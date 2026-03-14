@@ -11,6 +11,17 @@ const schema = a.schema({
     category: a.ref('SakeCategory').required(),
     memo: a.string(),
   }).authorization(allow => [allow.publicApiKey()]),
+
+  DrinkingRecord: a.model({
+    sakeName: a.string().required(),
+    placeName: a.string().required(),
+    price: a.integer(),
+    drinkingDate: a.date().required(),
+    category: a.ref('SakeCategory').required(),
+    drinkingMethod: a.string().required(),
+    rating: a.integer().required(),
+    memo: a.string(),
+  }).authorization(allow => [allow.publicApiKey()]),
 });
 
 export type Schema = ClientSchema<typeof schema>;

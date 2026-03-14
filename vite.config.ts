@@ -11,4 +11,13 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: [],
+    alias: {
+      'aws-amplify/data': path.resolve(__dirname, './src/__mocks__/aws-amplify-data.ts'),
+      '@aws-amplify/backend': path.resolve(__dirname, './src/__mocks__/aws-amplify-backend.ts'),
+    },
+  },
 })
