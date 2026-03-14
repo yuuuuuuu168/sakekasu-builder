@@ -24,7 +24,6 @@ dist-ssr
 *.sw?
 
 # Amplify
-amplify_outputs.json
 .amplify/
 
 # Build logs
