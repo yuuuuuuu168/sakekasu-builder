@@ -1,9 +1,9 @@
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
-import { RekognitionClient, DetectTextCommand } from '@aws-sdk/client-rekognition';
+import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { extractSakeName } from './extractSakeName.js';
 
 const s3Client = new S3Client({});
-const rekognitionClient = new RekognitionClient({});
+const bedrockClient = new BedrockRuntimeClient({});
 
 const BUCKET_NAME = process.env.BUCKET_NAME!;
 
@@ -44,6 +44,7 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
 
   // S3 から画像を取得
   let imageBytes: Uint8Array;
+  let mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' = 'image/jpeg';
   try {
     const s3Response = await s3Client.send(
       new GetObjectCommand({
@@ -52,37 +53,74 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
       }),
     );
     imageBytes = await s3Response.Body!.transformToByteArray();
+
+    // Content-Type から画像形式を判定
+    const contentType = s3Response.ContentType ?? '';
+    if (
+      contentType === 'image/jpeg' ||
+      contentType === 'image/png' ||
+      contentType === 'image/gif' ||
+      contentType === 'image/webp'
+    ) {
+      mediaType = contentType;
+    }
   } catch {
     throw new Error('Failed to retrieve image from storage');
   }
 
-  // Rekognition でテキスト検出
-  let textDetections;
+  // 画像を Base64 エンコード
+  const base64Image = Buffer.from(imageBytes).toString('base64');
+
+  // Bedrock Claude Haiku でマルチモーダル解析
+  const modelId = process.env.BEDROCK_MODEL_ID ?? 'anthropic.claude-haiku-4-5-20251001-v1:0';
+  const requestBody = {
+    anthropic_version: 'bedrock-2023-05-31',
+    max_tokens: 256,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: mediaType,
+              data: base64Image,
+            },
+          },
+          {
+            type: 'text',
+            text: `このお酒のラベル画像から銘柄名を抽出してください。
+銘柄名のみを以下のJSON形式で返してください。銘柄名が読み取れない場合はnullを返してください。
+
+{"sakeName": "銘柄名" または null}
+
+注意:
+- 製造者名（酒造、株式会社等）は含めない
+- 容量（ml）やアルコール度数（%）は含めない
+- 銘柄名のみを返す`,
+          },
+        ],
+      },
+    ],
+  };
+
+  let responseText: string;
   try {
-    const rekognitionResponse = await rekognitionClient.send(
-      new DetectTextCommand({
-        Image: {
-          Bytes: imageBytes,
-        },
+    const response = await bedrockClient.send(
+      new InvokeModelCommand({
+        modelId,
+        contentType: 'application/json',
+        accept: 'application/json',
+        body: JSON.stringify(requestBody),
       }),
     );
-    textDetections = rekognitionResponse.TextDetections ?? [];
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+    responseText = responseBody.content[0].text;
   } catch {
     throw new Error('OCR analysis failed');
   }
 
   // 銘柄名を抽出して返却
-  const result = extractSakeName(
-    textDetections.map((d) => ({
-      DetectedText: d.DetectedText,
-      Type: d.Type as 'LINE' | 'WORD' | undefined,
-      Confidence: d.Confidence,
-    })),
-  );
-
-  return {
-    sakeName: result.sakeName,
-    confidence: result.confidence,
-    rawTexts: result.rawTexts,
-  };
+  return extractSakeName(responseText);
 }

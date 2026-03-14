@@ -174,6 +174,7 @@ export class ApiStack extends cdk.Stack {
       memorySize: 512,
       environment: {
         BUCKET_NAME: this.imageBucket.bucketName,
+        BEDROCK_MODEL_ID: 'anthropic.claude-haiku-4-5-20251001-v1:0',
       },
       bundling: {
         format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
@@ -185,9 +186,9 @@ export class ApiStack extends cdk.Stack {
     // S3 読み取り権限
     this.imageBucket.grantRead(ocrAnalyzerFunction);
 
-    // Rekognition DetectText 権限
+    // Bedrock InvokeModel 権限
     ocrAnalyzerFunction.addToRolePolicy(new cdk.aws_iam.PolicyStatement({
-      actions: ['rekognition:DetectText'],
+      actions: ['bedrock:InvokeModel'],
       resources: ['*'],
     }));
 
