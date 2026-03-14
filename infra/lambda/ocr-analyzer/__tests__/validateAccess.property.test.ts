@@ -8,9 +8,9 @@ vi.mock('@aws-sdk/client-s3', () => ({
   S3Client: vi.fn(),
   GetObjectCommand: vi.fn(),
 }));
-vi.mock('@aws-sdk/client-rekognition', () => ({
-  RekognitionClient: vi.fn(),
-  DetectTextCommand: vi.fn(),
+vi.mock('@aws-sdk/client-bedrock-runtime', () => ({
+  BedrockRuntimeClient: vi.fn(),
+  InvokeModelCommand: vi.fn(),
 }));
 
 import { validateImageKeyAccess } from '../index.js';
