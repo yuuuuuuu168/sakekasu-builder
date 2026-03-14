@@ -1,12 +1,9 @@
 import { useState } from 'react';
-import { generateClient } from 'aws-amplify/data';
-import type { Schema } from '@/types/schema';
+import { generateClient } from 'aws-amplify/api';
+import { createPurchaseRecord } from '@/graphql/mutations';
 import type { PurchaseFormData, SaveResult } from '@/features/purchase/types';
 
-// Cognito 認証ベースのクライアント（apiKey → userPool に移行）
-const client = generateClient<Schema>({
-  authMode: 'userPool',
-});
+const client = generateClient();
 
 export interface UsePurchaseStorageReturn {
   savePurchase: (data: PurchaseFormData) => Promise<SaveResult>;
@@ -19,17 +16,22 @@ export function usePurchaseStorage(): UsePurchaseStorageReturn {
   const savePurchase = async (data: PurchaseFormData): Promise<SaveResult> => {
     setIsSaving(true);
     try {
-      const { errors } = await client.models.PurchaseRecord.create({
-        sakeName: data.sakeName,
-        storeName: data.storeName,
-        price: parseInt(data.price, 10),
-        purchaseDate: data.purchaseDate,
-        category: data.category,
-        memo: data.memo || undefined,
+      const result = await client.graphql({
+        query: createPurchaseRecord,
+        variables: {
+          input: {
+            sakeName: data.sakeName,
+            storeName: data.storeName,
+            price: parseInt(data.price, 10),
+            purchaseDate: data.purchaseDate,
+            category: data.category,
+            memo: data.memo || undefined,
+          },
+        },
       });
 
-      if (errors && errors.length > 0) {
-        console.error('PurchaseRecord create errors:', errors);
+      if ('errors' in result && result.errors && result.errors.length > 0) {
+        console.error('PurchaseRecord create errors:', result.errors);
         return { success: false, error: '登録に失敗しました。もう一度お試しください' };
       }
 
