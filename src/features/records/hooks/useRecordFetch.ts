@@ -25,6 +25,7 @@ export function toPurchaseUnifiedRecord(
     category: record.category,
     memo: record.memo ?? undefined,
     storeName: record.storeName,
+    imageKey: record.imageKey,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
@@ -44,6 +45,7 @@ export function toDrinkingUnifiedRecord(
     placeName: record.placeName,
     drinkingMethod: record.drinkingMethod,
     rating: record.rating,
+    imageKey: record.imageKey,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
