@@ -1,73 +1,80 @@
-# React + TypeScript + Vite
+# 酒カス (sakekasu-builder.com)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+日本酒・ウイスキー・焼酎など、「何を飲んだか」「何を買ったか」を忘れがちな酒飲みのための記録・管理 Web アプリ。
 
-Currently, two official plugins are available:
+## 機能
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+| # | 機能 | 状態 |
+|---|------|------|
+| 1 | 購入したお酒の登録 | ✅ 実装済み |
+| 2 | 飲んだお酒の登録 | ✅ 実装済み |
+| 3 | 購入・飲酒記録の一覧表示 | ✅ 実装済み |
+| 4 | Cognito 認証 + CDK バックエンド | ✅ 実装済み |
+| 5 | 記録の削除 | ✅ 実装済み |
+| 6 | 画像添付（ラベル写真等） | ✅ 実装済み |
+| 7 | 複数画像添付対応 | 未着手 |
+| 8 | 購入記録からの飲酒登録連携 | 未着手 |
+| 9 | 購入記録の飲みきりステータス管理 | 未着手 |
+| 10 | 画像からの銘柄名自動取得（AI OCR） | ✅ 実装済み |
+| 11 | 写真からおすすめ提案（AI） | 未着手 |
 
-## React Compiler
+## 技術スタック
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- React 19 + TypeScript 5.9
+- Vite 7
+- Tailwind CSS v4
+- shadcn/ui（@base-ui/react ベース）
+- Framer Motion
+- AWS CDK（AppSync + DynamoDB）
+- Amazon Cognito（UserPool）
+- AWS S3（画像ストレージ）
+- Amplify（フロントエンドホスティング）
+- Vitest + Testing Library + fast-check
 
-## Expanding the ESLint configuration
+## プロジェクト構成
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+src/
+  features/
+    auth/        # 認証（Cognito）
+    purchase/    # 購入登録
+    drinking/    # 飲酒登録
+    records/     # 記録一覧
+    image/       # 画像添付・OCR
+  components/    # 共通コンポーネント（shadcn/ui, ThemeProvider 等）
+infra/
+  lib/           # CDK スタック（AuthStack, ApiStack）
+  graphql/       # AppSync GraphQL スキーマ
+  lambda/        # Lambda 関数（presigned-url, ocr-analyzer）
+  scripts/       # amplify_outputs.json 生成スクリプト
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## セットアップ
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```bash
+# フロントエンド
+npm install
+npm run dev
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# インフラ（CDK）
+cd infra
+npm install
+npx cdk deploy --context env=dev
 ```
+
+デプロイ後、`infra/scripts/generate-outputs.ts` を実行して `amplify_outputs.json` を生成してください。
+
+## テスト
+
+```bash
+# フロントエンド
+npm run test -- --run
+
+# インフラ
+cd infra
+npm run test -- --run
+```
+
+## デザイン
+
+「和モダン」コンセプト。ダークモード対応、カスタムカラーパレット（sake-gold, sake-red, sake-navy 等）。
