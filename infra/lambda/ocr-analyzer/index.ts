@@ -72,7 +72,7 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
   const base64Image = Buffer.from(imageBytes).toString('base64');
 
   // Bedrock Claude Haiku でマルチモーダル解析
-  const modelId = process.env.BEDROCK_MODEL_ID ?? 'anthropic.claude-haiku-4-5-20251001-v1:0';
+  const modelId = process.env.BEDROCK_MODEL_ID ?? 'jp.anthropic.claude-sonnet-4-6';
   const requestBody = {
     anthropic_version: 'bedrock-2023-05-31',
     max_tokens: 256,
@@ -117,7 +117,10 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
     );
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
     responseText = responseBody.content[0].text;
-  } catch {
+    // デバッグ用: Bedrockのレスポンスをログ出力
+    console.log('[OCR] Bedrock raw response:', responseText);
+  } catch (err) {
+    console.error('[OCR] Bedrock invocation error:', err);
     throw new Error('OCR analysis failed');
   }
 

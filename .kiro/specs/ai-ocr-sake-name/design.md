@@ -2,16 +2,18 @@
 
 ## 概要
 
-本機能は、購入登録・飲酒登録時に添付されたお酒のラベル画像から Amazon Rekognition の DetectText API を使用してテキストを抽出し、銘柄名を自動的にフォームへ入力する機能である。
+本機能は、購入登録・飲酒登録時に添付されたお酒のラベル画像から Amazon Bedrock の Claude Haiku（anthropic.claude-haiku-3-5系）を使用したマルチモーダル解析でテキストを抽出し、銘柄名を自動的にフォームへ入力する機能である。
 
-ユーザーが画像をアップロードした後、「銘柄名を読み取る」ボタンをクリックすると、バックエンドの Lambda 関数が S3 から画像を取得し、Rekognition でテキスト検出を実行する。抽出されたテキスト群から銘柄名として最も適切な文字列を選択し、フロントエンドのフォームに自動入力する。
+ユーザーが画像をアップロードした後、「銘柄名を読み取る」ボタンをクリックすると、バックエンドの Lambda 関数が S3 から画像を取得し、Bedrock Claude Haiku にマルチモーダルメッセージとして送信する。Claude が銘柄名を JSON 形式で返し、フロントエンドのフォームに自動入力する。
 
 ### 設計判断
 
-1. **Rekognition DetectText を採用**: Bedrock マルチモーダル LLM と比較して、レイテンシが低く（通常1-3秒）、コストが安い。ラベルのテキスト抽出には十分な精度を持つ
-2. **ユーザー明示トリガー方式**: 画像選択時の自動実行ではなく、ボタンクリックによる明示的なトリガーを採用。不要な API 呼び出しを防ぎ、ユーザーが画像確認後に実行できる
-3. **既存 Lambda パターンの踏襲**: presigned-url Lambda と同じ NodejsFunction パターン（ESM、createRequire バナー）を使用し、一貫性を保つ
-4. **銘柄名抽出ヒューリスティック**: Rekognition が返すテキスト行から、容量・度数・製造者名などの非銘柄情報をフィルタリングし、最も大きいフォントサイズ（高い信頼度）のテキストを銘柄名候補として選択する
+1. **Bedrock Claude Haiku を採用**: 当初は Amazon Rekognition DetectText を使用していたが、精度が不十分なため、マルチモーダル LLM による解析に切り替える。Claude Haiku は日本語ラベルの理解に優れ、銘柄名・製造者名・容量表記などの文脈的な区別が可能
+2. **モデル ID**: `anthropic.claude-haiku-4-5-20251001-v1:0`（2025年10月リリースの Claude Haiku 4.5）を使用
+3. **ユーザー明示トリガー方式**: 画像選択時の自動実行ではなく、ボタンクリックによる明示的なトリガーを採用。不要な API 呼び出しを防ぎ、ユーザーが画像確認後に実行できる
+4. **既存 Lambda パターンの踏襲**: presigned-url Lambda と同じ NodejsFunction パターン（ESM、createRequire バナー）を使用し、一貫性を保つ
+5. **Confidence の扱い**: Bedrock はスコアを返さないため、銘柄名が抽出できた場合は固定値 0.9、できなかった場合は 0.0 とする
+6. **rawTexts の扱い**: Bedrock のレスポンステキスト全体を rawTexts に含める
 
 ## アーキテクチャ
 
@@ -23,7 +25,7 @@ sequenceDiagram
     participant AppSync as AppSync API
     participant Lambda as OCR Lambda
     participant S3 as S3 (画像)
-    participant Rekognition as Amazon Rekognition
+    participant Bedrock as Amazon Bedrock (Claude Haiku)
 
     User->>UI: 画像を選択・プレビュー表示
     User->>UI: 「銘柄名を読み取る」ボタンをクリック
@@ -33,9 +35,10 @@ sequenceDiagram
     Lambda->>Lambda: imageKey プレフィックスと sub を照合
     Lambda->>S3: GetObject(imageKey)
     S3-->>Lambda: 画像バイナリ
-    Lambda->>Rekognition: DetectText(imageBytes)
-    Rekognition-->>Lambda: TextDetections[]
-    Lambda->>Lambda: Sake_Name_Extractor で銘柄名を抽出
+    Lambda->>Lambda: 画像を Base64 エンコード
+    Lambda->>Bedrock: InvokeModel(Claude Haiku, マルチモーダルメッセージ)
+    Bedrock-->>Lambda: JSON レスポンス（銘柄名）
+    Lambda->>Lambda: Sake_Name_Extractor でレスポンスをパース
     Lambda-->>AppSync: OcrResult { sakeName, confidence, rawTexts }
     AppSync-->>Hook: OcrResult
     Hook-->>UI: 結果を通知
@@ -59,7 +62,7 @@ graph TD
         GQL --> AS[AppSync API]
         AS --> OL[OCR Lambda]
         OL --> S3[S3 Bucket]
-        OL --> RK[Amazon Rekognition]
+        OL --> BD[Amazon Bedrock Claude Haiku]
     end
 ```
 
@@ -105,31 +108,42 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult>
 **処理フロー:**
 1. `identity.sub` と `imageKey` プレフィックスの照合（アクセス制御）
 2. S3 から画像を取得（`GetObjectCommand`）
-3. Rekognition `DetectText` API で画像内テキストを検出
-4. `extractSakeName()` で銘柄名を抽出
-5. `OcrResult` を返却
+3. 画像バイナリを Base64 エンコード
+4. Bedrock `InvokeModelCommand` でマルチモーダルメッセージを送信
+5. `extractSakeName()` でレスポンスをパースし銘柄名を抽出
+6. `OcrResult` を返却
 
 ### 3. 銘柄名抽出ロジック (`extractSakeName`)
 
 ```typescript
-function extractSakeName(textDetections: TextDetection[]): {
+function extractSakeName(bedrockResponseText: string): {
   sakeName: string | null;
   confidence: number;
   rawTexts: string[];
 }
 ```
 
+**Bedrock へのプロンプト:**
+
+```
+このお酒のラベル画像から銘柄名を抽出してください。
+銘柄名のみを以下のJSON形式で返してください。銘柄名が読み取れない場合はnullを返してください。
+
+{"sakeName": "銘柄名" または null}
+
+注意:
+- 製造者名（酒造、株式会社等）は含めない
+- 容量（ml）やアルコール度数（%）は含めない
+- 銘柄名のみを返す
+```
+
 **抽出アルゴリズム:**
-1. `Type === 'LINE'` のテキスト検出結果のみを対象とする
-2. 以下のパターンに一致するテキストを非銘柄情報として除外:
-   - 容量表記: `/\d+\s*(ml|mL|ML|ℓ|リットル)/`
-   - アルコール度数: `/\d+\s*[%％度]/`, `/アルコール/`
-   - 製造者情報: `/製造|醸造|酒造|株式会社|有限会社|合名会社/`
-   - 原材料: `/原材料|米|米こうじ|醸造アルコール/`
-   - 保存方法: `/保存|要冷蔵|冷暗所/`
-   - 産地表記: `/産|県|市|町|村|都|府|道/` （ただし2文字以下の場合のみ除外しない）
-3. 残ったテキストから `Confidence` が最も高いものを銘柄名候補として選択
-4. 候補がない場合は `sakeName: null, confidence: 0.0` を返す
+1. Bedrock のレスポンステキスト全体を `rawTexts` に格納
+2. レスポンステキストから JSON をパース
+3. `sakeName` フィールドを取得
+4. `sakeName` が null または空文字列の場合: `{ sakeName: null, confidence: 0.0, rawTexts }`
+5. `sakeName` が有効な文字列の場合: `{ sakeName, confidence: 0.9, rawTexts }`
+6. JSON パースに失敗した場合: `{ sakeName: null, confidence: 0.0, rawTexts }`
 
 ### 4. useOcrAnalysis フック (`src/features/image/hooks/useOcrAnalysis.ts`)
 
@@ -218,6 +232,7 @@ const ocrAnalyzerFunction = new NodejsFunction(this, 'OcrAnalyzerFunction', {
   memorySize: 512,
   environment: {
     BUCKET_NAME: this.imageBucket.bucketName,
+    BEDROCK_MODEL_ID: 'anthropic.claude-haiku-4-5-20251001-v1:0',
   },
   bundling: {
     format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
@@ -229,9 +244,9 @@ const ocrAnalyzerFunction = new NodejsFunction(this, 'OcrAnalyzerFunction', {
 // S3 読み取り権限
 this.imageBucket.grantRead(ocrAnalyzerFunction);
 
-// Rekognition DetectText 権限
+// Bedrock InvokeModel 権限（Rekognition DetectText から変更）
 ocrAnalyzerFunction.addToRolePolicy(new cdk.aws_iam.PolicyStatement({
-  actions: ['rekognition:DetectText'],
+  actions: ['bedrock:InvokeModel'],
   resources: ['*'],
 }));
 
@@ -254,17 +269,42 @@ ocrDataSource.createResolver('AnalyzeSakeLabelResolver', {
 | フィールド | 型 | 説明 |
 |---|---|---|
 | sakeName | String \| null | 抽出された銘柄名。検出できなかった場合は null |
-| confidence | Float | 信頼度スコア（0.0〜1.0）。sakeName が null の場合は 0.0 |
-| rawTexts | [String] | Rekognition が検出した全テキスト行のリスト |
+| confidence | Float | 信頼度スコア（0.0 または 0.9）。sakeName が null の場合は 0.0、抽出成功時は 0.9 |
+| rawTexts | [String] | Bedrock のレスポンステキスト全体を含むリスト |
 
-### Rekognition TextDetection（参考: AWS SDK レスポンス）
+### Bedrock InvokeModel リクエスト（参考）
 
-| フィールド | 型 | 説明 |
-|---|---|---|
-| DetectedText | string | 検出されたテキスト文字列 |
-| Type | 'LINE' \| 'WORD' | テキストの種類（行 or 単語） |
-| Confidence | number | 検出信頼度（0-100） |
-| Geometry | object | テキストの位置情報（BoundingBox 等） |
+```typescript
+// @aws-sdk/client-bedrock-runtime の InvokeModelCommand を使用
+const request = {
+  modelId: 'anthropic.claude-haiku-4-5-20251001-v1:0',
+  contentType: 'application/json',
+  accept: 'application/json',
+  body: JSON.stringify({
+    anthropic_version: 'bedrock-2023-05-31',
+    max_tokens: 256,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/jpeg', // または image/png
+              data: base64ImageData,
+            },
+          },
+          {
+            type: 'text',
+            text: '...プロンプト...',
+          },
+        ],
+      },
+    ],
+  }),
+};
+```
 
 ### フロントエンド状態管理
 
@@ -290,35 +330,23 @@ interface ImageUploadState {
 
 ### Property 1: アクセス制御 — imageKey プレフィックス不一致時の拒否
 
-*任意の* ユーザー sub と imageKey のペアに対して、imageKey のプレフィックスが sub と一致しない場合、OCR_Analyzer は「Unauthorized: cannot access other user's images」エラーを返し、S3 からの画像取得および Rekognition の呼び出しを実行しないこと。
+*任意の* ユーザー sub と imageKey のペアに対して、imageKey のプレフィックスが sub と一致しない場合、OCR_Analyzer は「Unauthorized: cannot access other user's images」エラーを返し、S3 からの画像取得および Bedrock の呼び出しを実行しないこと。
 
 **Validates: Requirements 2.5, 7.2, 7.3, 7.4**
 
-### Property 2: Confidence スコアの範囲不変条件
+### Property 2: Confidence スコアの不変条件
 
-*任意の* TextDetection リストを extractSakeName に入力した場合、返される confidence 値は 0.0 以上 1.0 以下の範囲内であること。
+*任意の* Bedrock レスポンステキストを extractSakeName に入力した場合、返される confidence 値は 0.0 または 0.9 のいずれかであること。具体的には、sakeName が null でない有効な文字列の場合は 0.9、sakeName が null の場合は 0.0 であること。
 
 **Validates: Requirements 3.2**
 
-### Property 3: 最高 Confidence 候補の選択
+### Property 3: rawTexts の完全性
 
-*任意の* 複数の銘柄名候補を含む TextDetection リストに対して、extractSakeName が返す sakeName は、非銘柄情報を除外した後の候補の中で最も高い Confidence を持つテキストであること。
-
-**Validates: Requirements 3.3**
-
-### Property 4: 非銘柄情報のフィルタリング
-
-*任意の* 容量表記（例: "720ml"）、アルコール度数（例: "15%"）、製造者名（例: "○○酒造株式会社"）などの非銘柄パターンに一致するテキストを含む TextDetection リストに対して、extractSakeName はそれらのテキストを銘柄名候補として選択しないこと。
-
-**Validates: Requirements 3.4**
-
-### Property 5: rawTexts の完全性
-
-*任意の* TextDetection リストに対して、extractSakeName が返す rawTexts フィールドは、入力された全ての LINE タイプのテキスト検出結果の DetectedText を含むこと。
+*任意の* Bedrock レスポンステキストを extractSakeName に入力した場合、返される rawTexts フィールドはそのレスポンステキスト全体を含むこと。
 
 **Validates: Requirements 3.6**
 
-### Property 6: エラー時のフォーム値保持
+### Property 4: エラー時のフォーム値保持
 
 *任意の* フォーム状態（sakeName フィールドに任意の文字列が入力された状態）において、OCR 解析がエラー（ネットワークエラー、タイムアウト、銘柄名未検出）で終了した場合、sakeName フィールドの値は変更されないこと。
 
@@ -332,8 +360,8 @@ interface ImageUploadState {
 |---|---|---|
 | 認証エラー | imageKey プレフィックスと sub の不一致 | `Error: "Unauthorized: cannot access other user's images"` |
 | S3 取得エラー | 画像が存在しない、またはアクセス権限不足 | `Error: "Failed to retrieve image from storage"` |
-| Rekognition エラー | 画像フォーマット不正、サービスエラー | `Error: "OCR analysis failed"` |
-| テキスト未検出 | 画像内にテキストが存在しない | 正常レスポンス: `{ sakeName: null, confidence: 0.0, rawTexts: [] }` |
+| Bedrock エラー | モデル呼び出し失敗、サービスエラー | `Error: "OCR analysis failed"` |
+| テキスト未検出 | Bedrock が銘柄名を返せなかった | 正常レスポンス: `{ sakeName: null, confidence: 0.0, rawTexts: [...] }` |
 
 ### フロントエンド（useOcrAnalysis）
 
@@ -369,11 +397,9 @@ interface ImageUploadState {
 | テスト | 対象 | 内容 |
 |---|---|---|
 | Property 1 テスト | `validateImageKeyAccess()` | ランダムな sub/imageKey ペアを生成し、プレフィックス不一致時にエラーが返ることを検証 |
-| Property 2 テスト | `extractSakeName()` | ランダムな TextDetection リストを生成し、confidence が 0.0〜1.0 の範囲内であることを検証 |
-| Property 3 テスト | `extractSakeName()` | 複数候補を含むランダムな TextDetection リストを生成し、最高 Confidence の候補が選択されることを検証 |
-| Property 4 テスト | `extractSakeName()` | 非銘柄パターン（容量、度数、製造者名等）を含むランダムな TextDetection リストを生成し、それらが銘柄名として選択されないことを検証 |
-| Property 5 テスト | `extractSakeName()` | ランダムな TextDetection リストを生成し、rawTexts が全 LINE テキストを含むことを検証 |
-| Property 6 テスト | `useOcrAnalysis` フック | ランダムな既存 sakeName 値とエラー種別を生成し、エラー後も値が保持されることを検証 |
+| Property 2 テスト | `extractSakeName()` | ランダムな Bedrock レスポンステキストを生成し、confidence が 0.0 または 0.9 のいずれかであること、sakeName の有無と一致することを検証 |
+| Property 3 テスト | `extractSakeName()` | ランダムな Bedrock レスポンステキストを生成し、rawTexts にそのテキスト全体が含まれることを検証 |
+| Property 4 テスト | `useOcrAnalysis` フック | ランダムな既存 sakeName 値とエラー種別を生成し、エラー後も値が保持されることを検証 |
 
 ### ユニットテスト
 
@@ -388,7 +414,8 @@ interface ImageUploadState {
 | フォーム自動入力 | DrinkingForm | OCR 結果が sakeName フィールドに反映されること |
 | 既存値上書き | PurchaseForm/DrinkingForm | 既存の sakeName が OCR 結果で上書きされること |
 | 手動編集可能 | PurchaseForm/DrinkingForm | OCR 結果反映後も sakeName フィールドが編集可能であること |
-| 空テキスト検出 | extractSakeName | テキスト未検出時に sakeName=null, confidence=0.0 を返すこと |
+| 空レスポンス処理 | extractSakeName | Bedrock が空/null を返した場合に sakeName=null, confidence=0.0 を返すこと |
+| JSON パース失敗 | extractSakeName | Bedrock が不正な JSON を返した場合に sakeName=null, confidence=0.0 を返すこと |
 | GraphQL ミューテーション | useOcrAnalysis | analyzeSakeLabel ミューテーションが正しく呼び出されること |
 
 ### テストファイル配置

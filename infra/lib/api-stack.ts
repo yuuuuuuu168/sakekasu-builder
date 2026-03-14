@@ -174,7 +174,7 @@ export class ApiStack extends cdk.Stack {
       memorySize: 512,
       environment: {
         BUCKET_NAME: this.imageBucket.bucketName,
-        BEDROCK_MODEL_ID: 'anthropic.claude-haiku-4-5-20251001-v1:0',
+        BEDROCK_MODEL_ID: 'jp.anthropic.claude-sonnet-4-6',
       },
       bundling: {
         format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
