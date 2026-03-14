@@ -23,23 +23,36 @@ export interface ExtractResult {
 export function extractSakeName(bedrockResponseText: string): ExtractResult {
   const rawTexts = [bedrockResponseText];
 
-  try {
-    const parsed: unknown = JSON.parse(bedrockResponseText);
-
-    if (
-      parsed !== null &&
-      typeof parsed === 'object' &&
-      'sakeName' in parsed
-    ) {
-      const sakeName = (parsed as { sakeName: unknown }).sakeName;
-
-      if (typeof sakeName === 'string' && sakeName.length > 0) {
-        return { sakeName, confidence: 0.9, rawTexts };
+  // 1. まずテキスト全体をそのままJSONパース試行
+  const tryParse = (text: string): { sakeName: unknown } | null => {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed !== null && typeof parsed === 'object' && 'sakeName' in parsed) {
+        return parsed as { sakeName: unknown };
       }
+    } catch {
+      // ignore
     }
+    return null;
+  };
 
-    return { sakeName: null, confidence: 0.0, rawTexts };
-  } catch {
-    return { sakeName: null, confidence: 0.0, rawTexts };
+  // 2. テキスト中の {...} ブロックを抽出してパース試行
+  const extractJsonBlock = (text: string): { sakeName: unknown } | null => {
+    const match = text.match(/\{[^{}]*"sakeName"[^{}]*\}/);
+    if (match) {
+      return tryParse(match[0]);
+    }
+    return null;
+  };
+
+  const parsed = tryParse(bedrockResponseText) ?? extractJsonBlock(bedrockResponseText);
+
+  if (parsed !== null) {
+    const sakeName = parsed.sakeName;
+    if (typeof sakeName === 'string' && sakeName.trim().length > 0) {
+      return { sakeName: sakeName.trim(), confidence: 0.9, rawTexts };
+    }
   }
+
+  return { sakeName: null, confidence: 0.0, rawTexts };
 }
