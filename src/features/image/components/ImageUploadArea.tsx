@@ -22,6 +22,12 @@ export interface ImageUploadAreaProps {
   compressionInfo?: CompressionInfo | null;
   /** 無効化フラグ */
   disabled?: boolean;
+  /** OCR 解析中フラグ */
+  isOcrAnalyzing?: boolean;
+  /** OCR トリガーボタンのクリックハンドラ */
+  onOcrTrigger?: () => void;
+  /** OCR 結果メッセージ（成功/エラー） */
+  ocrMessage?: { text: string; variant: 'success' | 'error' } | null;
 }
 
 function formatMB(bytes: number): string {
@@ -36,6 +42,9 @@ export function ImageUploadArea({
   error,
   compressionInfo = null,
   disabled = false,
+  isOcrAnalyzing = false,
+  onOcrTrigger,
+  ocrMessage = null,
 }: ImageUploadAreaProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -106,7 +115,7 @@ export function ImageUploadArea({
     }
   }, [disabled, isCompressing, isUploading]);
 
-  const isInteractive = !disabled && !isCompressing && !isUploading;
+  const isInteractive = !disabled && !isCompressing && !isUploading && !isOcrAnalyzing;
 
   return (
     <div className="space-y-2" data-testid="image-upload-area">
@@ -123,11 +132,32 @@ export function ImageUploadArea({
 
       {/* プレビュー表示 or ドロップ領域 */}
       {imageFile && previewUrl ? (
-        <PreviewArea
-          previewUrl={previewUrl}
-          onDelete={handleDelete}
-          disabled={!isInteractive}
-        />
+        <>
+          <PreviewArea
+            previewUrl={previewUrl}
+            onDelete={handleDelete}
+            disabled={!isInteractive}
+          />
+          {/* OCR トリガーボタン */}
+          {onOcrTrigger && (
+            <button
+              type="button"
+              onClick={onOcrTrigger}
+              disabled={isOcrAnalyzing}
+              className="flex items-center gap-1.5 rounded-md border border-sake-gold/40 bg-sake-gold/10 px-3 py-1.5 text-xs font-medium text-sake-gold transition-colors hover:bg-sake-gold/20 disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid="ocr-trigger-button"
+            >
+              {isOcrAnalyzing ? (
+                <>
+                  <SpinnerIcon />
+                  <span>読み取り中...</span>
+                </>
+              ) : (
+                <span>銘柄名を読み取る</span>
+              )}
+            </button>
+          )}
+        </>
       ) : (
         <DropZone
           isDragOver={isDragOver}
@@ -183,6 +213,18 @@ export function ImageUploadArea({
             icon={<ErrorIcon />}
             text={error}
             variant="error"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* OCR 結果メッセージ */}
+      <AnimatePresence>
+        {ocrMessage && (
+          <StatusMessage
+            key="ocr-message"
+            icon={ocrMessage.variant === 'success' ? <CheckIcon /> : <ErrorIcon />}
+            text={ocrMessage.text}
+            variant={ocrMessage.variant}
           />
         )}
       </AnimatePresence>

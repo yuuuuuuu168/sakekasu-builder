@@ -46,6 +46,13 @@ type PresignedUrlResponse {
   key: String!
 }
 
+# OCR 解析結果型
+type OcrResult {
+  sakeName: String
+  confidence: Float!
+  rawTexts: [String!]!
+}
+
 # クエリ
 type Query {
   getPurchaseRecord(id: ID!): PurchaseRecord
@@ -69,6 +76,7 @@ type Mutation {
     contentType: String!
     fileName: String!
   ): PresignedUrlResponse!
+  analyzeSakeLabel(imageKey: String!): OcrResult!
 }
 
 # 購入記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）

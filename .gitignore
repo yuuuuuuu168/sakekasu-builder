@@ -26,5 +26,8 @@ dist-ssr
 # Amplify
 .amplify/
 
+# CDK output
+infra/cdk.out/
+
 # Build logs
 Amplify-histry/
