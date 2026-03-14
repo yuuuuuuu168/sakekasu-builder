@@ -18,6 +18,7 @@ export default defineConfig({
     setupFiles: [],
     alias: {
       'aws-amplify/data': path.resolve(__dirname, './src/__mocks__/aws-amplify-data.ts'),
+      'aws-amplify/api': path.resolve(__dirname, './src/__mocks__/aws-amplify-api.ts'),
     },
   },
 })
