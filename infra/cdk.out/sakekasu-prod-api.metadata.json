@@ -1,0 +1,54 @@
+{
+  "/sakekasu-prod-api/PurchaseRecordTable": [
+    {
+      "type": "aws:cdk:hasPhysicalName",
+      "data": {
+        "Ref": "PurchaseRecordTable91EF19C4"
+      }
+    }
+  ],
+  "/sakekasu-prod-api/DrinkingRecordTable": [
+    {
+      "type": "aws:cdk:hasPhysicalName",
+      "data": {
+        "Ref": "DrinkingRecordTable846710AB"
+      }
+    }
+  ],
+  "/sakekasu-prod-api/BootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "BootstrapVersion"
+    }
+  ],
+  "/sakekasu-prod-api/CheckBootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CheckBootstrapVersion"
+    }
+  ],
+  "/sakekasu-prod-api/PurchaseRecordTable/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PurchaseRecordTable91EF19C4"
+    }
+  ],
+  "/sakekasu-prod-api/DrinkingRecordTable/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DrinkingRecordTable846710AB"
+    }
+  ],
+  "/sakekasu-prod-api/CDKMetadata/Default": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CDKMetadata"
+    }
+  ],
+  "/sakekasu-prod-api/CDKMetadata/Condition": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CDKMetadataAvailable"
+    }
+  ]
+}

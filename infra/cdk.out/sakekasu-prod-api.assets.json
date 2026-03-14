@@ -1,0 +1,20 @@
+{
+  "version": "52.0.0",
+  "files": {
+    "7281c0ff8353fac166dfe49cd2f892ce89b6a980c9222faa69b80c209f3bd71c": {
+      "displayName": "sakekasu-prod-api Template",
+      "source": {
+        "path": "sakekasu-prod-api.template.json",
+        "packaging": "file"
+      },
+      "destinations": {
+        "current_account-current_region-7ee98857": {
+          "bucketName": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}",
+          "objectKey": "7281c0ff8353fac166dfe49cd2f892ce89b6a980c9222faa69b80c209f3bd71c.json",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
+        }
+      }
+    }
+  },
+  "dockerImages": {}
+}
