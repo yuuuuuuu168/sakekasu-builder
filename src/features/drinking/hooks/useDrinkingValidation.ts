@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { DrinkingFormData, DrinkingValidationErrors } from '../types';
-import { DRINKING_METHODS_MAP, categoryRequiresDrinkingMethod } from '../types';
+import { DRINKING_METHODS_MAP } from '../types';
 import { SAKE_CATEGORIES } from '../../purchase/types';
 import type { SakeCategory } from '../../purchase/types';
 

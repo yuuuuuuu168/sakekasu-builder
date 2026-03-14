@@ -58,8 +58,8 @@ export function useRecordFetch(): UseRecordFetchReturn {
     setError(null);
 
     const results = await Promise.allSettled([
-      client.models.PurchaseRecord.list(),
-      client.models.DrinkingRecord.list(),
+      client.models.PurchaseRecord.list({}),
+      client.models.DrinkingRecord.list({}),
     ]);
 
     const allRecords: UnifiedRecord[] = [];

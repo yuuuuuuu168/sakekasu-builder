@@ -31,5 +31,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "amplify_outputs.json"]
+  "include": ["src", "amplify_outputs.json"],
+  "exclude": ["src/**/__tests__/**", "src/**/__mocks__/**"]
 }

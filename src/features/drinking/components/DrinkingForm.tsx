@@ -146,7 +146,7 @@ export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
         <FormField label="カテゴリ" error={errors.category} required>
           <Select
             value={formData.category}
-            onValueChange={(val) => handleChange('category', val)}
+            onValueChange={(val) => { if (val !== null) handleChange('category', val); }}
           >
             <SelectTrigger
               data-testid="input-category"
@@ -173,7 +173,7 @@ export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
           <FormField label="飲み方" error={errors.drinkingMethod} required>
             <Select
               value={formData.drinkingMethod}
-              onValueChange={(val) => handleChange('drinkingMethod', val)}
+              onValueChange={(val) => { if (val !== null) handleChange('drinkingMethod', val); }}
             >
               <SelectTrigger
                 data-testid="input-drinkingMethod"

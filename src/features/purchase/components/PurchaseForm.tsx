@@ -20,7 +20,7 @@ import { Calendar } from '@/components/ui/calendar';
 
 import { usePurchaseForm } from '@/features/purchase/hooks/usePurchaseForm';
 import { SAKE_CATEGORIES } from '@/features/purchase/types';
-import type { SakeCategory, PurchaseFormData } from '@/features/purchase/types';
+import type { SakeCategory } from '@/features/purchase/types';
 
 const CATEGORY_DISPLAY_NAMES: Record<SakeCategory, string> = {
   NIHONSHU: '日本酒',
@@ -137,7 +137,7 @@ export function PurchaseForm({ onSubmitSuccess }: PurchaseFormProps) {
       <FormField label="カテゴリ" error={errors.category} required>
         <CategorySelect
           value={formData.category}
-          onChange={(val) => handleChange('category', val)}
+          onChange={(val) => { if (val !== null) handleChange('category', val); }}
           onBlur={() => handleBlur('category')}
         />
       </FormField>
@@ -260,7 +260,7 @@ function CategorySelect({
   onBlur,
 }: {
   value: SakeCategory;
-  onChange: (value: string) => void;
+  onChange: (value: string | null) => void;
   onBlur: () => void;
 }) {
   return (
