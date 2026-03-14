@@ -9,6 +9,7 @@ export const getPurchaseRecord = /* GraphQL */ `
       purchaseDate
       category
       memo
+      imageKey
       createdAt
       updatedAt
     }
@@ -26,6 +27,7 @@ export const listPurchaseRecords = /* GraphQL */ `
       purchaseDate
       category
       memo
+      imageKey
       createdAt
       updatedAt
     }
@@ -45,6 +47,7 @@ export const getDrinkingRecord = /* GraphQL */ `
       drinkingMethod
       rating
       memo
+      imageKey
       createdAt
       updatedAt
     }
@@ -64,8 +67,15 @@ export const listDrinkingRecords = /* GraphQL */ `
       drinkingMethod
       rating
       memo
+      imageKey
       createdAt
       updatedAt
     }
+  }
+`;
+
+export const getDownloadUrl = /* GraphQL */ `
+  query GetDownloadUrl($key: String!) {
+    getDownloadUrl(key: $key)
   }
 `;

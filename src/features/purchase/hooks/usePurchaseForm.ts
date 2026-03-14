@@ -2,8 +2,10 @@ import { useState, useCallback } from 'react';
 import type { PurchaseFormData, SaveResult } from '@/features/purchase/types';
 import { useFormValidation } from '@/features/purchase/hooks/useFormValidation';
 import { usePurchaseStorage } from '@/features/purchase/hooks/usePurchaseStorage';
+import { useImageUpload } from '@/features/image/hooks/useImageUpload';
 import type { UseFormValidationReturn } from '@/features/purchase/hooks/useFormValidation';
 import type { UsePurchaseStorageReturn } from '@/features/purchase/hooks/usePurchaseStorage';
+import type { UseImageUploadReturn } from '@/features/image/hooks/useImageUpload';
 
 export interface UsePurchaseFormReturn {
   formData: PurchaseFormData;
@@ -13,6 +15,8 @@ export interface UsePurchaseFormReturn {
   handleChange: (field: keyof PurchaseFormData, value: string) => void;
   handleBlur: (field: keyof PurchaseFormData) => void;
   handleSubmit: () => Promise<void>;
+  /** 画像アップロード関連 */
+  imageUpload: UseImageUploadReturn;
 }
 
 function getTodayString(): string {
@@ -40,6 +44,7 @@ export function usePurchaseForm(): UsePurchaseFormReturn {
 
   const { errors, validateField, isValid, clearErrors } = useFormValidation();
   const { savePurchase, isSaving } = usePurchaseStorage();
+  const imageUpload = useImageUpload();
 
   const handleChange = useCallback(
     (field: keyof PurchaseFormData, value: string) => {
@@ -62,16 +67,29 @@ export function usePurchaseForm(): UsePurchaseFormReturn {
       return;
     }
 
-    const result = await savePurchase(formData);
+    // 画像がある場合はアップロードを先に実行
+    let imageKey: string | null = null;
+    if (imageUpload.imageFile) {
+      const recordId = crypto.randomUUID();
+      const key = await imageUpload.uploadImage('purchase', recordId);
+      if (key === null) {
+        // アップロード失敗 → エラーは useImageUpload 側で設定済み、入力内容を保持
+        return;
+      }
+      imageKey = key;
+    }
+
+    const result = await savePurchase(formData, { imageKey });
 
     if (result.success) {
       setFormData(getInitialFormData());
       clearErrors();
+      imageUpload.clearImage();
       setSubmitResult({ success: true });
     } else {
       setSubmitResult(result);
     }
-  }, [formData, isValid, savePurchase, clearErrors]);
+  }, [formData, isValid, savePurchase, clearErrors, imageUpload]);
 
   return {
     formData,
@@ -81,5 +99,6 @@ export function usePurchaseForm(): UsePurchaseFormReturn {
     handleChange,
     handleBlur,
     handleSubmit,
+    imageUpload,
   };
 }

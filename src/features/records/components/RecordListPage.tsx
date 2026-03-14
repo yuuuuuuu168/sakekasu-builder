@@ -8,6 +8,7 @@ import { RecordCard } from './RecordCard';
 import { EmptyState } from './EmptyState';
 import { LoadingState } from './LoadingState';
 import { ErrorState } from './ErrorState';
+import { ImageModal } from '@/features/image/components/ImageModal';
 import type { UnifiedRecord } from '../types';
 
 export function RecordListPage() {
@@ -56,6 +57,19 @@ export function RecordListPage() {
     handleSuccess,
   );
 
+  // ImageModal の状態管理（選択された画像の URL と銘柄名）
+  const [modalImage, setModalImage] = useState<{ url: string; sakeName: string } | null>(null);
+
+  const handleImageClick = useCallback((imageUrl: string, sakeName: string) => {
+    setModalImage({ url: imageUrl, sakeName });
+  }, []);
+
+  const handleModalClose = useCallback((open: boolean) => {
+    if (!open) {
+      setModalImage(null);
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-white dark:bg-dark-bg">
       <div className="mx-auto max-w-2xl px-4 py-8 sm:py-12">
@@ -99,12 +113,23 @@ export function RecordListPage() {
                   record={record}
                   onDelete={deleteRecord}
                   isDeleting={isDeleting}
+                  onImageClick={handleImageClick}
                 />
               ))}
             </AnimatePresence>
           </div>
         )}
       </div>
+
+      {/* 画像モーダル（ページレベルで単一インスタンス） */}
+      {modalImage && (
+        <ImageModal
+          open={!!modalImage}
+          onOpenChange={handleModalClose}
+          imageUrl={modalImage.url}
+          sakeName={modalImage.sakeName}
+        />
+      )}
     </div>
   );
 }

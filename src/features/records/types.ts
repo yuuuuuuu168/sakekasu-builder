@@ -18,6 +18,7 @@ export interface UnifiedRecord {
   placeName?: string;
   drinkingMethod?: string;
   rating?: number; // 1〜5
+  imageKey?: string | null;
   createdAt: string;
   updatedAt: string;
 }

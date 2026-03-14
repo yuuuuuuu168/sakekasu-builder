@@ -15,7 +15,7 @@ inclusion: always
 | 2 | 飲んだお酒を登録するページ | ✅ 実装済み | #[[file:.kiro/specs/sake-drinking-registration/requirements.md]] |
 | 3 | 購入・飲酒記録の一覧ページ | ✅ 実装済み | #[[file:.kiro/specs/sake-record-list/requirements.md]] |
 | 4 | Cognito認証 + CDKバックエンド | ✅ 実装済み | #[[file:.kiro/specs/cdk-backend-auth/requirements.md]] |
-| 5 | 記録の削除機能 | 未着手 | - |
+| 5 | 記録の削除機能 | ✅ 実装済み | #[[file:.kiro/specs/record-deletion/requirements.md]] |
 | 6 | 画像添付機能（ラベル写真等） | 未着手 | - |
 | 7 | 画像からの銘柄名自動取得（AI OCR） | 未着手 | - |
 | 8 | 写真からおすすめ提案（AI） | 未着手 | - |

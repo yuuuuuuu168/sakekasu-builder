@@ -99,7 +99,7 @@ describe('ApiStack', () => {
 
   // Requirements 3.5, 4.6: AppSync リゾルバーが存在する
   it('AppSync リゾルバーが存在する', () => {
-    template.resourceCountIs('AWS::AppSync::Resolver', 10);
+    template.resourceCountIs('AWS::AppSync::Resolver', 12);
   });
 
   // Requirements 3.7: GraphqlApiUrl の CfnOutput が存在する

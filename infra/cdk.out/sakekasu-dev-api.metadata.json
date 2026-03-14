@@ -63,6 +63,42 @@
       "data": "SakekasuApiSchemaCBE52513"
     }
   ],
+  "/sakekasu-dev-api/ImageStorage/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "ImageStorage82E68681"
+    }
+  ],
+  "/sakekasu-dev-api/PresignedUrlFunction/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PresignedUrlFunction7EEE7292"
+    }
+  ],
+  "/sakekasu-dev-api/DeletePurchaseRecordFunction/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DeletePurchaseRecordFunction7F77E14C"
+    }
+  ],
+  "/sakekasu-dev-api/DeleteImagePurchaseRecordFunction/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DeleteImagePurchaseRecordFunctionD5954176"
+    }
+  ],
+  "/sakekasu-dev-api/DeleteDrinkingRecordFunction/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DeleteDrinkingRecordFunctionE7EAB8BA"
+    }
+  ],
+  "/sakekasu-dev-api/DeleteImageDrinkingRecordFunction/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DeleteImageDrinkingRecordFunction4C6AFB69"
+    }
+  ],
   "/sakekasu-dev-api/CDKMetadata/Default": [
     {
       "type": "aws:cdk:logicalId",
@@ -79,6 +115,24 @@
     {
       "type": "aws:cdk:logicalId",
       "data": "SakekasuApiDrinkingDataSourceC3375CAE"
+    }
+  ],
+  "/sakekasu-dev-api/SakekasuApi/PresignedUrlDataSource/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "SakekasuApiPresignedUrlDataSourceFE95F331"
+    }
+  ],
+  "/sakekasu-dev-api/SakekasuApi/GenerateUploadUrlResolver/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "SakekasuApiGenerateUploadUrlResolver0855D4B3"
+    }
+  ],
+  "/sakekasu-dev-api/SakekasuApi/GetDownloadUrlResolver/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "SakekasuApiGetDownloadUrlResolver46097640"
     }
   ],
   "/sakekasu-dev-api/SakekasuApi/CreatePurchaseRecordResolver/Resource": [
@@ -141,6 +195,12 @@
       "data": "SakekasuApiDeleteDrinkingRecordResolverEA506857"
     }
   ],
+  "/sakekasu-dev-api/PresignedUrlFunction/ServiceRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PresignedUrlFunctionServiceRole30C56AA3"
+    }
+  ],
   "/sakekasu-dev-api/SakekasuApi/PurchaseDataSource/ServiceRole/Resource": [
     {
       "type": "aws:cdk:logicalId",
@@ -153,6 +213,18 @@
       "data": "SakekasuApiDrinkingDataSourceServiceRole2E7E8E5C"
     }
   ],
+  "/sakekasu-dev-api/SakekasuApi/PresignedUrlDataSource/ServiceRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "SakekasuApiPresignedUrlDataSourceServiceRoleEC6C4563"
+    }
+  ],
+  "/sakekasu-dev-api/PresignedUrlFunction/ServiceRole/DefaultPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PresignedUrlFunctionServiceRoleDefaultPolicyDE7C0755"
+    }
+  ],
   "/sakekasu-dev-api/SakekasuApi/PurchaseDataSource/ServiceRole/DefaultPolicy/Resource": [
     {
       "type": "aws:cdk:logicalId",
@@ -163,6 +235,12 @@
     {
       "type": "aws:cdk:logicalId",
       "data": "SakekasuApiDrinkingDataSourceServiceRoleDefaultPolicyAFE5B8BF"
+    }
+  ],
+  "/sakekasu-dev-api/SakekasuApi/PresignedUrlDataSource/ServiceRole/DefaultPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "SakekasuApiPresignedUrlDataSourceServiceRoleDefaultPolicyDB9B7A8A"
     }
   ]
 }

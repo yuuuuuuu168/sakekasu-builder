@@ -4,6 +4,8 @@ import { categoryRequiresDrinkingMethod } from '../types';
 import type { SakeCategory } from '../../purchase/types';
 import { useDrinkingValidation } from './useDrinkingValidation';
 import { useDrinkingStorage } from './useDrinkingStorage';
+import { useImageUpload } from '@/features/image/hooks/useImageUpload';
+import type { UseImageUploadReturn } from '@/features/image/hooks/useImageUpload';
 
 export interface UseDrinkingFormReturn {
   formData: DrinkingFormData;
@@ -15,6 +17,8 @@ export interface UseDrinkingFormReturn {
   handleSubmit: () => Promise<void>;
   successMessage: string | null;
   errorMessage: string | null;
+  /** 画像アップロード関連 */
+  imageUpload: UseImageUploadReturn;
 }
 
 function getTodayString(): string {
@@ -45,6 +49,7 @@ export function useDrinkingForm(): UseDrinkingFormReturn {
 
   const { errors, validateField, isValid, clearErrors } = useDrinkingValidation();
   const { saveDrinking, isSaving } = useDrinkingStorage();
+  const imageUpload = useImageUpload();
 
   const isFormValid = Object.keys(errors).length === 0;
 
@@ -80,17 +85,30 @@ export function useDrinkingForm(): UseDrinkingFormReturn {
       return;
     }
 
-    const result = await saveDrinking(formData);
+    // 画像がある場合はアップロードを先に実行
+    let imageKey: string | null = null;
+    if (imageUpload.imageFile) {
+      const recordId = crypto.randomUUID();
+      const key = await imageUpload.uploadImage('drinking', recordId);
+      if (key === null) {
+        // アップロード失敗 → エラーは useImageUpload 側で設定済み、入力内容を保持
+        return;
+      }
+      imageKey = key;
+    }
+
+    const result = await saveDrinking(formData, { imageKey });
 
     if (result.success) {
       // 飲んだ場所を保持してリセット
       setFormData(getInitialDrinkingFormData(formData.placeName));
       clearErrors();
+      imageUpload.clearImage();
       setSuccessMessage('登録が完了しました');
     } else {
       setErrorMessage(result.error || '登録に失敗しました。もう一度お試しください');
     }
-  }, [formData, isValid, saveDrinking, clearErrors]);
+  }, [formData, isValid, saveDrinking, clearErrors, imageUpload]);
 
   return {
     formData,
@@ -102,5 +120,6 @@ export function useDrinkingForm(): UseDrinkingFormReturn {
     handleSubmit,
     successMessage,
     errorMessage,
+    imageUpload,
   };
 }

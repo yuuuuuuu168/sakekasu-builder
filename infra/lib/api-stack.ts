@@ -2,6 +2,8 @@ import * as cdk from 'aws-cdk-lib';
 import * as appsync from 'aws-cdk-lib/aws-appsync';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
@@ -24,6 +26,8 @@ export class ApiStack extends cdk.Stack {
   public readonly purchaseDataSource: appsync.DynamoDbDataSource;
   /** DrinkingRecord DynamoDB データソース */
   public readonly drinkingDataSource: appsync.DynamoDbDataSource;
+  /** Image Storage S3 バケット */
+  public readonly imageBucket: s3.Bucket;
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
@@ -90,9 +94,71 @@ export class ApiStack extends cdk.Stack {
       this.drinkingTable,
     );
 
+    // Image Storage S3 バケット
+    this.imageBucket = new s3.Bucket(this, 'ImageStorage', {
+      bucketName: `${props.envName}-sakekasu-images`,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      removalPolicy,
+      cors: [
+        {
+          allowedOrigins: [
+            'https://sakekasu-builder.com',
+            'http://localhost:5173',
+          ],
+          allowedMethods: [s3.HttpMethods.PUT, s3.HttpMethods.GET],
+          allowedHeaders: ['*'],
+          maxAge: 3600,
+        },
+      ],
+    });
+
+    // Presigned URL 生成 Lambda 関数
+    const presignedUrlFunction = new lambda.Function(
+      this,
+      'PresignedUrlFunction',
+      {
+        functionName: `${props.envName}-sakekasu-presigned-url`,
+        runtime: lambda.Runtime.NODEJS_20_X,
+        handler: 'index.handler',
+        code: lambda.Code.fromAsset(
+          path.join(
+            path.dirname(url.fileURLToPath(import.meta.url)),
+            '../lambda/presigned-url',
+          ),
+        ),
+        environment: {
+          BUCKET_NAME: this.imageBucket.bucketName,
+          UPLOAD_EXPIRY: '300',
+          DOWNLOAD_EXPIRY: '3600',
+        },
+      },
+    );
+
+    // Lambda に S3 読み書き権限を付与
+    this.imageBucket.grantReadWrite(presignedUrlFunction);
+
+    // AppSync Lambda データソース
+    const presignedUrlDataSource = this.graphqlApi.addLambdaDataSource(
+      'PresignedUrlDataSource',
+      presignedUrlFunction,
+    );
+
+    // generateUploadUrl ミューテーションリゾルバー
+    presignedUrlDataSource.createResolver('GenerateUploadUrlResolver', {
+      typeName: 'Mutation',
+      fieldName: 'generateUploadUrl',
+    });
+
+    // getDownloadUrl クエリリゾルバー
+    presignedUrlDataSource.createResolver('GetDownloadUrlResolver', {
+      typeName: 'Query',
+      fieldName: 'getDownloadUrl',
+    });
+
     // リゾルバーを登録
-    this.createResolvers(this.purchaseDataSource, 'PurchaseRecord');
-    this.createResolvers(this.drinkingDataSource, 'DrinkingRecord');
+    this.createResolvers(this.purchaseDataSource, 'PurchaseRecord', presignedUrlDataSource);
+    this.createResolvers(this.drinkingDataSource, 'DrinkingRecord', presignedUrlDataSource);
 
     // CloudFormation 出力
     new cdk.CfnOutput(this, 'GraphqlApiUrl', {
@@ -112,6 +178,7 @@ export class ApiStack extends cdk.Stack {
   private createResolvers(
     dataSource: appsync.DynamoDbDataSource,
     typeName: string,
+    lambdaDataSource: appsync.LambdaDataSource,
   ): void {
     const jsRuntime = appsync.FunctionRuntime.JS_1_0_0;
 
@@ -260,12 +327,17 @@ export function response(ctx) {
 `),
     });
 
-    // delete ミューテーション（条件式で owner 検証 + DeleteItem）
-    dataSource.createResolver(`Delete${typeName}Resolver`, {
-      typeName: 'Mutation',
-      fieldName: `delete${typeName}`,
-      runtime: jsRuntime,
-      code: appsync.Code.fromInline(`
+    // delete ミューテーション（Pipeline リゾルバー: DynamoDB 削除 → S3 画像削除）
+    // ステップ1: DynamoDB から記録を取得（imageKey含む）して削除
+    const deleteRecordFunction = new appsync.AppsyncFunction(
+      this,
+      `Delete${typeName}Function`,
+      {
+        name: `Delete${typeName}Function`,
+        api: this.graphqlApi,
+        dataSource: dataSource,
+        runtime: jsRuntime,
+        code: appsync.Code.fromInline(`
 export function request(ctx) {
   return {
     operation: 'DeleteItem',
@@ -285,7 +357,58 @@ export function response(ctx) {
     }
     util.error(ctx.error.message, ctx.error.type);
   }
+  // 削除された記録を stash に保存（imageKey を次のステップで使用）
+  ctx.stash.deletedRecord = ctx.result;
   return ctx.result;
+}
+`),
+      },
+    );
+
+    // ステップ2: imageKey が存在する場合、Lambda 経由で S3 画像削除
+    const deleteImageFunction = new appsync.AppsyncFunction(
+      this,
+      `DeleteImage${typeName}Function`,
+      {
+        name: `DeleteImage${typeName}Function`,
+        api: this.graphqlApi,
+        dataSource: lambdaDataSource,
+        runtime: jsRuntime,
+        code: appsync.Code.fromInline(`
+export function request(ctx) {
+  const deletedRecord = ctx.stash.deletedRecord;
+  const imageKey = deletedRecord && deletedRecord.imageKey ? deletedRecord.imageKey : null;
+
+  if (!imageKey) {
+    return { operation: 'Invoke', payload: { info: { fieldName: 'deleteImage' }, arguments: {}, identity: ctx.identity } };
+  }
+
+  return { operation: 'Invoke', payload: { info: { fieldName: 'deleteImage' }, arguments: { imageKey: imageKey }, identity: ctx.identity } };
+}
+
+export function response(ctx) {
+  if (ctx.error) {
+    util.appendError(ctx.error.message, ctx.error.type);
+  }
+  return ctx.stash.deletedRecord;
+}
+`),
+      },
+    );
+
+    // Pipeline リゾルバー
+    this.graphqlApi.createResolver(`Delete${typeName}Resolver`, {
+      typeName: 'Mutation',
+      fieldName: `delete${typeName}`,
+      runtime: jsRuntime,
+      pipelineConfig: [deleteRecordFunction, deleteImageFunction],
+      code: appsync.Code.fromInline(`
+export function request(ctx) {
+  return {};
+}
+
+export function response(ctx) {
+  return ctx.prev.result;
 }
 `),
     });
