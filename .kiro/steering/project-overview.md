@@ -20,7 +20,7 @@ inclusion: always
 | 7 | 複数画像添付対応 | 未着手 | - |
 | 8 | 購入記録からの飲酒登録連携 | 未着手 | - |
 | 9 | 購入記録の飲みきりステータス管理 | 未着手 | - |
-| 10 | 画像からの銘柄名自動取得（AI OCR） | 未着手 | - |
+| 10 | 画像からの銘柄名自動取得（AI OCR） | ✅ 実装済み | - |
 | 11 | 写真からおすすめ提案（AI） | 未着手 | - |
 
 ### 機能1: 購入したお酒の登録
@@ -85,10 +85,11 @@ src/
     purchase/        # 購入登録機能
     drinking/        # 飲酒登録機能
     records/         # 記録一覧機能
+    image/           # 画像添付機能（S3 アップロード・OCR）
       components/    # UI コンポーネント
       hooks/         # カスタムフック
+      utils/         # imageCompressor, imageValidator 等
       __tests__/     # テスト（unit + property）
-      types.ts       # 型定義
   graphql/           # GraphQL クエリ・ミューテーション定義
   types/             # 共通型定義（schema.ts 等）
   components/        # 共通コンポーネント
@@ -99,6 +100,7 @@ src/
 infra/               # AWS CDK インフラ定義
   lib/               # CDK スタック（AuthStack, ApiStack）
   graphql/           # AppSync GraphQL スキーマ
+  lambda/            # Lambda 関数（presigned-url, ocr-analyzer）
   scripts/           # amplify_outputs.json 生成スクリプト等
 ```
 
