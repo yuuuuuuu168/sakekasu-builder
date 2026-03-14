@@ -26,3 +26,6 @@ dist-ssr
 # Amplify
 amplify_outputs.json
 .amplify/
+
+# Build logs
+Amplify-histry/
