@@ -1,7 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { RecordCard } from '../components/RecordCard';
 import type { UnifiedRecord } from '../types';
+
+const noopDelete = vi.fn();
+const defaultDeleteProps = { onDelete: noopDelete, isDeleting: false };
 
 // --- 具体的なテストデータ ---
 
@@ -64,7 +67,7 @@ const purchaseRecordNoPrice: UnifiedRecord = {
 describe('RecordCard', () => {
   // Validates: Requirements 1.2, 1.4
   it('購入記録の全フィールドが正しく表示される', () => {
-    render(<RecordCard record={purchaseRecord} />);
+    render(<RecordCard record={purchaseRecord} {...defaultDeleteProps} />);
 
     expect(screen.getByTestId('sake-name').textContent).toBe('獺祭 純米大吟醸 磨き三割九分');
     expect(screen.getByTestId('record-type-label').textContent).toBe('購入');
@@ -76,7 +79,7 @@ describe('RecordCard', () => {
 
   // Validates: Requirements 1.3, 1.4
   it('飲酒記録の全フィールドが正しく表示される', () => {
-    render(<RecordCard record={drinkingRecord} />);
+    render(<RecordCard record={drinkingRecord} {...defaultDeleteProps} />);
 
     expect(screen.getByTestId('sake-name').textContent).toBe('山崎 12年');
     expect(screen.getByTestId('record-type-label').textContent).toBe('飲酒');
@@ -92,24 +95,24 @@ describe('RecordCard', () => {
 
   // Validates: Requirement 1.4
   it('購入記録の種別ラベルが「購入」と表示される', () => {
-    render(<RecordCard record={purchaseRecord} />);
+    render(<RecordCard record={purchaseRecord} {...defaultDeleteProps} />);
     expect(screen.getByTestId('record-type-label').textContent).toBe('購入');
   });
 
   // Validates: Requirement 1.4
   it('飲酒記録の種別ラベルが「飲酒」と表示される', () => {
-    render(<RecordCard record={drinkingRecord} />);
+    render(<RecordCard record={drinkingRecord} {...defaultDeleteProps} />);
     expect(screen.getByTestId('record-type-label').textContent).toBe('飲酒');
   });
 
   // Validates: Requirements 1.2, 1.3
   it('価格がnullの場合は価格が表示されない', () => {
-    render(<RecordCard record={drinkingRecordNoPrice} />);
+    render(<RecordCard record={drinkingRecordNoPrice} {...defaultDeleteProps} />);
     expect(screen.queryByTestId('price')).toBeNull();
   });
 
   it('購入記録で価格がnullの場合も価格が表示されない', () => {
-    render(<RecordCard record={purchaseRecordNoPrice} />);
+    render(<RecordCard record={purchaseRecordNoPrice} {...defaultDeleteProps} />);
     expect(screen.queryByTestId('price')).toBeNull();
   });
 
@@ -126,9 +129,33 @@ describe('RecordCard', () => {
 
     for (const { category, label } of categories) {
       const record: UnifiedRecord = { ...purchaseRecord, id: `cat-${category}`, category };
-      const { unmount } = render(<RecordCard record={record} />);
+      const { unmount } = render(<RecordCard record={record} {...defaultDeleteProps} />);
       expect(screen.getByTestId('category-label').textContent).toBe(label);
       unmount();
     }
+  });
+
+  // --- 削除機能の統合テスト ---
+
+  // Validates: Requirement 1.1
+  it('DeleteButton がカード内にレンダリングされる', () => {
+    render(<RecordCard record={purchaseRecord} {...defaultDeleteProps} />);
+    const deleteButton = screen.getByRole('button', { name: '削除' });
+    expect(deleteButton).toBeTruthy();
+  });
+
+  // Validates: Requirement 2.1
+  it('削除ボタンクリックで ConfirmDialog が表示される', async () => {
+    render(<RecordCard record={purchaseRecord} {...defaultDeleteProps} />);
+    const deleteButton = screen.getByRole('button', { name: '削除' });
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/「獺祭 純米大吟醸 磨き三割九分」の購入記録を削除しますか/)
+      ).toBeTruthy();
+      expect(screen.getByRole('button', { name: '削除する' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'キャンセル' })).toBeTruthy();
+    });
   });
 });

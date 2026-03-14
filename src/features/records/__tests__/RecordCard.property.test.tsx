@@ -1,10 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import * as fc from 'fast-check';
 import type { UnifiedRecord } from '../types';
 import { CATEGORY_FILTER_OPTIONS } from '../types';
 import { SAKE_CATEGORIES } from '../../purchase/types';
 import { RecordCard } from '../components/RecordCard';
+
+const noopDelete = vi.fn();
+const defaultDeleteProps = { onDelete: noopDelete, isDeleting: false };
 
 // --- Arbitrary generators ---
 
@@ -62,7 +65,7 @@ describe('Feature: sake-record-list, Property 8: RecordCard の必須フィー�
   it('購入記録: 銘柄名、カテゴリ、記録種別ラベル、購入店舗、価格、購入日を表示する', () => {
     fc.assert(
       fc.property(arbPurchaseRecord, (record) => {
-        const { unmount } = render(<RecordCard record={record} />);
+        const { unmount } = render(<RecordCard record={record} {...defaultDeleteProps} />);
 
         // 共通フィールド
         expect(screen.getByTestId('sake-name').textContent).toBe(record.sakeName);
@@ -87,7 +90,7 @@ describe('Feature: sake-record-list, Property 8: RecordCard の必須フィー�
   it('飲酒記録: 銘柄名、カテゴリ、記録種別ラベル、飲んだ場所、飲んだ日、飲み方、評価を表示する', () => {
     fc.assert(
       fc.property(arbDrinkingRecord, (record) => {
-        const { unmount } = render(<RecordCard record={record} />);
+        const { unmount } = render(<RecordCard record={record} {...defaultDeleteProps} />);
 
         // 共通フィールド
         expect(screen.getByTestId('sake-name').textContent).toBe(record.sakeName);

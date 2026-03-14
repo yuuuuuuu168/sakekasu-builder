@@ -12,9 +12,13 @@ inclusion: always
 | # | 機能 | 状態 | spec |
 |---|------|------|------|
 | 1 | 購入したお酒を登録するページ | ✅ 実装済み | #[[file:.kiro/specs/sake-purchase-registration/requirements.md]] |
-| 2 | 飲んだお酒を登録するページ | 未着手 | - |
-| 3 | 購入・飲酒記録の一覧ページ | 未着手 | - |
-| 4 | 写真からおすすめ提案（AI） | 未着手 | - |
+| 2 | 飲んだお酒を登録するページ | ✅ 実装済み | #[[file:.kiro/specs/sake-drinking-registration/requirements.md]] |
+| 3 | 購入・飲酒記録の一覧ページ | ✅ 実装済み | #[[file:.kiro/specs/sake-record-list/requirements.md]] |
+| 4 | Cognito認証 + CDKバックエンド | ✅ 実装済み | #[[file:.kiro/specs/cdk-backend-auth/requirements.md]] |
+| 5 | 記録の削除機能 | 未着手 | - |
+| 6 | 画像添付機能（ラベル写真等） | 未着手 | - |
+| 7 | 画像からの銘柄名自動取得（AI OCR） | 未着手 | - |
+| 8 | 写真からおすすめ提案（AI） | 未着手 | - |
 
 ### 機能1: 購入したお酒の登録
 - 銘柄名、購入店舗、価格、購入日、カテゴリ、メモを登録
@@ -29,6 +33,19 @@ inclusion: always
 ### 機能4: おすすめ提案
 - 過去の好みデータをもとに、居酒屋メニュー等の写真からおすすめ銘柄を提案
 
+### 機能5: 記録の削除
+- 購入記録・飲酒記録を一覧画面から個別に削除できる
+- 誤登録や不要な記録の整理に対応
+
+### 機能6: 画像添付
+- 購入・飲酒登録時にお酒のラベルや外観の写真を添付できる
+- 一覧画面でサムネイル表示
+- S3 等のストレージに画像を保存
+
+### 機能7: 画像からの銘柄名自動取得
+- 添付されたラベル画像から AI（OCR）で銘柄名を自動抽出し、入力フォームに反映
+- 登録の手間を軽減
+
 ## 技術スタック
 
 - **フレームワーク**: React 19 + TypeScript 5.9
@@ -36,8 +53,8 @@ inclusion: always
 - **スタイリング**: Tailwind CSS v4（`@theme` ディレクティブ、`@import "tailwindcss"` 方式、tailwind.config.js 不使用）
 - **UIコンポーネント**: shadcn/ui（@base-ui/react ベース）
 - **アニメーション**: Framer Motion
-- **バックエンド**: AWS Amplify Gen 2（Data: AppSync + DynamoDB）
-- **認証**: 現在は apiKey（将来的にCognito移行予定）
+- **バックエンド**: AWS CDK（AppSync + DynamoDB）、フロントエンドホスティングは Amplify
+- **認証**: Amazon Cognito（UserPool）
 - **テスト**: Vitest + Testing Library + fast-check（プロパティベーステスト）
 - **フォント**: Geist Variable
 
@@ -46,19 +63,25 @@ inclusion: always
 ```
 src/
   features/          # 機能ごとのディレクトリ
+    auth/            # 認証機能（Cognito）
     purchase/        # 購入登録機能
+    drinking/        # 飲酒登録機能
+    records/         # 記録一覧機能
       components/    # UI コンポーネント
       hooks/         # カスタムフック
       __tests__/     # テスト（unit + property）
       types.ts       # 型定義
+  graphql/           # GraphQL クエリ・ミューテーション定義
+  types/             # 共通型定義（schema.ts 等）
   components/        # 共通コンポーネント
     ui/              # shadcn/ui コンポーネント
     ThemeProvider.tsx # ダークモード
     ThemeToggle.tsx   # テーマ切替
   lib/               # ユーティリティ
-amplify/
-  data/resource.ts   # Amplify Data スキーマ
-  backend.ts         # Amplify バックエンド設定
+infra/               # AWS CDK インフラ定義
+  lib/               # CDK スタック（AuthStack, ApiStack）
+  graphql/           # AppSync GraphQL スキーマ
+  scripts/           # amplify_outputs.json 生成スクリプト等
 ```
 
 ## デザインテーマ

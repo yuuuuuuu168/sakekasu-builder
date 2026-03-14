@@ -1,8 +1,14 @@
-import type { UnifiedRecord } from '../types';
+import { useState } from 'react';
+import { motion } from 'framer-motion';
+import type { RecordType, UnifiedRecord } from '../types';
 import { CATEGORY_FILTER_OPTIONS } from '../types';
+import { DeleteButton } from './DeleteButton';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface RecordCardProps {
   record: UnifiedRecord;
+  onDelete: (id: string, type: RecordType) => void;
+  isDeleting: boolean;
 }
 
 /** カテゴリ値から日本語ラベルを取得 */
@@ -27,16 +33,21 @@ function RatingStars({ rating }: { rating: number }) {
   );
 }
 
-export function RecordCard({ record }: RecordCardProps) {
+export function RecordCard({ record, onDelete, isDeleting }: RecordCardProps) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const isPurchase = record.type === 'purchase';
   const priceText = formatPrice(record.price);
 
   return (
-    <div
+    <motion.div
+      layout
+      initial={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -80 }}
+      transition={{ duration: 0.3, ease: 'easeInOut' }}
       className="rounded-xl border border-white/20 bg-white/80 p-4 shadow-sm backdrop-blur-lg transition-shadow hover:shadow-md dark:bg-white/5"
       data-testid="record-card"
     >
-      {/* ヘッダー: 種別ラベル + 日付 */}
+      {/* ヘッダー: 種別ラベル + 削除ボタン + 日付 */}
       <div className="mb-3 flex items-center justify-between">
         <span
           className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${
@@ -48,13 +59,19 @@ export function RecordCard({ record }: RecordCardProps) {
         >
           {isPurchase ? '購入' : '飲酒'}
         </span>
-        <time
-          className="text-sm text-gray-500 dark:text-gray-400"
-          dateTime={record.date}
-          data-testid="record-date"
-        >
-          {record.date}
-        </time>
+        <div className="flex items-center gap-2">
+          <time
+            className="text-sm text-gray-500 dark:text-gray-400"
+            dateTime={record.date}
+            data-testid="record-date"
+          >
+            {record.date}
+          </time>
+          <DeleteButton
+            onClick={() => setConfirmOpen(true)}
+            disabled={isDeleting}
+          />
+        </div>
       </div>
 
       {/* 銘柄名 */}
@@ -104,6 +121,16 @@ export function RecordCard({ record }: RecordCardProps) {
           <RatingStars rating={record.rating} />
         </div>
       )}
-    </div>
+
+      {/* 削除確認ダイアログ */}
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        sakeName={record.sakeName}
+        recordType={record.type}
+        isDeleting={isDeleting}
+        onConfirm={() => onDelete(record.id, record.type)}
+      />
+    </motion.div>
   );
 }
