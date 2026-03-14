@@ -2,8 +2,9 @@ import * as cdk from 'aws-cdk-lib';
 import * as appsync from 'aws-cdk-lib/aws-appsync';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
+import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
@@ -104,6 +105,7 @@ export class ApiStack extends cdk.Stack {
         {
           allowedOrigins: [
             'https://sakekasu-builder.com',
+            'https://*.amplifyapp.com',
             'http://localhost:5173',
           ],
           allowedMethods: [s3.HttpMethods.PUT, s3.HttpMethods.GET],
@@ -114,23 +116,26 @@ export class ApiStack extends cdk.Stack {
     });
 
     // Presigned URL 生成 Lambda 関数
-    const presignedUrlFunction = new lambda.Function(
+    const presignedUrlFunction = new NodejsFunction(
       this,
       'PresignedUrlFunction',
       {
         functionName: `${props.envName}-sakekasu-presigned-url`,
-        runtime: lambda.Runtime.NODEJS_20_X,
-        handler: 'index.handler',
-        code: lambda.Code.fromAsset(
-          path.join(
-            path.dirname(url.fileURLToPath(import.meta.url)),
-            '../lambda/presigned-url',
-          ),
+        runtime: Runtime.NODEJS_20_X,
+        entry: path.join(
+          path.dirname(url.fileURLToPath(import.meta.url)),
+          '../lambda/presigned-url/index.ts',
         ),
+        handler: 'handler',
         environment: {
           BUCKET_NAME: this.imageBucket.bucketName,
           UPLOAD_EXPIRY: '300',
           DOWNLOAD_EXPIRY: '3600',
+        },
+        bundling: {
+          format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
+          mainFields: ['module', 'main'],
+          banner: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
         },
       },
     );
@@ -154,6 +159,47 @@ export class ApiStack extends cdk.Stack {
     presignedUrlDataSource.createResolver('GetDownloadUrlResolver', {
       typeName: 'Query',
       fieldName: 'getDownloadUrl',
+    });
+
+    // OCR Analyzer Lambda 関数
+    const ocrAnalyzerFunction = new NodejsFunction(this, 'OcrAnalyzerFunction', {
+      functionName: `${props.envName}-sakekasu-ocr-analyzer`,
+      runtime: Runtime.NODEJS_20_X,
+      entry: path.join(
+        path.dirname(url.fileURLToPath(import.meta.url)),
+        '../lambda/ocr-analyzer/index.ts',
+      ),
+      handler: 'handler',
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 512,
+      environment: {
+        BUCKET_NAME: this.imageBucket.bucketName,
+      },
+      bundling: {
+        format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
+        mainFields: ['module', 'main'],
+        banner: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+      },
+    });
+
+    // S3 読み取り権限
+    this.imageBucket.grantRead(ocrAnalyzerFunction);
+
+    // Rekognition DetectText 権限
+    ocrAnalyzerFunction.addToRolePolicy(new cdk.aws_iam.PolicyStatement({
+      actions: ['rekognition:DetectText'],
+      resources: ['*'],
+    }));
+
+    // AppSync Lambda データソース + リゾルバー
+    const ocrDataSource = this.graphqlApi.addLambdaDataSource(
+      'OcrAnalyzerDataSource',
+      ocrAnalyzerFunction,
+    );
+
+    ocrDataSource.createResolver('AnalyzeSakeLabelResolver', {
+      typeName: 'Mutation',
+      fieldName: 'analyzeSakeLabel',
     });
 
     // リゾルバーを登録

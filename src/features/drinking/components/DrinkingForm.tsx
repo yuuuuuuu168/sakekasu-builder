@@ -21,6 +21,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { useDrinkingForm } from '../hooks/useDrinkingForm';
 import { StarRating } from './StarRating';
 import { ImageUploadArea } from '@/features/image/components/ImageUploadArea';
+import { useOcrAnalysis } from '@/features/image/hooks/useOcrAnalysis';
 import { SAKE_CATEGORIES } from '@/features/purchase/types';
 import type { SakeCategory } from '@/features/purchase/types';
 import { getDrinkingMethodsByCategory, categoryRequiresDrinkingMethod } from '../types';
@@ -53,7 +54,24 @@ export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
     imageUpload,
   } = useDrinkingForm();
 
-  const isSubmitting = isSaving || imageUpload.isUploading;
+  const { analyzeImage, isAnalyzing, ocrResult, ocrError, resetOcr } = useOcrAnalysis();
+
+  const isSubmitting = isSaving || imageUpload.isUploading || isAnalyzing;
+
+  const handleOcrTrigger = async () => {
+    const key = imageUpload.imageKey ?? await imageUpload.preUploadImage('drinking');
+    if (!key) return;
+    const result = await analyzeImage(key);
+    if (result?.sakeName) {
+      handleChange('sakeName', result.sakeName);
+    }
+  };
+
+  const ocrMessage = ocrError
+    ? { text: ocrError, variant: 'error' as const }
+    : ocrResult?.sakeName
+      ? { text: `銘柄名を読み取りました: ${ocrResult.sakeName}`, variant: 'success' as const }
+      : null;
 
   useEffect(() => {
     if (successMessage) {
@@ -93,6 +111,28 @@ export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
       transition={{ duration: 0.4, ease: 'easeOut' }}
     >
       <form onSubmit={onFormSubmit} className="space-y-5" data-testid="drinking-form">
+        {/* 画像添付 */}
+        <FormField label="画像（任意）">
+          <ImageUploadArea
+            imageFile={imageUpload.imageFile}
+            onImageChange={(file) => {
+              if (file) {
+                imageUpload.handleImageSelect(file);
+              } else {
+                imageUpload.clearImage();
+                resetOcr();
+              }
+            }}
+            isCompressing={imageUpload.isCompressing}
+            isUploading={imageUpload.isUploading}
+            error={imageUpload.error}
+            disabled={isSubmitting}
+            isOcrAnalyzing={isAnalyzing}
+            onOcrTrigger={handleOcrTrigger}
+            ocrMessage={ocrMessage}
+          />
+        </FormField>
+
         {/* 銘柄名 */}
         <FormField label="銘柄名" error={errors.sakeName} required>
           <Input
@@ -215,24 +255,6 @@ export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
             value={formData.memo}
             onChange={(e) => handleChange('memo', e.target.value)}
             rows={3}
-          />
-        </FormField>
-
-        {/* 画像添付 */}
-        <FormField label="画像（任意）">
-          <ImageUploadArea
-            imageFile={imageUpload.imageFile}
-            onImageChange={(file) => {
-              if (file) {
-                imageUpload.handleImageSelect(file);
-              } else {
-                imageUpload.clearImage();
-              }
-            }}
-            isCompressing={imageUpload.isCompressing}
-            isUploading={imageUpload.isUploading}
-            error={imageUpload.error}
-            disabled={isSubmitting}
           />
         </FormField>
 

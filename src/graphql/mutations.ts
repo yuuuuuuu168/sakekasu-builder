@@ -106,3 +106,13 @@ export const generateUploadUrl = /* GraphQL */ `
     }
   }
 `;
+
+export const analyzeSakeLabel = /* GraphQL */ `
+  mutation AnalyzeSakeLabel($imageKey: String!) {
+    analyzeSakeLabel(imageKey: $imageKey) {
+      sakeName
+      confidence
+      rawTexts
+    }
+  }
+`;
