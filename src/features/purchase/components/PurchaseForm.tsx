@@ -19,6 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 
 import { usePurchaseForm } from '@/features/purchase/hooks/usePurchaseForm';
+import { ImageUploadArea } from '@/features/image/components/ImageUploadArea';
 import { SAKE_CATEGORIES } from '@/features/purchase/types';
 import type { SakeCategory } from '@/features/purchase/types';
 
@@ -46,7 +47,10 @@ export function PurchaseForm({ onSubmitSuccess }: PurchaseFormProps) {
     handleChange,
     handleBlur,
     handleSubmit,
+    imageUpload,
   } = usePurchaseForm();
+
+  const isSubmitting = isSaving || imageUpload.isUploading;
 
   useEffect(() => {
     if (!submitResult) return;
@@ -153,19 +157,37 @@ export function PurchaseForm({ onSubmitSuccess }: PurchaseFormProps) {
         />
       </FormField>
 
+      {/* 画像添付 */}
+      <FormField label="画像（任意）">
+        <ImageUploadArea
+          imageFile={imageUpload.imageFile}
+          onImageChange={(file) => {
+            if (file) {
+              imageUpload.handleImageSelect(file);
+            } else {
+              imageUpload.clearImage();
+            }
+          }}
+          isCompressing={imageUpload.isCompressing}
+          isUploading={imageUpload.isUploading}
+          error={imageUpload.error}
+          disabled={isSubmitting}
+        />
+      </FormField>
+
       {/* 登録ボタン */}
       <MotionButton
         type="submit"
         data-testid="submit-button"
-        disabled={isSaving}
+        disabled={isSubmitting}
         className="w-full h-10 text-base font-semibold"
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
       >
-        {isSaving ? (
+        {isSubmitting ? (
           <>
             <Loader2 className="size-4 animate-spin" />
-            登録中...
+            {imageUpload.isUploading ? '画像アップロード中...' : '登録中...'}
           </>
         ) : (
           '🍶 登録する'

@@ -53,7 +53,7 @@
         "validateOnSynth": false,
         "assumeRoleArn": "arn:${AWS::Partition}:iam::<アプリのアカウント ID>:role/cdk-hnb659fds-deploy-role-<アプリのアカウント ID>-ap-northeast-1",
         "cloudFormationExecutionRoleArn": "arn:${AWS::Partition}:iam::<アプリのアカウント ID>:role/cdk-hnb659fds-cfn-exec-role-<アプリのアカウント ID>-ap-northeast-1",
-        "stackTemplateAssetObjectUrl": "s3://cdk-hnb659fds-assets-<アプリのアカウント ID>-ap-northeast-1/5dbed41797e8ad5279c4a7246daee09bf00212c92660aa5ad90ea43194f229c5.json",
+        "stackTemplateAssetObjectUrl": "s3://cdk-hnb659fds-assets-<アプリのアカウント ID>-ap-northeast-1/bf671a195af85d60cf005460eebe86488134866bef50ad3c37b759d750002d34.json",
         "requiresBootstrapStackVersion": 6,
         "bootstrapStackVersionSsmParameter": "/cdk-bootstrap/hnb659fds/version",
         "additionalDependencies": [

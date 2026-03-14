@@ -9,6 +9,7 @@ export const createPurchaseRecord = /* GraphQL */ `
       purchaseDate
       category
       memo
+      imageKey
       createdAt
       updatedAt
     }
@@ -53,6 +54,7 @@ export const createDrinkingRecord = /* GraphQL */ `
       drinkingMethod
       rating
       memo
+      imageKey
       createdAt
       updatedAt
     }
@@ -82,6 +84,25 @@ export const deleteDrinkingRecord = /* GraphQL */ `
   mutation DeleteDrinkingRecord($id: ID!) {
     deleteDrinkingRecord(id: $id) {
       id
+    }
+  }
+`;
+
+export const generateUploadUrl = /* GraphQL */ `
+  mutation GenerateUploadUrl(
+    $recordType: String!
+    $recordId: String!
+    $contentType: String!
+    $fileName: String!
+  ) {
+    generateUploadUrl(
+      recordType: $recordType
+      recordId: $recordId
+      contentType: $contentType
+      fileName: $fileName
+    ) {
+      uploadUrl
+      key
     }
   }
 `;

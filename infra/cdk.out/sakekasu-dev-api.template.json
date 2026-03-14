@@ -110,7 +110,7 @@
       "ApiId"
      ]
     },
-    "Definition": "# SakeCategory 列挙型\nenum SakeCategory {\n  NIHONSHU\n  BEER\n  WINE\n  WHISKY\n  SHOCHU\n  OTHER\n}\n\n# 購入記録\ntype PurchaseRecord {\n  id: ID!\n  owner: String!\n  sakeName: String!\n  storeName: String!\n  price: Int!\n  purchaseDate: AWSDate!\n  category: SakeCategory!\n  memo: String\n  createdAt: AWSDateTime!\n  updatedAt: AWSDateTime!\n}\n\n# 飲酒記録\ntype DrinkingRecord {\n  id: ID!\n  owner: String!\n  sakeName: String!\n  placeName: String!\n  price: Int\n  drinkingDate: AWSDate!\n  category: SakeCategory!\n  drinkingMethod: String!\n  rating: Int!\n  memo: String\n  createdAt: AWSDateTime!\n  updatedAt: AWSDateTime!\n}\n\n# クエリ\ntype Query {\n  getPurchaseRecord(id: ID!): PurchaseRecord\n  listPurchaseRecords: [PurchaseRecord!]!\n  getDrinkingRecord(id: ID!): DrinkingRecord\n  listDrinkingRecords: [DrinkingRecord!]!\n}\n\n# ミューテーション\ntype Mutation {\n  createPurchaseRecord(input: CreatePurchaseRecordInput!): PurchaseRecord\n  updatePurchaseRecord(input: UpdatePurchaseRecordInput!): PurchaseRecord\n  deletePurchaseRecord(id: ID!): PurchaseRecord\n  createDrinkingRecord(input: CreateDrinkingRecordInput!): DrinkingRecord\n  updateDrinkingRecord(input: UpdateDrinkingRecordInput!): DrinkingRecord\n  deleteDrinkingRecord(id: ID!): DrinkingRecord\n}\n\n# 購入記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）\ninput CreatePurchaseRecordInput {\n  sakeName: String!\n  storeName: String!\n  price: Int!\n  purchaseDate: AWSDate!\n  category: SakeCategory!\n  memo: String\n}\n\n# 購入記録更新用 Input（id は必須、他はオプション）\ninput UpdatePurchaseRecordInput {\n  id: ID!\n  sakeName: String\n  storeName: String\n  price: Int\n  purchaseDate: AWSDate\n  category: SakeCategory\n  memo: String\n}\n\n# 飲酒記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）\ninput CreateDrinkingRecordInput {\n  sakeName: String!\n  placeName: String!\n  price: Int\n  drinkingDate: AWSDate!\n  category: SakeCategory!\n  drinkingMethod: String!\n  rating: Int!\n  memo: String\n}\n\n# 飲酒記録更新用 Input（id は必須、他はオプション）\ninput UpdateDrinkingRecordInput {\n  id: ID!\n  sakeName: String\n  placeName: String\n  price: Int\n  drinkingDate: AWSDate\n  category: SakeCategory\n  drinkingMethod: String\n  rating: Int\n  memo: String\n}\n"
+    "Definition": "# SakeCategory 列挙型\nenum SakeCategory {\n  NIHONSHU\n  BEER\n  WINE\n  WHISKY\n  SHOCHU\n  OTHER\n}\n\n# 購入記録\ntype PurchaseRecord {\n  id: ID!\n  owner: String!\n  sakeName: String!\n  storeName: String!\n  price: Int!\n  purchaseDate: AWSDate!\n  category: SakeCategory!\n  memo: String\n  imageKey: String\n  createdAt: AWSDateTime!\n  updatedAt: AWSDateTime!\n}\n\n# 飲酒記録\ntype DrinkingRecord {\n  id: ID!\n  owner: String!\n  sakeName: String!\n  placeName: String!\n  price: Int\n  drinkingDate: AWSDate!\n  category: SakeCategory!\n  drinkingMethod: String!\n  rating: Int!\n  memo: String\n  imageKey: String\n  createdAt: AWSDateTime!\n  updatedAt: AWSDateTime!\n}\n\n# Presigned URL レスポンス\ntype PresignedUrlResponse {\n  uploadUrl: String!\n  key: String!\n}\n\n# クエリ\ntype Query {\n  getPurchaseRecord(id: ID!): PurchaseRecord\n  listPurchaseRecords: [PurchaseRecord!]!\n  getDrinkingRecord(id: ID!): DrinkingRecord\n  listDrinkingRecords: [DrinkingRecord!]!\n  getDownloadUrl(key: String!): String!\n}\n\n# ミューテーション\ntype Mutation {\n  createPurchaseRecord(input: CreatePurchaseRecordInput!): PurchaseRecord\n  updatePurchaseRecord(input: UpdatePurchaseRecordInput!): PurchaseRecord\n  deletePurchaseRecord(id: ID!): PurchaseRecord\n  createDrinkingRecord(input: CreateDrinkingRecordInput!): DrinkingRecord\n  updateDrinkingRecord(input: UpdateDrinkingRecordInput!): DrinkingRecord\n  deleteDrinkingRecord(id: ID!): DrinkingRecord\n  generateUploadUrl(\n    recordType: String!\n    recordId: String!\n    contentType: String!\n    fileName: String!\n  ): PresignedUrlResponse!\n}\n\n# 購入記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）\ninput CreatePurchaseRecordInput {\n  sakeName: String!\n  storeName: String!\n  price: Int!\n  purchaseDate: AWSDate!\n  category: SakeCategory!\n  memo: String\n  imageKey: String\n}\n\n# 購入記録更新用 Input（id は必須、他はオプション）\ninput UpdatePurchaseRecordInput {\n  id: ID!\n  sakeName: String\n  storeName: String\n  price: Int\n  purchaseDate: AWSDate\n  category: SakeCategory\n  memo: String\n}\n\n# 飲酒記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）\ninput CreateDrinkingRecordInput {\n  sakeName: String!\n  placeName: String!\n  price: Int\n  drinkingDate: AWSDate!\n  category: SakeCategory!\n  drinkingMethod: String!\n  rating: Int!\n  memo: String\n  imageKey: String\n}\n\n# 飲酒記録更新用 Input（id は必須、他はオプション）\ninput UpdateDrinkingRecordInput {\n  id: ID!\n  sakeName: String\n  placeName: String\n  price: Int\n  drinkingDate: AWSDate\n  category: SakeCategory\n  drinkingMethod: String\n  rating: Int\n  memo: String\n}\n"
    },
    "Metadata": {
     "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/Schema"
@@ -382,6 +382,145 @@
     "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/DrinkingDataSource/Resource"
    }
   },
+  "SakekasuApiPresignedUrlDataSourceServiceRoleEC6C4563": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "appsync.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/PresignedUrlDataSource/ServiceRole/Resource"
+   }
+  },
+  "SakekasuApiPresignedUrlDataSourceServiceRoleDefaultPolicyDB9B7A8A": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:InvokeFunction",
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "PresignedUrlFunction7EEE7292",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "PresignedUrlFunction7EEE7292",
+             "Arn"
+            ]
+           },
+           ":*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "SakekasuApiPresignedUrlDataSourceServiceRoleDefaultPolicyDB9B7A8A",
+    "Roles": [
+     {
+      "Ref": "SakekasuApiPresignedUrlDataSourceServiceRoleEC6C4563"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/PresignedUrlDataSource/ServiceRole/DefaultPolicy/Resource"
+   }
+  },
+  "SakekasuApiPresignedUrlDataSourceFE95F331": {
+   "Type": "AWS::AppSync::DataSource",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "LambdaConfig": {
+     "LambdaFunctionArn": {
+      "Fn::GetAtt": [
+       "PresignedUrlFunction7EEE7292",
+       "Arn"
+      ]
+     }
+    },
+    "Name": "PresignedUrlDataSource",
+    "ServiceRoleArn": {
+     "Fn::GetAtt": [
+      "SakekasuApiPresignedUrlDataSourceServiceRoleEC6C4563",
+      "Arn"
+     ]
+    },
+    "Type": "AWS_LAMBDA"
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/PresignedUrlDataSource/Resource"
+   }
+  },
+  "SakekasuApiGenerateUploadUrlResolver0855D4B3": {
+   "Type": "AWS::AppSync::Resolver",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "DataSourceName": "PresignedUrlDataSource",
+    "FieldName": "generateUploadUrl",
+    "Kind": "UNIT",
+    "TypeName": "Mutation"
+   },
+   "DependsOn": [
+    "SakekasuApiPresignedUrlDataSourceFE95F331",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/GenerateUploadUrlResolver/Resource"
+   }
+  },
+  "SakekasuApiGetDownloadUrlResolver46097640": {
+   "Type": "AWS::AppSync::Resolver",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "DataSourceName": "PresignedUrlDataSource",
+    "FieldName": "getDownloadUrl",
+    "Kind": "UNIT",
+    "TypeName": "Query"
+   },
+   "DependsOn": [
+    "SakekasuApiPresignedUrlDataSourceFE95F331",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/GetDownloadUrlResolver/Resource"
+   }
+  },
   "SakekasuApiCreatePurchaseRecordResolverA38E7473": {
    "Type": "AWS::AppSync::Resolver",
    "Properties": {
@@ -499,10 +638,25 @@
       "ApiId"
      ]
     },
-    "Code": "\nexport function request(ctx) {\n  return {\n    operation: 'DeleteItem',\n    key: util.dynamodb.toMapValues({ id: ctx.args.id }),\n    condition: {\n      expression: '#owner = :expectedOwner',\n      expressionNames: { '#owner': 'owner' },\n      expressionValues: util.dynamodb.toMapValues({ ':expectedOwner': ctx.identity.sub }),\n    },\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {\n      util.error('Unauthorized: owner mismatch', 'Unauthorized');\n    }\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  return ctx.result;\n}\n",
-    "DataSourceName": "PurchaseDataSource",
+    "Code": "\nexport function request(ctx) {\n  return {};\n}\n\nexport function response(ctx) {\n  return ctx.prev.result;\n}\n",
     "FieldName": "deletePurchaseRecord",
-    "Kind": "UNIT",
+    "Kind": "PIPELINE",
+    "PipelineConfig": {
+     "Functions": [
+      {
+       "Fn::GetAtt": [
+        "DeletePurchaseRecordFunction7F77E14C",
+        "FunctionId"
+       ]
+      },
+      {
+       "Fn::GetAtt": [
+        "DeleteImagePurchaseRecordFunctionD5954176",
+        "FunctionId"
+       ]
+      }
+     ]
+    },
     "Runtime": {
      "Name": "APPSYNC_JS",
      "RuntimeVersion": "1.0.0"
@@ -510,7 +664,6 @@
     "TypeName": "Mutation"
    },
    "DependsOn": [
-    "SakekasuApiPurchaseDataSource7050A357",
     "SakekasuApiSchemaCBE52513"
    ],
    "Metadata": {
@@ -634,10 +787,25 @@
       "ApiId"
      ]
     },
-    "Code": "\nexport function request(ctx) {\n  return {\n    operation: 'DeleteItem',\n    key: util.dynamodb.toMapValues({ id: ctx.args.id }),\n    condition: {\n      expression: '#owner = :expectedOwner',\n      expressionNames: { '#owner': 'owner' },\n      expressionValues: util.dynamodb.toMapValues({ ':expectedOwner': ctx.identity.sub }),\n    },\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {\n      util.error('Unauthorized: owner mismatch', 'Unauthorized');\n    }\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  return ctx.result;\n}\n",
-    "DataSourceName": "DrinkingDataSource",
+    "Code": "\nexport function request(ctx) {\n  return {};\n}\n\nexport function response(ctx) {\n  return ctx.prev.result;\n}\n",
     "FieldName": "deleteDrinkingRecord",
-    "Kind": "UNIT",
+    "Kind": "PIPELINE",
+    "PipelineConfig": {
+     "Functions": [
+      {
+       "Fn::GetAtt": [
+        "DeleteDrinkingRecordFunctionE7EAB8BA",
+        "FunctionId"
+       ]
+      },
+      {
+       "Fn::GetAtt": [
+        "DeleteImageDrinkingRecordFunction4C6AFB69",
+        "FunctionId"
+       ]
+      }
+     ]
+    },
     "Runtime": {
      "Name": "APPSYNC_JS",
      "RuntimeVersion": "1.0.0"
@@ -645,17 +813,291 @@
     "TypeName": "Mutation"
    },
    "DependsOn": [
-    "SakekasuApiDrinkingDataSourceC3375CAE",
     "SakekasuApiSchemaCBE52513"
    ],
    "Metadata": {
     "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/DeleteDrinkingRecordResolver/Resource"
    }
   },
+  "ImageStorage82E68681": {
+   "Type": "AWS::S3::Bucket",
+   "Properties": {
+    "BucketEncryption": {
+     "ServerSideEncryptionConfiguration": [
+      {
+       "ServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+       }
+      }
+     ]
+    },
+    "BucketName": "dev-sakekasu-images",
+    "CorsConfiguration": {
+     "CorsRules": [
+      {
+       "AllowedHeaders": [
+        "*"
+       ],
+       "AllowedMethods": [
+        "PUT",
+        "GET"
+       ],
+       "AllowedOrigins": [
+        "https://sakekasu-builder.com",
+        "http://localhost:5173"
+       ],
+       "MaxAge": 3600
+      }
+     ]
+    },
+    "PublicAccessBlockConfiguration": {
+     "BlockPublicAcls": true,
+     "BlockPublicPolicy": true,
+     "IgnorePublicAcls": true,
+     "RestrictPublicBuckets": true
+    }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/ImageStorage/Resource"
+   }
+  },
+  "PresignedUrlFunctionServiceRole30C56AA3": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "lambda.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "ManagedPolicyArns": [
+     {
+      "Fn::Join": [
+       "",
+       [
+        "arn:",
+        {
+         "Ref": "AWS::Partition"
+        },
+        ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+       ]
+      ]
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/PresignedUrlFunction/ServiceRole/Resource"
+   }
+  },
+  "PresignedUrlFunctionServiceRoleDefaultPolicyDE7C0755": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "s3:GetObject*",
+        "s3:GetBucket*",
+        "s3:List*",
+        "s3:DeleteObject*",
+        "s3:PutObject",
+        "s3:PutObjectLegalHold",
+        "s3:PutObjectRetention",
+        "s3:PutObjectTagging",
+        "s3:PutObjectVersionTagging",
+        "s3:Abort*"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "ImageStorage82E68681",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "ImageStorage82E68681",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "PresignedUrlFunctionServiceRoleDefaultPolicyDE7C0755",
+    "Roles": [
+     {
+      "Ref": "PresignedUrlFunctionServiceRole30C56AA3"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/PresignedUrlFunction/ServiceRole/DefaultPolicy/Resource"
+   }
+  },
+  "PresignedUrlFunction7EEE7292": {
+   "Type": "AWS::Lambda::Function",
+   "Properties": {
+    "Code": {
+     "S3Bucket": "cdk-hnb659fds-assets-<アプリのアカウント ID>-ap-northeast-1",
+     "S3Key": "e4a0cc478460ef80c539f06d7e812c2455490d80f4830fc8a1911f5eb61c19cc.zip"
+    },
+    "Environment": {
+     "Variables": {
+      "BUCKET_NAME": {
+       "Ref": "ImageStorage82E68681"
+      },
+      "UPLOAD_EXPIRY": "300",
+      "DOWNLOAD_EXPIRY": "3600"
+     }
+    },
+    "FunctionName": "dev-sakekasu-presigned-url",
+    "Handler": "index.handler",
+    "Role": {
+     "Fn::GetAtt": [
+      "PresignedUrlFunctionServiceRole30C56AA3",
+      "Arn"
+     ]
+    },
+    "Runtime": "nodejs20.x"
+   },
+   "DependsOn": [
+    "PresignedUrlFunctionServiceRoleDefaultPolicyDE7C0755",
+    "PresignedUrlFunctionServiceRole30C56AA3"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/PresignedUrlFunction/Resource",
+    "aws:asset:path": "asset.e4a0cc478460ef80c539f06d7e812c2455490d80f4830fc8a1911f5eb61c19cc",
+    "aws:asset:is-bundled": false,
+    "aws:asset:property": "Code"
+   }
+  },
+  "DeletePurchaseRecordFunction7F77E14C": {
+   "Type": "AWS::AppSync::FunctionConfiguration",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  return {\n    operation: 'DeleteItem',\n    key: util.dynamodb.toMapValues({ id: ctx.args.id }),\n    condition: {\n      expression: '#owner = :expectedOwner',\n      expressionNames: { '#owner': 'owner' },\n      expressionValues: util.dynamodb.toMapValues({ ':expectedOwner': ctx.identity.sub }),\n    },\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {\n      util.error('Unauthorized: owner mismatch', 'Unauthorized');\n    }\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  // 削除された記録を stash に保存（imageKey を次のステップで使用）\n  ctx.stash.deletedRecord = ctx.result;\n  return ctx.result;\n}\n",
+    "DataSourceName": "PurchaseDataSource",
+    "FunctionVersion": "2018-05-29",
+    "Name": "DeletePurchaseRecordFunction",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    }
+   },
+   "DependsOn": [
+    "SakekasuApiPurchaseDataSource7050A357",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/DeletePurchaseRecordFunction/Resource"
+   }
+  },
+  "DeleteImagePurchaseRecordFunctionD5954176": {
+   "Type": "AWS::AppSync::FunctionConfiguration",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  const deletedRecord = ctx.stash.deletedRecord;\n  const imageKey = deletedRecord && deletedRecord.imageKey ? deletedRecord.imageKey : null;\n\n  if (!imageKey) {\n    return { operation: 'Invoke', payload: { info: { fieldName: 'deleteImage' }, arguments: {}, identity: ctx.identity } };\n  }\n\n  return { operation: 'Invoke', payload: { info: { fieldName: 'deleteImage' }, arguments: { imageKey: imageKey }, identity: ctx.identity } };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    util.appendError(ctx.error.message, ctx.error.type);\n  }\n  return ctx.stash.deletedRecord;\n}\n",
+    "DataSourceName": "PresignedUrlDataSource",
+    "FunctionVersion": "2018-05-29",
+    "Name": "DeleteImagePurchaseRecordFunction",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    }
+   },
+   "DependsOn": [
+    "SakekasuApiPresignedUrlDataSourceFE95F331",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/DeleteImagePurchaseRecordFunction/Resource"
+   }
+  },
+  "DeleteDrinkingRecordFunctionE7EAB8BA": {
+   "Type": "AWS::AppSync::FunctionConfiguration",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  return {\n    operation: 'DeleteItem',\n    key: util.dynamodb.toMapValues({ id: ctx.args.id }),\n    condition: {\n      expression: '#owner = :expectedOwner',\n      expressionNames: { '#owner': 'owner' },\n      expressionValues: util.dynamodb.toMapValues({ ':expectedOwner': ctx.identity.sub }),\n    },\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {\n      util.error('Unauthorized: owner mismatch', 'Unauthorized');\n    }\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  // 削除された記録を stash に保存（imageKey を次のステップで使用）\n  ctx.stash.deletedRecord = ctx.result;\n  return ctx.result;\n}\n",
+    "DataSourceName": "DrinkingDataSource",
+    "FunctionVersion": "2018-05-29",
+    "Name": "DeleteDrinkingRecordFunction",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    }
+   },
+   "DependsOn": [
+    "SakekasuApiDrinkingDataSourceC3375CAE",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/DeleteDrinkingRecordFunction/Resource"
+   }
+  },
+  "DeleteImageDrinkingRecordFunction4C6AFB69": {
+   "Type": "AWS::AppSync::FunctionConfiguration",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  const deletedRecord = ctx.stash.deletedRecord;\n  const imageKey = deletedRecord && deletedRecord.imageKey ? deletedRecord.imageKey : null;\n\n  if (!imageKey) {\n    return { operation: 'Invoke', payload: { info: { fieldName: 'deleteImage' }, arguments: {}, identity: ctx.identity } };\n  }\n\n  return { operation: 'Invoke', payload: { info: { fieldName: 'deleteImage' }, arguments: { imageKey: imageKey }, identity: ctx.identity } };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    util.appendError(ctx.error.message, ctx.error.type);\n  }\n  return ctx.stash.deletedRecord;\n}\n",
+    "DataSourceName": "PresignedUrlDataSource",
+    "FunctionVersion": "2018-05-29",
+    "Name": "DeleteImageDrinkingRecordFunction",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    }
+   },
+   "DependsOn": [
+    "SakekasuApiPresignedUrlDataSourceFE95F331",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/DeleteImageDrinkingRecordFunction/Resource"
+   }
+  },
   "CDKMetadata": {
    "Type": "AWS::CDK::Metadata",
    "Properties": {
-    "Analytics": "v2:deflate64:H4sIAAAAAAAA/1WNQQ6CMBBFz8K+jFi9gJHEjYkK7s1QaiiWttIiIU3vbigh0dX/bybzhgLd7yBLcLQpq1+pFBX40iF7ERztw9eTwk7XFfg7VpKT41PFEggaYyfFwJ96NM1bHoyYt5Fu538qWcM7JHmU5VWODks99Cz6fqjgVssP7+fx2gMR2IEv9PI95lVLwaYZlxZCPF2Nl8GZwQWidM2htZsPpUC3kCWtFSLtB+VEx6FY8gtWr0NbAgEAAA=="
+    "Analytics": "v2:deflate64:H4sIAAAAAAAA/22OTW7CMBCFz8LemdLABQJRu0FqSbpHE8cEE8dOMzYosnz3yk5bUamr9775fTnk2w2sV3injLd9pmQDvrbIe4Z3Ovl21jiYtgH/gY0SbH/WyQSG40iz5uBfJxwvn6oYZewmOh7+Us0vYkBWpmNlU6LF2riJp3sPdMChafGhUAky6iamOPfri+Xzi9PcSqNj78fvjT7Lzk0YITCJA/jKLLmTvhsl+RxxcYHRBvzO8V7YWP12i+yQRGAqhQL/37+4fkIiYQmKKCFFTtkT1xY7qbu48+bs6Gxg2rQCrvR0y3PIn2G9upKU2eS0lYOAatEvWKeTEpgBAAA="
    },
    "Metadata": {
     "aws:cdk:path": "sakekasu-dev-api/CDKMetadata/Default"

@@ -18,6 +18,7 @@ type PurchaseRecord {
   purchaseDate: AWSDate!
   category: SakeCategory!
   memo: String
+  imageKey: String
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
 }
@@ -34,8 +35,15 @@ type DrinkingRecord {
   drinkingMethod: String!
   rating: Int!
   memo: String
+  imageKey: String
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
+}
+
+# Presigned URL レスポンス
+type PresignedUrlResponse {
+  uploadUrl: String!
+  key: String!
 }
 
 # クエリ
@@ -44,6 +52,7 @@ type Query {
   listPurchaseRecords: [PurchaseRecord!]!
   getDrinkingRecord(id: ID!): DrinkingRecord
   listDrinkingRecords: [DrinkingRecord!]!
+  getDownloadUrl(key: String!): String!
 }
 
 # ミューテーション
@@ -54,6 +63,12 @@ type Mutation {
   createDrinkingRecord(input: CreateDrinkingRecordInput!): DrinkingRecord
   updateDrinkingRecord(input: UpdateDrinkingRecordInput!): DrinkingRecord
   deleteDrinkingRecord(id: ID!): DrinkingRecord
+  generateUploadUrl(
+    recordType: String!
+    recordId: String!
+    contentType: String!
+    fileName: String!
+  ): PresignedUrlResponse!
 }
 
 # 購入記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）
@@ -64,6 +79,7 @@ input CreatePurchaseRecordInput {
   purchaseDate: AWSDate!
   category: SakeCategory!
   memo: String
+  imageKey: String
 }
 
 # 購入記録更新用 Input（id は必須、他はオプション）
@@ -87,6 +103,7 @@ input CreateDrinkingRecordInput {
   drinkingMethod: String!
   rating: Int!
   memo: String
+  imageKey: String
 }
 
 # 飲酒記録更新用 Input（id は必須、他はオプション）

@@ -22,6 +22,23 @@ vi.mock('@/features/purchase/hooks/usePurchaseStorage', () => ({
   }),
 }));
 
+// useImageUpload をモック
+const mockHandleImageSelect = vi.fn();
+const mockUploadImage = vi.fn(async () => null);
+const mockClearImage = vi.fn();
+vi.mock('@/features/image/hooks/useImageUpload', () => ({
+  useImageUpload: () => ({
+    imageFile: null,
+    setImageFile: vi.fn(),
+    isCompressing: false,
+    isUploading: false,
+    error: null,
+    handleImageSelect: mockHandleImageSelect,
+    uploadImage: mockUploadImage,
+    clearImage: mockClearImage,
+  }),
+}));
+
 import { PurchaseForm } from '@/features/purchase/components/PurchaseForm';
 
 describe('PurchaseForm ユニットテスト', () => {

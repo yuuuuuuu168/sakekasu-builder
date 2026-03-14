@@ -6,15 +6,19 @@ import type { SaveResult } from '../../purchase/types';
 
 const client = generateClient();
 
+export interface SaveDrinkingOptions {
+  imageKey?: string | null;
+}
+
 export interface UseDrinkingStorageReturn {
-  saveDrinking: (data: DrinkingFormData) => Promise<SaveResult>;
+  saveDrinking: (data: DrinkingFormData, options?: SaveDrinkingOptions) => Promise<SaveResult>;
   isSaving: boolean;
 }
 
 export function useDrinkingStorage(): UseDrinkingStorageReturn {
   const [isSaving, setIsSaving] = useState(false);
 
-  const saveDrinking = async (data: DrinkingFormData): Promise<SaveResult> => {
+  const saveDrinking = async (data: DrinkingFormData, options?: SaveDrinkingOptions): Promise<SaveResult> => {
     setIsSaving(true);
     try {
       const result = await client.graphql({
@@ -29,6 +33,7 @@ export function useDrinkingStorage(): UseDrinkingStorageReturn {
             drinkingMethod: data.drinkingMethod,
             rating: data.rating,
             memo: data.memo || undefined,
+            imageKey: options?.imageKey ?? null,
           },
         },
       });

@@ -3,6 +3,12 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { RecordCard } from '../components/RecordCard';
 import type { UnifiedRecord } from '../types';
 
+// useImageUrl フックのモック
+const mockUseImageUrl = vi.fn();
+vi.mock('@/features/image/hooks/useImageUrl', () => ({
+  useImageUrl: (...args: unknown[]) => mockUseImageUrl(...args),
+}));
+
 const noopDelete = vi.fn();
 const defaultDeleteProps = { onDelete: noopDelete, isDeleting: false };
 
@@ -65,6 +71,14 @@ const purchaseRecordNoPrice: UnifiedRecord = {
 // --- テスト ---
 
 describe('RecordCard', () => {
+  beforeEach(() => {
+    mockUseImageUrl.mockReturnValue({
+      imageUrl: null,
+      isLoading: false,
+      hasError: false,
+    });
+  });
+
   // Validates: Requirements 1.2, 1.4
   it('購入記録の全フィールドが正しく表示される', () => {
     render(<RecordCard record={purchaseRecord} {...defaultDeleteProps} />);
@@ -157,5 +171,82 @@ describe('RecordCard', () => {
       expect(screen.getByRole('button', { name: '削除する' })).toBeTruthy();
       expect(screen.getByRole('button', { name: 'キャンセル' })).toBeTruthy();
     });
+  });
+
+  // --- サムネイル表示テスト ---
+
+  // Validates: Requirement 4.2
+  it('imageKey が null の場合、プレースホルダーアイコンが表示される', () => {
+    mockUseImageUrl.mockReturnValue({ imageUrl: null, isLoading: false, hasError: false });
+    render(<RecordCard record={purchaseRecord} {...defaultDeleteProps} />);
+    expect(screen.getByTestId('image-placeholder')).toBeTruthy();
+    expect(screen.queryByTestId('record-thumbnail')).toBeNull();
+  });
+
+  // Validates: Requirement 4.4
+  it('画像読み込み中はスケルトンローダーが表示される', () => {
+    mockUseImageUrl.mockReturnValue({ imageUrl: null, isLoading: true, hasError: false });
+    const recordWithImage = { ...purchaseRecord, imageKey: 'user123/purchase/rec-001/label.jpg' };
+    render(<RecordCard record={recordWithImage} {...defaultDeleteProps} />);
+    expect(screen.getByTestId('thumbnail-skeleton')).toBeTruthy();
+  });
+
+  // Validates: Requirements 4.1, 4.3
+  it('imageKey がある場合、サムネイル画像が 80×80px で表示される', () => {
+    mockUseImageUrl.mockReturnValue({
+      imageUrl: 'https://example.com/presigned-url/label.jpg',
+      isLoading: false,
+      hasError: false,
+    });
+    const recordWithImage = { ...purchaseRecord, imageKey: 'user123/purchase/rec-001/label.jpg' };
+    render(<RecordCard record={recordWithImage} {...defaultDeleteProps} />);
+
+    const thumbnail = screen.getByTestId('record-thumbnail');
+    expect(thumbnail).toBeTruthy();
+    // 80×80px のサイズクラスが適用されている
+    expect(thumbnail.className).toContain('h-20');
+    expect(thumbnail.className).toContain('w-20');
+    // img 要素に object-cover が適用されている
+    const img = thumbnail.querySelector('img');
+    expect(img).toBeTruthy();
+    expect(img!.className).toContain('object-cover');
+    expect(img!.alt).toBe('獺祭 純米大吟醸 磨き三割九分の画像');
+  });
+
+  // Validates: Requirement 4.5
+  it('画像読み込みエラー時はプレースホルダーにフォールバックする', () => {
+    mockUseImageUrl.mockReturnValue({ imageUrl: null, isLoading: false, hasError: true });
+    const recordWithImage = { ...purchaseRecord, imageKey: 'user123/purchase/rec-001/label.jpg' };
+    render(<RecordCard record={recordWithImage} {...defaultDeleteProps} />);
+    expect(screen.getByTestId('image-placeholder')).toBeTruthy();
+    expect(screen.queryByTestId('record-thumbnail')).toBeNull();
+  });
+
+  // Validates: Requirement 4.6
+  it('サムネイルクリックで onImageClick コールバックが呼ばれる', () => {
+    const mockOnImageClick = vi.fn();
+    mockUseImageUrl.mockReturnValue({
+      imageUrl: 'https://example.com/presigned-url/label.jpg',
+      isLoading: false,
+      hasError: false,
+    });
+    const recordWithImage = { ...purchaseRecord, imageKey: 'user123/purchase/rec-001/label.jpg' };
+    render(
+      <RecordCard
+        record={recordWithImage}
+        {...defaultDeleteProps}
+        onImageClick={mockOnImageClick}
+      />,
+    );
+
+    // サムネイルをクリック
+    const thumbnail = screen.getByTestId('record-thumbnail');
+    fireEvent.click(thumbnail);
+
+    // onImageClick が画像URL と銘柄名で呼ばれる
+    expect(mockOnImageClick).toHaveBeenCalledWith(
+      'https://example.com/presigned-url/label.jpg',
+      '獺祭 純米大吟醸 磨き三割九分',
+    );
   });
 });

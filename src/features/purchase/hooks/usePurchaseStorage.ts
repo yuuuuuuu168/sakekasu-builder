@@ -5,15 +5,19 @@ import type { PurchaseFormData, SaveResult } from '@/features/purchase/types';
 
 const client = generateClient();
 
+export interface SavePurchaseOptions {
+  imageKey?: string | null;
+}
+
 export interface UsePurchaseStorageReturn {
-  savePurchase: (data: PurchaseFormData) => Promise<SaveResult>;
+  savePurchase: (data: PurchaseFormData, options?: SavePurchaseOptions) => Promise<SaveResult>;
   isSaving: boolean;
 }
 
 export function usePurchaseStorage(): UsePurchaseStorageReturn {
   const [isSaving, setIsSaving] = useState(false);
 
-  const savePurchase = async (data: PurchaseFormData): Promise<SaveResult> => {
+  const savePurchase = async (data: PurchaseFormData, options?: SavePurchaseOptions): Promise<SaveResult> => {
     setIsSaving(true);
     try {
       const result = await client.graphql({
@@ -26,6 +30,7 @@ export function usePurchaseStorage(): UsePurchaseStorageReturn {
             purchaseDate: data.purchaseDate,
             category: data.category,
             memo: data.memo || undefined,
+            imageKey: options?.imageKey ?? null,
           },
         },
       });
