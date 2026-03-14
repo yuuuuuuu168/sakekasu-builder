@@ -1,0 +1,21 @@
+{
+  "version": "52.0.0",
+  "files": {
+    "5dbed41797e8ad5279c4a7246daee09bf00212c92660aa5ad90ea43194f229c5": {
+      "displayName": "sakekasu-dev-api Template",
+      "source": {
+        "path": "sakekasu-dev-api.template.json",
+        "packaging": "file"
+      },
+      "destinations": {
+        "<アプリのアカウント ID>-ap-northeast-1-9a861dad": {
+          "bucketName": "cdk-hnb659fds-assets-<アプリのアカウント ID>-ap-northeast-1",
+          "objectKey": "5dbed41797e8ad5279c4a7246daee09bf00212c92660aa5ad90ea43194f229c5.json",
+          "region": "ap-northeast-1",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::<アプリのアカウント ID>:role/cdk-hnb659fds-file-publishing-role-<アプリのアカウント ID>-ap-northeast-1"
+        }
+      }
+    }
+  },
+  "dockerImages": {}
+}

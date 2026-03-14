@@ -1,0 +1,714 @@
+{
+ "Resources": {
+  "PurchaseRecordTable91EF19C4": {
+   "Type": "AWS::DynamoDB::Table",
+   "Properties": {
+    "AttributeDefinitions": [
+     {
+      "AttributeName": "id",
+      "AttributeType": "S"
+     },
+     {
+      "AttributeName": "owner",
+      "AttributeType": "S"
+     }
+    ],
+    "BillingMode": "PAY_PER_REQUEST",
+    "GlobalSecondaryIndexes": [
+     {
+      "IndexName": "owner-index",
+      "KeySchema": [
+       {
+        "AttributeName": "owner",
+        "KeyType": "HASH"
+       }
+      ],
+      "Projection": {
+       "ProjectionType": "ALL"
+      }
+     }
+    ],
+    "KeySchema": [
+     {
+      "AttributeName": "id",
+      "KeyType": "HASH"
+     }
+    ],
+    "TableName": "dev-sakekasu-purchase-records"
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/PurchaseRecordTable/Resource"
+   }
+  },
+  "DrinkingRecordTable846710AB": {
+   "Type": "AWS::DynamoDB::Table",
+   "Properties": {
+    "AttributeDefinitions": [
+     {
+      "AttributeName": "id",
+      "AttributeType": "S"
+     },
+     {
+      "AttributeName": "owner",
+      "AttributeType": "S"
+     }
+    ],
+    "BillingMode": "PAY_PER_REQUEST",
+    "GlobalSecondaryIndexes": [
+     {
+      "IndexName": "owner-index",
+      "KeySchema": [
+       {
+        "AttributeName": "owner",
+        "KeyType": "HASH"
+       }
+      ],
+      "Projection": {
+       "ProjectionType": "ALL"
+      }
+     }
+    ],
+    "KeySchema": [
+     {
+      "AttributeName": "id",
+      "KeyType": "HASH"
+     }
+    ],
+    "TableName": "dev-sakekasu-drinking-records"
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/DrinkingRecordTable/Resource"
+   }
+  },
+  "SakekasuApiED3BBF54": {
+   "Type": "AWS::AppSync::GraphQLApi",
+   "Properties": {
+    "AuthenticationType": "AMAZON_COGNITO_USER_POOLS",
+    "Name": "dev-sakekasu-api",
+    "UserPoolConfig": {
+     "AwsRegion": "ap-northeast-1",
+     "DefaultAction": "ALLOW",
+     "UserPoolId": {
+      "Fn::ImportValue": "sakekasu-dev-auth:ExportsOutputRefUserPool6BA7E5F296FD7236"
+     }
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/Resource"
+   }
+  },
+  "SakekasuApiSchemaCBE52513": {
+   "Type": "AWS::AppSync::GraphQLSchema",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Definition": "# SakeCategory 列挙型\nenum SakeCategory {\n  NIHONSHU\n  BEER\n  WINE\n  WHISKY\n  SHOCHU\n  OTHER\n}\n\n# 購入記録\ntype PurchaseRecord {\n  id: ID!\n  owner: String!\n  sakeName: String!\n  storeName: String!\n  price: Int!\n  purchaseDate: AWSDate!\n  category: SakeCategory!\n  memo: String\n  createdAt: AWSDateTime!\n  updatedAt: AWSDateTime!\n}\n\n# 飲酒記録\ntype DrinkingRecord {\n  id: ID!\n  owner: String!\n  sakeName: String!\n  placeName: String!\n  price: Int\n  drinkingDate: AWSDate!\n  category: SakeCategory!\n  drinkingMethod: String!\n  rating: Int!\n  memo: String\n  createdAt: AWSDateTime!\n  updatedAt: AWSDateTime!\n}\n\n# クエリ\ntype Query {\n  getPurchaseRecord(id: ID!): PurchaseRecord\n  listPurchaseRecords: [PurchaseRecord!]!\n  getDrinkingRecord(id: ID!): DrinkingRecord\n  listDrinkingRecords: [DrinkingRecord!]!\n}\n\n# ミューテーション\ntype Mutation {\n  createPurchaseRecord(input: CreatePurchaseRecordInput!): PurchaseRecord\n  updatePurchaseRecord(input: UpdatePurchaseRecordInput!): PurchaseRecord\n  deletePurchaseRecord(id: ID!): PurchaseRecord\n  createDrinkingRecord(input: CreateDrinkingRecordInput!): DrinkingRecord\n  updateDrinkingRecord(input: UpdateDrinkingRecordInput!): DrinkingRecord\n  deleteDrinkingRecord(id: ID!): DrinkingRecord\n}\n\n# 購入記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）\ninput CreatePurchaseRecordInput {\n  sakeName: String!\n  storeName: String!\n  price: Int!\n  purchaseDate: AWSDate!\n  category: SakeCategory!\n  memo: String\n}\n\n# 購入記録更新用 Input（id は必須、他はオプション）\ninput UpdatePurchaseRecordInput {\n  id: ID!\n  sakeName: String\n  storeName: String\n  price: Int\n  purchaseDate: AWSDate\n  category: SakeCategory\n  memo: String\n}\n\n# 飲酒記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）\ninput CreateDrinkingRecordInput {\n  sakeName: String!\n  placeName: String!\n  price: Int\n  drinkingDate: AWSDate!\n  category: SakeCategory!\n  drinkingMethod: String!\n  rating: Int!\n  memo: String\n}\n\n# 飲酒記録更新用 Input（id は必須、他はオプション）\ninput UpdateDrinkingRecordInput {\n  id: ID!\n  sakeName: String\n  placeName: String\n  price: Int\n  drinkingDate: AWSDate\n  category: SakeCategory\n  drinkingMethod: String\n  rating: Int\n  memo: String\n}\n"
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/Schema"
+   }
+  },
+  "SakekasuApiPurchaseDataSourceServiceRoleA9B000A3": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "appsync.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/PurchaseDataSource/ServiceRole/Resource"
+   }
+  },
+  "SakekasuApiPurchaseDataSourceServiceRoleDefaultPolicy0D1D6501": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "dynamodb:BatchGetItem",
+        "dynamodb:Query",
+        "dynamodb:GetItem",
+        "dynamodb:Scan",
+        "dynamodb:ConditionCheckItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:DescribeTable"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "PurchaseRecordTable91EF19C4",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "PurchaseRecordTable91EF19C4",
+             "Arn"
+            ]
+           },
+           "/index/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "dynamodb:GetRecords",
+        "dynamodb:GetShardIterator"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "PurchaseRecordTable91EF19C4",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "PurchaseRecordTable91EF19C4",
+             "Arn"
+            ]
+           },
+           "/index/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "SakekasuApiPurchaseDataSourceServiceRoleDefaultPolicy0D1D6501",
+    "Roles": [
+     {
+      "Ref": "SakekasuApiPurchaseDataSourceServiceRoleA9B000A3"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/PurchaseDataSource/ServiceRole/DefaultPolicy/Resource"
+   }
+  },
+  "SakekasuApiPurchaseDataSource7050A357": {
+   "Type": "AWS::AppSync::DataSource",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "DynamoDBConfig": {
+     "AwsRegion": "ap-northeast-1",
+     "TableName": {
+      "Ref": "PurchaseRecordTable91EF19C4"
+     }
+    },
+    "Name": "PurchaseDataSource",
+    "ServiceRoleArn": {
+     "Fn::GetAtt": [
+      "SakekasuApiPurchaseDataSourceServiceRoleA9B000A3",
+      "Arn"
+     ]
+    },
+    "Type": "AMAZON_DYNAMODB"
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/PurchaseDataSource/Resource"
+   }
+  },
+  "SakekasuApiDrinkingDataSourceServiceRole2E7E8E5C": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "appsync.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/DrinkingDataSource/ServiceRole/Resource"
+   }
+  },
+  "SakekasuApiDrinkingDataSourceServiceRoleDefaultPolicyAFE5B8BF": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "dynamodb:BatchGetItem",
+        "dynamodb:Query",
+        "dynamodb:GetItem",
+        "dynamodb:Scan",
+        "dynamodb:ConditionCheckItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:DescribeTable"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "DrinkingRecordTable846710AB",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "DrinkingRecordTable846710AB",
+             "Arn"
+            ]
+           },
+           "/index/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "dynamodb:GetRecords",
+        "dynamodb:GetShardIterator"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "DrinkingRecordTable846710AB",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "DrinkingRecordTable846710AB",
+             "Arn"
+            ]
+           },
+           "/index/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "SakekasuApiDrinkingDataSourceServiceRoleDefaultPolicyAFE5B8BF",
+    "Roles": [
+     {
+      "Ref": "SakekasuApiDrinkingDataSourceServiceRole2E7E8E5C"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/DrinkingDataSource/ServiceRole/DefaultPolicy/Resource"
+   }
+  },
+  "SakekasuApiDrinkingDataSourceC3375CAE": {
+   "Type": "AWS::AppSync::DataSource",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "DynamoDBConfig": {
+     "AwsRegion": "ap-northeast-1",
+     "TableName": {
+      "Ref": "DrinkingRecordTable846710AB"
+     }
+    },
+    "Name": "DrinkingDataSource",
+    "ServiceRoleArn": {
+     "Fn::GetAtt": [
+      "SakekasuApiDrinkingDataSourceServiceRole2E7E8E5C",
+      "Arn"
+     ]
+    },
+    "Type": "AMAZON_DYNAMODB"
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/DrinkingDataSource/Resource"
+   }
+  },
+  "SakekasuApiCreatePurchaseRecordResolverA38E7473": {
+   "Type": "AWS::AppSync::Resolver",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  const now = util.time.nowISO8601();\n  const input = ctx.args.input;\n  const item = {\n    ...input,\n    id: util.autoId(),\n    owner: ctx.identity.sub,\n    createdAt: now,\n    updatedAt: now,\n  };\n  return {\n    operation: 'PutItem',\n    key: util.dynamodb.toMapValues({ id: item.id }),\n    attributeValues: util.dynamodb.toMapValues(item),\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  return ctx.result;\n}\n",
+    "DataSourceName": "PurchaseDataSource",
+    "FieldName": "createPurchaseRecord",
+    "Kind": "UNIT",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    },
+    "TypeName": "Mutation"
+   },
+   "DependsOn": [
+    "SakekasuApiPurchaseDataSource7050A357",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/CreatePurchaseRecordResolver/Resource"
+   }
+  },
+  "SakekasuApiListPurchaseRecordsResolver0FDB7F7A": {
+   "Type": "AWS::AppSync::Resolver",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  return {\n    operation: 'Query',\n    index: 'owner-index',\n    query: {\n      expression: '#owner = :owner',\n      expressionNames: { '#owner': 'owner' },\n      expressionValues: util.dynamodb.toMapValues({ ':owner': ctx.identity.sub }),\n    },\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  return ctx.result.items;\n}\n",
+    "DataSourceName": "PurchaseDataSource",
+    "FieldName": "listPurchaseRecords",
+    "Kind": "UNIT",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    },
+    "TypeName": "Query"
+   },
+   "DependsOn": [
+    "SakekasuApiPurchaseDataSource7050A357",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/ListPurchaseRecordsResolver/Resource"
+   }
+  },
+  "SakekasuApiGetPurchaseRecordResolverCFFC44DE": {
+   "Type": "AWS::AppSync::Resolver",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  return {\n    operation: 'GetItem',\n    key: util.dynamodb.toMapValues({ id: ctx.args.id }),\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  const result = ctx.result;\n  if (!result) {\n    return null;\n  }\n  if (result.owner !== ctx.identity.sub) {\n    util.unauthorized();\n  }\n  return result;\n}\n",
+    "DataSourceName": "PurchaseDataSource",
+    "FieldName": "getPurchaseRecord",
+    "Kind": "UNIT",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    },
+    "TypeName": "Query"
+   },
+   "DependsOn": [
+    "SakekasuApiPurchaseDataSource7050A357",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/GetPurchaseRecordResolver/Resource"
+   }
+  },
+  "SakekasuApiUpdatePurchaseRecordResolver90D0A62E": {
+   "Type": "AWS::AppSync::Resolver",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  const input = ctx.args.input;\n  const now = util.time.nowISO8601();\n\n  // input から id を除いた更新フィールドを構築\n  const expParts = [];\n  const expNames = {};\n  const expValues = {};\n\n  const keys = Object.keys(input);\n  for (const key of keys) {\n    if (key !== 'id') {\n      expParts.push('#' + key + ' = :' + key);\n      expNames['#' + key] = key;\n      expValues[':' + key] = input[key];\n    }\n  }\n\n  // updatedAt を常に更新\n  expParts.push('#updatedAt = :updatedAt');\n  expNames['#updatedAt'] = 'updatedAt';\n  expValues[':updatedAt'] = now;\n\n  return {\n    operation: 'UpdateItem',\n    key: util.dynamodb.toMapValues({ id: input.id }),\n    update: {\n      expression: 'SET ' + expParts.join(', '),\n      expressionNames: expNames,\n      expressionValues: util.dynamodb.toMapValues(expValues),\n    },\n    condition: {\n      expression: '#owner = :expectedOwner',\n      expressionNames: { '#owner': 'owner' },\n      expressionValues: util.dynamodb.toMapValues({ ':expectedOwner': ctx.identity.sub }),\n    },\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {\n      util.error('Unauthorized: owner mismatch', 'Unauthorized');\n    }\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  return ctx.result;\n}\n",
+    "DataSourceName": "PurchaseDataSource",
+    "FieldName": "updatePurchaseRecord",
+    "Kind": "UNIT",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    },
+    "TypeName": "Mutation"
+   },
+   "DependsOn": [
+    "SakekasuApiPurchaseDataSource7050A357",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/UpdatePurchaseRecordResolver/Resource"
+   }
+  },
+  "SakekasuApiDeletePurchaseRecordResolver2BB52595": {
+   "Type": "AWS::AppSync::Resolver",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  return {\n    operation: 'DeleteItem',\n    key: util.dynamodb.toMapValues({ id: ctx.args.id }),\n    condition: {\n      expression: '#owner = :expectedOwner',\n      expressionNames: { '#owner': 'owner' },\n      expressionValues: util.dynamodb.toMapValues({ ':expectedOwner': ctx.identity.sub }),\n    },\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {\n      util.error('Unauthorized: owner mismatch', 'Unauthorized');\n    }\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  return ctx.result;\n}\n",
+    "DataSourceName": "PurchaseDataSource",
+    "FieldName": "deletePurchaseRecord",
+    "Kind": "UNIT",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    },
+    "TypeName": "Mutation"
+   },
+   "DependsOn": [
+    "SakekasuApiPurchaseDataSource7050A357",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/DeletePurchaseRecordResolver/Resource"
+   }
+  },
+  "SakekasuApiCreateDrinkingRecordResolver3D2979E5": {
+   "Type": "AWS::AppSync::Resolver",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  const now = util.time.nowISO8601();\n  const input = ctx.args.input;\n  const item = {\n    ...input,\n    id: util.autoId(),\n    owner: ctx.identity.sub,\n    createdAt: now,\n    updatedAt: now,\n  };\n  return {\n    operation: 'PutItem',\n    key: util.dynamodb.toMapValues({ id: item.id }),\n    attributeValues: util.dynamodb.toMapValues(item),\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  return ctx.result;\n}\n",
+    "DataSourceName": "DrinkingDataSource",
+    "FieldName": "createDrinkingRecord",
+    "Kind": "UNIT",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    },
+    "TypeName": "Mutation"
+   },
+   "DependsOn": [
+    "SakekasuApiDrinkingDataSourceC3375CAE",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/CreateDrinkingRecordResolver/Resource"
+   }
+  },
+  "SakekasuApiListDrinkingRecordsResolver5AB8A24A": {
+   "Type": "AWS::AppSync::Resolver",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  return {\n    operation: 'Query',\n    index: 'owner-index',\n    query: {\n      expression: '#owner = :owner',\n      expressionNames: { '#owner': 'owner' },\n      expressionValues: util.dynamodb.toMapValues({ ':owner': ctx.identity.sub }),\n    },\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  return ctx.result.items;\n}\n",
+    "DataSourceName": "DrinkingDataSource",
+    "FieldName": "listDrinkingRecords",
+    "Kind": "UNIT",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    },
+    "TypeName": "Query"
+   },
+   "DependsOn": [
+    "SakekasuApiDrinkingDataSourceC3375CAE",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/ListDrinkingRecordsResolver/Resource"
+   }
+  },
+  "SakekasuApiGetDrinkingRecordResolverF94C241E": {
+   "Type": "AWS::AppSync::Resolver",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  return {\n    operation: 'GetItem',\n    key: util.dynamodb.toMapValues({ id: ctx.args.id }),\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  const result = ctx.result;\n  if (!result) {\n    return null;\n  }\n  if (result.owner !== ctx.identity.sub) {\n    util.unauthorized();\n  }\n  return result;\n}\n",
+    "DataSourceName": "DrinkingDataSource",
+    "FieldName": "getDrinkingRecord",
+    "Kind": "UNIT",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    },
+    "TypeName": "Query"
+   },
+   "DependsOn": [
+    "SakekasuApiDrinkingDataSourceC3375CAE",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/GetDrinkingRecordResolver/Resource"
+   }
+  },
+  "SakekasuApiUpdateDrinkingRecordResolverDDD8C865": {
+   "Type": "AWS::AppSync::Resolver",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  const input = ctx.args.input;\n  const now = util.time.nowISO8601();\n\n  // input から id を除いた更新フィールドを構築\n  const expParts = [];\n  const expNames = {};\n  const expValues = {};\n\n  const keys = Object.keys(input);\n  for (const key of keys) {\n    if (key !== 'id') {\n      expParts.push('#' + key + ' = :' + key);\n      expNames['#' + key] = key;\n      expValues[':' + key] = input[key];\n    }\n  }\n\n  // updatedAt を常に更新\n  expParts.push('#updatedAt = :updatedAt');\n  expNames['#updatedAt'] = 'updatedAt';\n  expValues[':updatedAt'] = now;\n\n  return {\n    operation: 'UpdateItem',\n    key: util.dynamodb.toMapValues({ id: input.id }),\n    update: {\n      expression: 'SET ' + expParts.join(', '),\n      expressionNames: expNames,\n      expressionValues: util.dynamodb.toMapValues(expValues),\n    },\n    condition: {\n      expression: '#owner = :expectedOwner',\n      expressionNames: { '#owner': 'owner' },\n      expressionValues: util.dynamodb.toMapValues({ ':expectedOwner': ctx.identity.sub }),\n    },\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {\n      util.error('Unauthorized: owner mismatch', 'Unauthorized');\n    }\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  return ctx.result;\n}\n",
+    "DataSourceName": "DrinkingDataSource",
+    "FieldName": "updateDrinkingRecord",
+    "Kind": "UNIT",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    },
+    "TypeName": "Mutation"
+   },
+   "DependsOn": [
+    "SakekasuApiDrinkingDataSourceC3375CAE",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/UpdateDrinkingRecordResolver/Resource"
+   }
+  },
+  "SakekasuApiDeleteDrinkingRecordResolverEA506857": {
+   "Type": "AWS::AppSync::Resolver",
+   "Properties": {
+    "ApiId": {
+     "Fn::GetAtt": [
+      "SakekasuApiED3BBF54",
+      "ApiId"
+     ]
+    },
+    "Code": "\nexport function request(ctx) {\n  return {\n    operation: 'DeleteItem',\n    key: util.dynamodb.toMapValues({ id: ctx.args.id }),\n    condition: {\n      expression: '#owner = :expectedOwner',\n      expressionNames: { '#owner': 'owner' },\n      expressionValues: util.dynamodb.toMapValues({ ':expectedOwner': ctx.identity.sub }),\n    },\n  };\n}\n\nexport function response(ctx) {\n  if (ctx.error) {\n    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {\n      util.error('Unauthorized: owner mismatch', 'Unauthorized');\n    }\n    util.error(ctx.error.message, ctx.error.type);\n  }\n  return ctx.result;\n}\n",
+    "DataSourceName": "DrinkingDataSource",
+    "FieldName": "deleteDrinkingRecord",
+    "Kind": "UNIT",
+    "Runtime": {
+     "Name": "APPSYNC_JS",
+     "RuntimeVersion": "1.0.0"
+    },
+    "TypeName": "Mutation"
+   },
+   "DependsOn": [
+    "SakekasuApiDrinkingDataSourceC3375CAE",
+    "SakekasuApiSchemaCBE52513"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/SakekasuApi/DeleteDrinkingRecordResolver/Resource"
+   }
+  },
+  "CDKMetadata": {
+   "Type": "AWS::CDK::Metadata",
+   "Properties": {
+    "Analytics": "v2:deflate64:H4sIAAAAAAAA/1WNQQ6CMBBFz8K+jFi9gJHEjYkK7s1QaiiWttIiIU3vbigh0dX/bybzhgLd7yBLcLQpq1+pFBX40iF7ERztw9eTwk7XFfg7VpKT41PFEggaYyfFwJ96NM1bHoyYt5Fu538qWcM7JHmU5VWODks99Cz6fqjgVssP7+fx2gMR2IEv9PI95lVLwaYZlxZCPF2Nl8GZwQWidM2htZsPpUC3kCWtFSLtB+VEx6FY8gtWr0NbAgEAAA=="
+   },
+   "Metadata": {
+    "aws:cdk:path": "sakekasu-dev-api/CDKMetadata/Default"
+   }
+  }
+ },
+ "Outputs": {
+  "GraphqlApiUrl": {
+   "Description": "GraphQL API エンドポイント URL",
+   "Value": {
+    "Fn::GetAtt": [
+     "SakekasuApiED3BBF54",
+     "GraphQLUrl"
+    ]
+   }
+  },
+  "ApiRegion": {
+   "Description": "API リソースの AWS リージョン",
+   "Value": "ap-northeast-1"
+  }
+ },
+ "Parameters": {
+  "BootstrapVersion": {
+   "Type": "AWS::SSM::Parameter::Value<String>",
+   "Default": "/cdk-bootstrap/hnb659fds/version",
+   "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]"
+  }
+ },
+ "Rules": {
+  "CheckBootstrapVersion": {
+   "Assertions": [
+    {
+     "Assert": {
+      "Fn::Not": [
+       {
+        "Fn::Contains": [
+         [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5"
+         ],
+         {
+          "Ref": "BootstrapVersion"
+         }
+        ]
+       }
+      ]
+     },
+     "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI."
+    }
+   ]
+  }
+ }
+}

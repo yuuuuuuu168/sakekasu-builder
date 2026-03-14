@@ -1,0 +1,16 @@
+{
+  "app": "npx tsx bin/app.ts",
+  "watch": {
+    "include": ["**"],
+    "exclude": [
+      "README.md",
+      "node_modules",
+      "dist",
+      "__tests__",
+      "**/*.test.ts"
+    ]
+  },
+  "context": {
+    "env": "dev"
+  }
+}

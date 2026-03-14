@@ -1,0 +1,103 @@
+# SakeCategory 列挙型
+enum SakeCategory {
+  NIHONSHU
+  BEER
+  WINE
+  WHISKY
+  SHOCHU
+  OTHER
+}
+
+# 購入記録
+type PurchaseRecord {
+  id: ID!
+  owner: String!
+  sakeName: String!
+  storeName: String!
+  price: Int!
+  purchaseDate: AWSDate!
+  category: SakeCategory!
+  memo: String
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime!
+}
+
+# 飲酒記録
+type DrinkingRecord {
+  id: ID!
+  owner: String!
+  sakeName: String!
+  placeName: String!
+  price: Int
+  drinkingDate: AWSDate!
+  category: SakeCategory!
+  drinkingMethod: String!
+  rating: Int!
+  memo: String
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime!
+}
+
+# クエリ
+type Query {
+  getPurchaseRecord(id: ID!): PurchaseRecord
+  listPurchaseRecords: [PurchaseRecord!]!
+  getDrinkingRecord(id: ID!): DrinkingRecord
+  listDrinkingRecords: [DrinkingRecord!]!
+}
+
+# ミューテーション
+type Mutation {
+  createPurchaseRecord(input: CreatePurchaseRecordInput!): PurchaseRecord
+  updatePurchaseRecord(input: UpdatePurchaseRecordInput!): PurchaseRecord
+  deletePurchaseRecord(id: ID!): PurchaseRecord
+  createDrinkingRecord(input: CreateDrinkingRecordInput!): DrinkingRecord
+  updateDrinkingRecord(input: UpdateDrinkingRecordInput!): DrinkingRecord
+  deleteDrinkingRecord(id: ID!): DrinkingRecord
+}
+
+# 購入記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）
+input CreatePurchaseRecordInput {
+  sakeName: String!
+  storeName: String!
+  price: Int!
+  purchaseDate: AWSDate!
+  category: SakeCategory!
+  memo: String
+}
+
+# 購入記録更新用 Input（id は必須、他はオプション）
+input UpdatePurchaseRecordInput {
+  id: ID!
+  sakeName: String
+  storeName: String
+  price: Int
+  purchaseDate: AWSDate
+  category: SakeCategory
+  memo: String
+}
+
+# 飲酒記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）
+input CreateDrinkingRecordInput {
+  sakeName: String!
+  placeName: String!
+  price: Int
+  drinkingDate: AWSDate!
+  category: SakeCategory!
+  drinkingMethod: String!
+  rating: Int!
+  memo: String
+}
+
+# 飲酒記録更新用 Input（id は必須、他はオプション）
+input UpdateDrinkingRecordInput {
+  id: ID!
+  sakeName: String
+  placeName: String
+  price: Int
+  drinkingDate: AWSDate
+  category: SakeCategory
+  drinkingMethod: String
+  rating: Int
+  memo: String
+}

@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
-import type { Schema } from '../../../../amplify/data/resource';
+import type { Schema } from '@/types/schema';
 import type { PurchaseFormData, SaveResult } from '@/features/purchase/types';
 
-const client = generateClient<Schema>();
+// Cognito 認証ベースのクライアント（apiKey → userPool に移行）
+const client = generateClient<Schema>({
+  authMode: 'userPool',
+});
 
 export interface UsePurchaseStorageReturn {
   savePurchase: (data: PurchaseFormData) => Promise<SaveResult>;
