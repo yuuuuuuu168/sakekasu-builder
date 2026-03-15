@@ -148,7 +148,7 @@ export class ApiStack extends cdk.Stack {
     // S3 画像削除失敗の CloudWatch メトリクスフィルター
     const deleteFailMetricFilter = new logs.MetricFilter(this, 'ImageDeleteFailMetricFilter', {
       logGroup: presignedUrlFunction.logGroup,
-      filterPattern: logs.FilterPattern.literal('{"level":"ERROR","action":"deleteImage"'),
+      filterPattern: logs.FilterPattern.literal('{ $.level = "ERROR" && $.action = "deleteImage" }'),
       metricNamespace: `${props.envName}-sakekasu`,
       metricName: 'ImageDeleteFailCount',
       metricValue: '1',
