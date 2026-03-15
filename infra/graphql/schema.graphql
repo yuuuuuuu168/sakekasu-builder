@@ -26,7 +26,7 @@ type PurchaseRecord {
   category: SakeCategory!
   memo: String
   imageKey: String
-  drinkingStatus: DrinkingStatus!
+  drinkingStatus: DrinkingStatus
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
 }
