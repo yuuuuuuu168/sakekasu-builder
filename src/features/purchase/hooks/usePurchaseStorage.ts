@@ -31,6 +31,7 @@ export function usePurchaseStorage(): UsePurchaseStorageReturn {
             category: data.category,
             memo: data.memo || undefined,
             imageKey: options?.imageKey ?? null,
+            drinkingStatus: 'NOT_STARTED',
           },
         },
       });

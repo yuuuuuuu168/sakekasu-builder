@@ -1,0 +1,58 @@
+import { useState } from 'react';
+import { generateClient } from 'aws-amplify/api';
+import { updatePurchaseRecord } from '@/graphql/mutations';
+import type { DrinkingStatus } from '@/types/schema';
+import { toast } from 'sonner';
+
+const client = generateClient();
+
+interface UseUpdateDrinkingStatusReturn {
+  updateStatus: (id: string, newStatus: DrinkingStatus) => Promise<void>;
+  isUpdating: boolean;
+}
+
+export function useUpdateDrinkingStatus(
+  onOptimisticUpdate: (id: string, newStatus: DrinkingStatus) => void,
+  onRollback: (id: string, oldStatus: DrinkingStatus) => void,
+): UseUpdateDrinkingStatusReturn {
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const updateStatus = async (id: string, newStatus: DrinkingStatus) => {
+    setIsUpdating(true);
+
+    // 現在のステータスをロールバック用に推定（呼び出し元で管理）
+    onOptimisticUpdate(id, newStatus);
+
+    try {
+      await client.graphql({
+        query: updatePurchaseRecord,
+        variables: {
+          input: { id, drinkingStatus: newStatus },
+        },
+      });
+      toast.success('ステータスを更新しました');
+    } catch (error) {
+      console.error('Failed to update drinking status:', error);
+      // ロールバックは呼び出し元に委任
+      const oldStatus = getReversedStatus(newStatus);
+      onRollback(id, oldStatus);
+      toast.error('ステータスの更新に失敗しました');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  return { updateStatus, isUpdating };
+}
+
+/** ステータス遷移を戻すためのヘルパー（ロールバック時の推測用） */
+function getReversedStatus(status: DrinkingStatus): DrinkingStatus {
+  switch (status) {
+    case 'IN_PROGRESS':
+      return 'NOT_STARTED';
+    case 'FINISHED':
+      return 'IN_PROGRESS';
+    case 'NOT_STARTED':
+      return 'IN_PROGRESS';
+  }
+}

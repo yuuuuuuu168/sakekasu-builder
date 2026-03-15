@@ -8,6 +8,13 @@ enum SakeCategory {
   OTHER
 }
 
+# 飲みきりステータス
+enum DrinkingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  FINISHED
+}
+
 # 購入記録
 type PurchaseRecord {
   id: ID!
@@ -19,6 +26,7 @@ type PurchaseRecord {
   category: SakeCategory!
   memo: String
   imageKey: String
+  drinkingStatus: DrinkingStatus!
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
 }
@@ -88,6 +96,7 @@ input CreatePurchaseRecordInput {
   category: SakeCategory!
   memo: String
   imageKey: String
+  drinkingStatus: DrinkingStatus
 }
 
 # 購入記録更新用 Input（id は必須、他はオプション）
@@ -99,6 +108,7 @@ input UpdatePurchaseRecordInput {
   purchaseDate: AWSDate
   category: SakeCategory
   memo: String
+  drinkingStatus: DrinkingStatus
 }
 
 # 飲酒記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）
