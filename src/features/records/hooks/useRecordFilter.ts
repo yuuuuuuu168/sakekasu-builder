@@ -2,18 +2,20 @@ import type {
   UnifiedRecord,
   RecordTypeFilter,
   CategoryFilter,
+  DrinkingStatusFilter,
 } from '../types';
 
 /**
  * レコードをフィルタリングする純粋関数。
- * 記録種別フィルタ、カテゴリフィルタ、酒名検索をAND条件で適用する。
+ * 記録種別フィルタ、カテゴリフィルタ、飲みきりステータスフィルタ、酒名検索をAND条件で適用する。
  * 酒名検索は曖昧検索（各文字が順番に含まれるfuzzy match）。
  */
 export function filterRecords(
   records: UnifiedRecord[],
   recordType: RecordTypeFilter,
   category: CategoryFilter,
-  searchQuery: string = ''
+  searchQuery: string = '',
+  drinkingStatusFilter: DrinkingStatusFilter = 'all'
 ): UnifiedRecord[] {
   const query = searchQuery.toLowerCase().trim();
 
@@ -24,7 +26,10 @@ export function filterRecords(
       category === 'all' || record.category === category;
     const matchesSearch =
       query === '' || fuzzyMatch(record.sakeName.toLowerCase(), query);
-    return matchesType && matchesCategory && matchesSearch;
+    const matchesDrinkingStatus =
+      drinkingStatusFilter === 'all' ||
+      (record.type === 'purchase' && record.drinkingStatus === drinkingStatusFilter);
+    return matchesType && matchesCategory && matchesSearch && matchesDrinkingStatus;
   });
 }
 

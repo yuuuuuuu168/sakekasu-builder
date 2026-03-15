@@ -11,9 +11,11 @@ import {
   RECORD_TYPE_OPTIONS,
   CATEGORY_FILTER_OPTIONS,
   SORT_OPTIONS,
+  DRINKING_STATUS_OPTIONS,
   type RecordTypeFilter,
   type CategoryFilter,
   type SortOption,
+  type DrinkingStatusFilter,
 } from '../types';
 
 interface FilterControlsProps {
@@ -21,11 +23,13 @@ interface FilterControlsProps {
   category: CategoryFilter;
   searchQuery: string;
   sortOption: SortOption;
+  drinkingStatusFilter: DrinkingStatusFilter;
   hasActiveFilter: boolean;
   onRecordTypeChange: (type: RecordTypeFilter) => void;
   onCategoryChange: (category: CategoryFilter) => void;
   onSearchQueryChange: (query: string) => void;
   onSortChange: (option: SortOption) => void;
+  onDrinkingStatusChange: (status: DrinkingStatusFilter) => void;
   onReset: () => void;
 }
 
@@ -34,11 +38,13 @@ export function FilterControls({
   category,
   searchQuery,
   sortOption,
+  drinkingStatusFilter,
   hasActiveFilter,
   onRecordTypeChange,
   onCategoryChange,
   onSearchQueryChange,
   onSortChange,
+  onDrinkingStatusChange,
   onReset,
 }: FilterControlsProps) {
   const recordTypeLabel = RECORD_TYPE_OPTIONS.find(
@@ -49,6 +55,9 @@ export function FilterControls({
   )?.label;
   const sortLabel = SORT_OPTIONS.find(
     (opt) => opt.value === sortOption
+  )?.label;
+  const drinkingStatusLabel = DRINKING_STATUS_OPTIONS.find(
+    (opt) => opt.value === drinkingStatusFilter
   )?.label;
 
   return (
@@ -93,6 +102,29 @@ export function FilterControls({
             </SelectTrigger>
             <SelectContent>
               {CATEGORY_FILTER_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* 飲みきりステータス */}
+        <div className="flex flex-col gap-1.5 min-w-[120px] flex-1">
+          <label className="text-xs text-muted-foreground">飲みきり</label>
+          <Select
+            value={drinkingStatusFilter}
+            onValueChange={(val) => onDrinkingStatusChange(val as DrinkingStatusFilter)}
+          >
+            <SelectTrigger
+              className="w-full min-h-[44px] text-sm"
+              data-testid="filter-drinking-status"
+            >
+              <SelectValue placeholder="すべて">{drinkingStatusLabel}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {DRINKING_STATUS_OPTIONS.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>
                   {opt.label}
                 </SelectItem>

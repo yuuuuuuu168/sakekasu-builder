@@ -8,6 +8,9 @@
 
 import type { SakeCategory } from '@/features/purchase/types';
 
+// 飲みきりステータス
+export type DrinkingStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'FINISHED';
+
 // 各モデルの共通フィールド
 interface BaseRecord {
   id: string;
@@ -25,6 +28,7 @@ export interface PurchaseRecordType extends BaseRecord {
   category: SakeCategory;
   memo: string | null;
   imageKey: string | null;
+  drinkingStatus: DrinkingStatus;
 }
 
 // DrinkingRecord モデル型

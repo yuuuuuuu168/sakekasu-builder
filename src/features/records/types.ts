@@ -1,4 +1,5 @@
 import type { SakeCategory } from '../purchase/types';
+import type { DrinkingStatus } from '@/types/schema';
 
 // 記録種別
 export type RecordType = 'purchase' | 'drinking';
@@ -14,6 +15,7 @@ export interface UnifiedRecord {
   memo?: string;
   // 購入記録固有
   storeName?: string;
+  drinkingStatus?: DrinkingStatus;
   // 飲酒記録固有
   placeName?: string;
   drinkingMethod?: string;
@@ -26,6 +28,7 @@ export interface UnifiedRecord {
 // フィルタ型
 export type RecordTypeFilter = 'all' | 'purchase' | 'drinking';
 export type CategoryFilter = 'all' | SakeCategory;
+export type DrinkingStatusFilter = 'all' | DrinkingStatus;
 
 // ソートオプション
 export type SortOption = 'date-desc' | 'date-asc' | 'price-desc' | 'price-asc' | 'rating-desc' | 'rating-asc';
@@ -46,6 +49,21 @@ export const RECORD_TYPE_OPTIONS: { value: RecordTypeFilter; label: string }[] =
   { value: 'purchase', label: '購入記録' },
   { value: 'drinking', label: '飲酒記録' },
 ];
+
+// 飲みきりステータスフィルタのラベルマッピング
+export const DRINKING_STATUS_OPTIONS: { value: DrinkingStatusFilter; label: string }[] = [
+  { value: 'all', label: 'すべて' },
+  { value: 'NOT_STARTED', label: '未開封' },
+  { value: 'IN_PROGRESS', label: '飲み中' },
+  { value: 'FINISHED', label: '飲みきり' },
+];
+
+// 飲みきりステータスの表示ラベル
+export const DRINKING_STATUS_DISPLAY: Record<DrinkingStatus, string> = {
+  NOT_STARTED: '未開封',
+  IN_PROGRESS: '飲み中',
+  FINISHED: '飲みきり',
+};
 
 // カテゴリフィルタのラベルマッピング
 export const CATEGORY_FILTER_OPTIONS: { value: CategoryFilter; label: string }[] = [
