@@ -25,6 +25,7 @@ export function toPurchaseUnifiedRecord(
     category: record.category,
     memo: record.memo ?? undefined,
     storeName: record.storeName,
+    drinkingStatus: record.drinkingStatus ?? 'NOT_STARTED',
     imageKey: record.imageKey,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
