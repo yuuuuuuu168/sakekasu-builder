@@ -10,6 +10,7 @@ export const createPurchaseRecord = /* GraphQL */ `
       category
       memo
       imageKey
+      drinkingStatus
       createdAt
       updatedAt
     }
@@ -27,6 +28,7 @@ export const updatePurchaseRecord = /* GraphQL */ `
       purchaseDate
       category
       memo
+      drinkingStatus
       createdAt
       updatedAt
     }

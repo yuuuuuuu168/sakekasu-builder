@@ -3,6 +3,7 @@ import { AnimatePresence } from 'framer-motion';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useRecordList } from '../hooks/useRecordList';
 import { useDeleteRecord } from '../hooks/useDeleteRecord';
+import { useUpdateDrinkingStatus } from '../hooks/useUpdateDrinkingStatus';
 import { FilterControls } from './FilterControls';
 import { RecordCard } from './RecordCard';
 import { EmptyState } from './EmptyState';
@@ -10,6 +11,7 @@ import { LoadingState } from './LoadingState';
 import { ErrorState } from './ErrorState';
 import { ImageModal } from '@/features/image/components/ImageModal';
 import type { UnifiedRecord } from '../types';
+import type { DrinkingStatus } from '@/types/schema';
 
 export function RecordListPage() {
   const {
@@ -20,11 +22,13 @@ export function RecordListPage() {
     category,
     sortOption,
     searchQuery,
+    drinkingStatusFilter,
     hasActiveFilter,
     setRecordType,
     setCategory,
     setSortOption,
     setSearchQuery,
+    setDrinkingStatusFilter,
     resetFilters,
     refetch,
   } = useRecordList();
@@ -55,6 +59,24 @@ export function RecordListPage() {
     handleOptimisticRemove,
     handleRollback,
     handleSuccess,
+  );
+
+  // 飲みきりステータスの楽観的更新
+  const handleStatusOptimisticUpdate = useCallback((id: string, newStatus: DrinkingStatus) => {
+    setDisplayRecords((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, drinkingStatus: newStatus } : r))
+    );
+  }, []);
+
+  const handleStatusRollback = useCallback((id: string, oldStatus: DrinkingStatus) => {
+    setDisplayRecords((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, drinkingStatus: oldStatus } : r))
+    );
+  }, []);
+
+  const { updateStatus, isUpdating: isStatusUpdating } = useUpdateDrinkingStatus(
+    handleStatusOptimisticUpdate,
+    handleStatusRollback,
   );
 
   // ImageModal の状態管理（選択された画像の URL と銘柄名）
@@ -88,11 +110,13 @@ export function RecordListPage() {
             category={category}
             searchQuery={searchQuery}
             sortOption={sortOption}
+            drinkingStatusFilter={drinkingStatusFilter}
             hasActiveFilter={hasActiveFilter}
             onRecordTypeChange={setRecordType}
             onCategoryChange={setCategory}
             onSearchQueryChange={setSearchQuery}
             onSortChange={setSortOption}
+            onDrinkingStatusChange={setDrinkingStatusFilter}
             onReset={resetFilters}
           />
         </div>
@@ -114,6 +138,8 @@ export function RecordListPage() {
                   onDelete={deleteRecord}
                   isDeleting={isDeleting}
                   onImageClick={handleImageClick}
+                  onDrinkingStatusChange={updateStatus}
+                  isStatusUpdating={isStatusUpdating}
                 />
               ))}
             </AnimatePresence>

@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import type { RecordType, UnifiedRecord } from '../types';
-import { CATEGORY_FILTER_OPTIONS } from '../types';
+import { CATEGORY_FILTER_OPTIONS, DRINKING_STATUS_DISPLAY } from '../types';
 import { DeleteButton } from './DeleteButton';
 import { ConfirmDialog } from './ConfirmDialog';
 import { useImageUrl } from '@/features/image/hooks/useImageUrl';
+import type { DrinkingStatus } from '@/types/schema';
 
 interface RecordCardProps {
   record: UnifiedRecord;
@@ -12,6 +13,28 @@ interface RecordCardProps {
   isDeleting: boolean;
   /** サムネイルクリック時のコールバック（画像URL と銘柄名を通知） */
   onImageClick?: (imageUrl: string, sakeName: string) => void;
+  /** 飲みきりステータス変更時のコールバック */
+  onDrinkingStatusChange?: (id: string, newStatus: DrinkingStatus) => void;
+  isStatusUpdating?: boolean;
+}
+
+/** 飲みきりステータスのスタイル定義 */
+const DRINKING_STATUS_STYLES: Record<DrinkingStatus, string> = {
+  NOT_STARTED: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+  IN_PROGRESS: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+  FINISHED: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+};
+
+/** 次のステータスを取得 */
+function getNextStatus(current: DrinkingStatus): DrinkingStatus {
+  switch (current) {
+    case 'NOT_STARTED':
+      return 'IN_PROGRESS';
+    case 'IN_PROGRESS':
+      return 'FINISHED';
+    case 'FINISHED':
+      return 'NOT_STARTED';
+  }
 }
 
 /** カテゴリ値から日本語ラベルを取得 */
@@ -117,7 +140,7 @@ function RecordThumbnail({
   );
 }
 
-export function RecordCard({ record, onDelete, isDeleting, onImageClick }: RecordCardProps) {
+export function RecordCard({ record, onDelete, isDeleting, onImageClick, onDrinkingStatusChange, isStatusUpdating }: RecordCardProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const isPurchase = record.type === 'purchase';
   const priceText = formatPrice(record.price);
@@ -189,6 +212,24 @@ export function RecordCard({ record, onDelete, isDeleting, onImageClick }: Recor
             >
               {getCategoryLabel(record.category)}
             </span>
+
+            {/* 購入記録: 飲みきりステータス */}
+            {isPurchase && record.drinkingStatus && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDrinkingStatusChange && record.drinkingStatus) {
+                    onDrinkingStatusChange(record.id, getNextStatus(record.drinkingStatus));
+                  }
+                }}
+                disabled={isStatusUpdating}
+                className={`rounded-full px-2 py-0.5 text-xs font-semibold transition-colors hover:opacity-80 disabled:opacity-50 ${DRINKING_STATUS_STYLES[record.drinkingStatus]}`}
+                data-testid="drinking-status"
+                title="クリックでステータスを変更"
+              >
+                {DRINKING_STATUS_DISPLAY[record.drinkingStatus]}
+              </button>
+            )}
 
             {/* 購入記録: 店舗 */}
             {isPurchase && record.storeName && (
