@@ -26,6 +26,7 @@ type PurchaseRecord {
   category: SakeCategory!
   memo: String
   imageKey: String
+  imageKeys: [String]
   drinkingStatus: DrinkingStatus
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
@@ -44,6 +45,7 @@ type DrinkingRecord {
   rating: Int!
   memo: String
   imageKey: String
+  imageKeys: [String]
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
 }
@@ -96,6 +98,7 @@ input CreatePurchaseRecordInput {
   category: SakeCategory!
   memo: String
   imageKey: String
+  imageKeys: [String]
   drinkingStatus: DrinkingStatus
 }
 
@@ -122,6 +125,7 @@ input CreateDrinkingRecordInput {
   rating: Int!
   memo: String
   imageKey: String
+  imageKeys: [String]
 }
 
 # 飲酒記録更新用 Input（id は必須、他はオプション）

@@ -80,17 +80,18 @@ export function useDrinkingForm(): UseDrinkingFormReturn {
 
     // 画像がある場合はアップロードを先に実行
     let imageKey: string | null = null;
-    if (imageUpload.imageFile) {
+    let imageKeys: string[] = [];
+    if (imageUpload.imageFiles.length > 0) {
       const recordId = crypto.randomUUID();
-      const key = await imageUpload.uploadImage('drinking', recordId);
-      if (key === null) {
+      imageKeys = await imageUpload.uploadImages('drinking', recordId);
+      if (imageKeys.length === 0 && imageUpload.imageFiles.length > 0) {
         // アップロード失敗 → エラーは useImageUpload 側で設定済み、入力内容を保持
         return;
       }
-      imageKey = key;
+      imageKey = imageKeys[0] ?? null;
     }
 
-    const result = await saveDrinking(formData, { imageKey });
+    const result = await saveDrinking(formData, { imageKey, imageKeys });
 
     if (result.success) {
       // 飲んだ場所を保持してリセット

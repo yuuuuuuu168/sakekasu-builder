@@ -78,6 +78,7 @@ export function PurchaseForm({ onSubmitSuccess }: PurchaseFormProps) {
       <FormField label="画像（任意）">
         <ImageUploadArea
           imageFile={imageUpload.imageFile}
+          imageFiles={imageUpload.imageFiles}
           onImageChange={(file) => {
             if (file) {
               imageUpload.handleImageSelect(file);
@@ -86,6 +87,7 @@ export function PurchaseForm({ onSubmitSuccess }: PurchaseFormProps) {
               resetOcr();
             }
           }}
+          onImageRemove={imageUpload.removeImage}
           isCompressing={imageUpload.isCompressing}
           isUploading={imageUpload.isUploading}
           error={imageUpload.error}

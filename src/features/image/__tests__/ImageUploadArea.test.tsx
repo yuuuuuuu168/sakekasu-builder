@@ -67,8 +67,8 @@ describe('ImageUploadArea', () => {
     const file = new File(['img'], 'sake.jpg', { type: 'image/jpeg' });
     renderUploadArea({ imageFile: file });
 
-    expect(screen.getByTestId('image-preview')).toBeInTheDocument();
-    expect(screen.getByAltText('選択された画像のプレビュー')).toBeInTheDocument();
+    expect(screen.getByTestId('image-preview-0')).toBeInTheDocument();
+    expect(screen.getByAltText('選択された画像 1')).toBeInTheDocument();
     expect(mockCreateObjectURL).toHaveBeenCalledWith(file);
   });
 
@@ -77,8 +77,8 @@ describe('ImageUploadArea', () => {
     const file = new File(['img'], 'sake.jpg', { type: 'image/jpeg' });
     renderUploadArea({ imageFile: file });
 
-    expect(screen.getByTestId('image-delete-button')).toBeInTheDocument();
-    expect(screen.getByLabelText('画像を削除')).toBeInTheDocument();
+    expect(screen.getByTestId('image-delete-button-0')).toBeInTheDocument();
+    expect(screen.getByLabelText('画像 1 を削除')).toBeInTheDocument();
   });
 
   // 要件 1.8: 削除ボタンクリックで onImageChange(null) が呼ばれる
@@ -87,7 +87,7 @@ describe('ImageUploadArea', () => {
     const file = new File(['img'], 'sake.jpg', { type: 'image/jpeg' });
     renderUploadArea({ imageFile: file, onImageChange });
 
-    fireEvent.click(screen.getByTestId('image-delete-button'));
+    fireEvent.click(screen.getByTestId('image-delete-button-0'));
     expect(onImageChange).toHaveBeenCalledWith(null);
   });
 

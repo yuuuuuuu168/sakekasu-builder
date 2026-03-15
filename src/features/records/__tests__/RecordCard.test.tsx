@@ -23,6 +23,7 @@ const purchaseRecord: UnifiedRecord = {
   category: 'NIHONSHU',
   memo: '正月用に購入',
   storeName: '酒のやまや 仙台店',
+  imageKeys: [],
   createdAt: '2025-01-15T10:00:00.000Z',
   updatedAt: '2025-01-15T10:00:00.000Z',
 };
@@ -38,6 +39,7 @@ const drinkingRecord: UnifiedRecord = {
   placeName: 'Bar MOON 渋谷',
   drinkingMethod: 'ロック',
   rating: 4,
+  imageKeys: [],
   createdAt: '2025-02-20T19:00:00.000Z',
   updatedAt: '2025-02-20T19:00:00.000Z',
 };
@@ -52,6 +54,7 @@ const drinkingRecordNoPrice: UnifiedRecord = {
   placeName: '自宅',
   drinkingMethod: 'そのまま',
   rating: 3,
+  imageKeys: [],
   createdAt: '2025-03-10T20:00:00.000Z',
   updatedAt: '2025-03-10T20:00:00.000Z',
 };
@@ -64,6 +67,7 @@ const purchaseRecordNoPrice: UnifiedRecord = {
   date: '2025-04-01',
   category: 'SHOCHU',
   storeName: 'コンビニ',
+  imageKeys: [],
   createdAt: '2025-04-01T12:00:00.000Z',
   updatedAt: '2025-04-01T12:00:00.000Z',
 };
@@ -186,7 +190,7 @@ describe('RecordCard', () => {
   // Validates: Requirement 4.4
   it('画像読み込み中はスケルトンローダーが表示される', () => {
     mockUseImageUrl.mockReturnValue({ imageUrl: null, isLoading: true, hasError: false });
-    const recordWithImage = { ...purchaseRecord, imageKey: 'user123/purchase/rec-001/label.jpg' };
+    const recordWithImage = { ...purchaseRecord, imageKey: 'user123/purchase/rec-001/label.jpg', imageKeys: ['user123/purchase/rec-001/label.jpg'] };
     render(<RecordCard record={recordWithImage} {...defaultDeleteProps} />);
     expect(screen.getByTestId('thumbnail-skeleton')).toBeTruthy();
   });
@@ -198,7 +202,7 @@ describe('RecordCard', () => {
       isLoading: false,
       hasError: false,
     });
-    const recordWithImage = { ...purchaseRecord, imageKey: 'user123/purchase/rec-001/label.jpg' };
+    const recordWithImage = { ...purchaseRecord, imageKey: 'user123/purchase/rec-001/label.jpg', imageKeys: ['user123/purchase/rec-001/label.jpg'] };
     render(<RecordCard record={recordWithImage} {...defaultDeleteProps} />);
 
     const thumbnail = screen.getByTestId('record-thumbnail');
@@ -216,7 +220,7 @@ describe('RecordCard', () => {
   // Validates: Requirement 4.5
   it('画像読み込みエラー時はプレースホルダーにフォールバックする', () => {
     mockUseImageUrl.mockReturnValue({ imageUrl: null, isLoading: false, hasError: true });
-    const recordWithImage = { ...purchaseRecord, imageKey: 'user123/purchase/rec-001/label.jpg' };
+    const recordWithImage = { ...purchaseRecord, imageKey: 'user123/purchase/rec-001/label.jpg', imageKeys: ['user123/purchase/rec-001/label.jpg'] };
     render(<RecordCard record={recordWithImage} {...defaultDeleteProps} />);
     expect(screen.getByTestId('image-placeholder')).toBeTruthy();
     expect(screen.queryByTestId('record-thumbnail')).toBeNull();
@@ -230,7 +234,7 @@ describe('RecordCard', () => {
       isLoading: false,
       hasError: false,
     });
-    const recordWithImage = { ...purchaseRecord, imageKey: 'user123/purchase/rec-001/label.jpg' };
+    const recordWithImage = { ...purchaseRecord, imageKey: 'user123/purchase/rec-001/label.jpg', imageKeys: ['user123/purchase/rec-001/label.jpg'] };
     render(
       <RecordCard
         record={recordWithImage}
@@ -243,10 +247,11 @@ describe('RecordCard', () => {
     const thumbnail = screen.getByTestId('record-thumbnail');
     fireEvent.click(thumbnail);
 
-    // onImageClick が画像URL と銘柄名で呼ばれる
+    // onImageClick が imageKeys, 銘柄名, インデックスで呼ばれる
     expect(mockOnImageClick).toHaveBeenCalledWith(
-      'https://example.com/presigned-url/label.jpg',
+      ['user123/purchase/rec-001/label.jpg'],
       '獺祭 純米大吟醸 磨き三割九分',
+      0,
     );
   });
 });

@@ -7,6 +7,7 @@ const client = generateClient();
 
 export interface SavePurchaseOptions {
   imageKey?: string | null;
+  imageKeys?: string[];
 }
 
 export interface UsePurchaseStorageReturn {
@@ -31,6 +32,7 @@ export function usePurchaseStorage(): UsePurchaseStorageReturn {
             category: data.category,
             memo: data.memo || undefined,
             imageKey: options?.imageKey ?? null,
+            imageKeys: options?.imageKeys?.length ? options.imageKeys : undefined,
             drinkingStatus: 'NOT_STARTED',
           },
         },

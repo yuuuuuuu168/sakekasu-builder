@@ -449,12 +449,13 @@ export function response(ctx) {
 export function request(ctx) {
   const deletedRecord = ctx.stash.deletedRecord;
   const imageKey = deletedRecord && deletedRecord.imageKey ? deletedRecord.imageKey : null;
+  const imageKeys = deletedRecord && deletedRecord.imageKeys ? deletedRecord.imageKeys : null;
 
-  if (!imageKey) {
+  if (!imageKey && (!imageKeys || imageKeys.length === 0)) {
     return { operation: 'Invoke', payload: { info: { fieldName: 'deleteImage' }, arguments: {}, identity: ctx.identity } };
   }
 
-  return { operation: 'Invoke', payload: { info: { fieldName: 'deleteImage' }, arguments: { imageKey: imageKey }, identity: ctx.identity } };
+  return { operation: 'Invoke', payload: { info: { fieldName: 'deleteImage' }, arguments: { imageKey: imageKey, imageKeys: imageKeys }, identity: ctx.identity } };
 }
 
 export function response(ctx) {
