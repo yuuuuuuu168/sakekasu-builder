@@ -6,6 +6,7 @@ import { useImageUpload } from '@/features/image/hooks/useImageUpload';
 import type { UseFormValidationReturn } from '@/features/purchase/hooks/useFormValidation';
 import type { UsePurchaseStorageReturn } from '@/features/purchase/hooks/usePurchaseStorage';
 import type { UseImageUploadReturn } from '@/features/image/hooks/useImageUpload';
+import { getTodayString } from '@/lib/dateUtils';
 
 export interface UsePurchaseFormReturn {
   formData: PurchaseFormData;
@@ -17,14 +18,6 @@ export interface UsePurchaseFormReturn {
   handleSubmit: () => Promise<void>;
   /** 画像アップロード関連 */
   imageUpload: UseImageUploadReturn;
-}
-
-function getTodayString(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 export function getInitialFormData(): PurchaseFormData {

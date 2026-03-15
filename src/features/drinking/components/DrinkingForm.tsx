@@ -1,9 +1,8 @@
 import { useEffect } from 'react';
 import { format, parse } from 'date-fns';
-import { ja } from 'date-fns/locale/ja';
-import { CalendarIcon, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -15,25 +14,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
+
+import { FormField } from '@/components/form/FormField';
+import { DatePickerField } from '@/components/form/DatePickerField';
+import { CategorySelect } from '@/components/form/CategorySelect';
 
 import { useDrinkingForm } from '../hooks/useDrinkingForm';
 import { StarRating } from './StarRating';
 import { ImageUploadArea } from '@/features/image/components/ImageUploadArea';
-import { useOcrAnalysis } from '@/features/image/hooks/useOcrAnalysis';
-import { SAKE_CATEGORIES } from '@/features/purchase/types';
-import type { SakeCategory } from '@/features/purchase/types';
+import { useOcrTrigger } from '@/features/image/hooks/useOcrTrigger';
 import { getDrinkingMethodsByCategory, categoryRequiresDrinkingMethod } from '../types';
-
-const CATEGORY_DISPLAY_NAMES: Record<SakeCategory, string> = {
-  NIHONSHU: '日本酒',
-  BEER: 'ビール',
-  WINE: 'ワイン',
-  WHISKY: 'ウイスキー',
-  SHOCHU: '焼酎',
-  OTHER: 'その他',
-};
+import type { SakeCategory } from '@/features/purchase/types';
 
 const MotionButton = motion.create(Button);
 
@@ -54,24 +45,13 @@ export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
     imageUpload,
   } = useDrinkingForm();
 
-  const { analyzeImage, isAnalyzing, ocrResult, ocrError, resetOcr } = useOcrAnalysis();
+  const { handleOcrTrigger, isAnalyzing, ocrMessage, resetOcr } = useOcrTrigger(
+    imageUpload,
+    'drinking',
+    (sakeName) => handleChange('sakeName', sakeName),
+  );
 
   const isSubmitting = isSaving || imageUpload.isUploading || isAnalyzing;
-
-  const handleOcrTrigger = async () => {
-    const key = imageUpload.imageKey ?? await imageUpload.preUploadImage('drinking');
-    if (!key) return;
-    const result = await analyzeImage(key);
-    if (result?.sakeName) {
-      handleChange('sakeName', result.sakeName);
-    }
-  };
-
-  const ocrMessage = ocrError
-    ? { text: ocrError, variant: 'error' as const }
-    : ocrResult?.sakeName
-      ? { text: `銘柄名を読み取りました: ${ocrResult.sakeName}`, variant: 'success' as const }
-      : null;
 
   useEffect(() => {
     if (successMessage) {
@@ -183,35 +163,19 @@ export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
             value={selectedDate}
             onSelect={handleDateSelect}
             onBlur={() => handleBlur('drinkingDate')}
+            testId="input-drinkingDate"
           />
         </FormField>
 
         {/* カテゴリ */}
         <FormField label="カテゴリ" error={errors.category} required>
-          <Select
+          <CategorySelect
             value={formData.category}
-            onValueChange={(val) => { if (val !== null) handleChange('category', val); }}
-          >
-            <SelectTrigger
-              data-testid="input-category"
-              className="w-full"
-              onBlur={() => handleBlur('category')}
-            >
-              <SelectValue placeholder="カテゴリを選択">
-                {CATEGORY_DISPLAY_NAMES[formData.category as SakeCategory]}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {SAKE_CATEGORIES.map((cat) => (
-                <SelectItem key={cat} value={cat}>
-                  {CATEGORY_DISPLAY_NAMES[cat]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            onChange={(val) => { if (val !== null) handleChange('category', val); }}
+            onBlur={() => handleBlur('category')}
+          />
         </FormField>
 
-        {/* 飲み方 */}
         {/* 飲み方（ビール・ワイン・その他は非表示） */}
         {showDrinkingMethod && (
           <FormField label="飲み方" error={errors.drinkingMethod} required>
@@ -278,83 +242,5 @@ export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
         </MotionButton>
       </form>
     </motion.div>
-  );
-}
-
-
-/* ─── Sub-components ─── */
-
-function FormField({
-  label,
-  error,
-  required,
-  children,
-}: {
-  label: string;
-  error?: string;
-  required?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <label className="text-sm font-medium text-foreground">
-        {label}
-        {required && <span className="ml-0.5 text-destructive">*</span>}
-      </label>
-      {children}
-      <AnimatePresence>
-        {error && (
-          <motion.p
-            data-testid={`error-${label}`}
-            className="text-xs text-destructive"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-          >
-            {error}
-          </motion.p>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-function DatePickerField({
-  value,
-  onSelect,
-  onBlur,
-}: {
-  value: Date | undefined;
-  onSelect: (date: Date | undefined) => void;
-  onBlur: () => void;
-}) {
-  const displayText = value
-    ? format(value, 'yyyy年MM月dd日', { locale: ja })
-    : '日付を選択';
-
-  return (
-    <Popover>
-      <PopoverTrigger
-        data-testid="input-drinkingDate"
-        className="flex h-8 w-full items-center gap-2 rounded-lg border border-input bg-transparent px-2.5 text-sm transition-colors hover:bg-muted/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
-        onBlur={onBlur}
-      >
-        <CalendarIcon className="size-4 text-muted-foreground" />
-        <span className={value ? 'text-foreground' : 'text-muted-foreground'}>
-          {displayText}
-        </span>
-      </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
-        <Calendar
-          mode="single"
-          selected={value}
-          onSelect={onSelect}
-          disabled={{ after: new Date() }}
-          locale={ja}
-          defaultMonth={value}
-        />
-      </PopoverContent>
-    </Popover>
   );
 }
