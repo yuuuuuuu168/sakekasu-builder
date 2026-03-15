@@ -20,9 +20,16 @@ interface RecordCardProps {
 
 /** 飲みきりステータスのスタイル定義 */
 const DRINKING_STATUS_STYLES: Record<DrinkingStatus, string> = {
-  NOT_STARTED: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
-  IN_PROGRESS: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
-  FINISHED: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+  NOT_STARTED: 'bg-gray-100 text-gray-700 border border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600',
+  IN_PROGRESS: 'bg-amber-50 text-amber-800 border border-amber-300 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-600',
+  FINISHED: 'bg-green-50 text-green-800 border border-green-300 dark:bg-green-900/40 dark:text-green-300 dark:border-green-600',
+};
+
+/** 飲みきりステータスのアイコン */
+const DRINKING_STATUS_ICONS: Record<DrinkingStatus, string> = {
+  NOT_STARTED: '\u{1F4E6}',  // 📦
+  IN_PROGRESS: '\u{1F376}',  // 🍶
+  FINISHED: '\u{2705}',      // ✅
 };
 
 /** 次のステータスを取得 */
@@ -203,6 +210,26 @@ export function RecordCard({ record, onDelete, isDeleting, onImageClick, onDrink
             {record.sakeName}
           </h3>
 
+          {/* 購入記録: 飲みきりステータス */}
+          {isPurchase && record.drinkingStatus && (
+            <div className="mb-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDrinkingStatusChange && record.drinkingStatus) {
+                    onDrinkingStatusChange(record.id, getNextStatus(record.drinkingStatus));
+                  }
+                }}
+                disabled={isStatusUpdating}
+                className={`rounded-lg px-3 py-1.5 text-sm font-bold shadow-sm transition-all hover:scale-105 hover:shadow-md active:scale-95 disabled:opacity-50 ${DRINKING_STATUS_STYLES[record.drinkingStatus]}`}
+                data-testid="drinking-status"
+                title="クリックでステータスを変更"
+              >
+                {DRINKING_STATUS_ICONS[record.drinkingStatus]} {DRINKING_STATUS_DISPLAY[record.drinkingStatus]}
+              </button>
+            </div>
+          )}
+
           {/* 詳細情報 */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
             {/* カテゴリ */}
@@ -212,24 +239,6 @@ export function RecordCard({ record, onDelete, isDeleting, onImageClick, onDrink
             >
               {getCategoryLabel(record.category)}
             </span>
-
-            {/* 購入記録: 飲みきりステータス */}
-            {isPurchase && record.drinkingStatus && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (onDrinkingStatusChange && record.drinkingStatus) {
-                    onDrinkingStatusChange(record.id, getNextStatus(record.drinkingStatus));
-                  }
-                }}
-                disabled={isStatusUpdating}
-                className={`rounded-full px-2 py-0.5 text-xs font-semibold transition-colors hover:opacity-80 disabled:opacity-50 ${DRINKING_STATUS_STYLES[record.drinkingStatus]}`}
-                data-testid="drinking-status"
-                title="クリックでステータスを変更"
-              >
-                {DRINKING_STATUS_DISPLAY[record.drinkingStatus]}
-              </button>
-            )}
 
             {/* 購入記録: 店舗 */}
             {isPurchase && record.storeName && (

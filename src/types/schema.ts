@@ -28,7 +28,7 @@ export interface PurchaseRecordType extends BaseRecord {
   category: SakeCategory;
   memo: string | null;
   imageKey: string | null;
-  drinkingStatus: DrinkingStatus;
+  drinkingStatus: DrinkingStatus | null;
 }
 
 // DrinkingRecord モデル型
