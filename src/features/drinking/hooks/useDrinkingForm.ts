@@ -6,6 +6,7 @@ import { useDrinkingValidation } from './useDrinkingValidation';
 import { useDrinkingStorage } from './useDrinkingStorage';
 import { useImageUpload } from '@/features/image/hooks/useImageUpload';
 import type { UseImageUploadReturn } from '@/features/image/hooks/useImageUpload';
+import { getTodayString } from '@/lib/dateUtils';
 
 export interface UseDrinkingFormReturn {
   formData: DrinkingFormData;
@@ -19,14 +20,6 @@ export interface UseDrinkingFormReturn {
   errorMessage: string | null;
   /** 画像アップロード関連 */
   imageUpload: UseImageUploadReturn;
-}
-
-function getTodayString(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 export function getInitialDrinkingFormData(placeName: string = ''): DrinkingFormData {
