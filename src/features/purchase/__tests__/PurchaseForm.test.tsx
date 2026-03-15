@@ -29,13 +29,18 @@ const mockClearImage = vi.fn();
 vi.mock('@/features/image/hooks/useImageUpload', () => ({
   useImageUpload: () => ({
     imageFile: null,
+    imageFiles: [],
     setImageFile: vi.fn(),
     isCompressing: false,
     isUploading: false,
     error: null,
     handleImageSelect: mockHandleImageSelect,
     uploadImage: mockUploadImage,
+    uploadImages: vi.fn(async () => []),
     clearImage: mockClearImage,
+    removeImage: vi.fn(),
+    preUploadImage: vi.fn(async () => null),
+    imageKey: null,
   }),
 }));
 

@@ -95,6 +95,7 @@ export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
         <FormField label="画像（任意）">
           <ImageUploadArea
             imageFile={imageUpload.imageFile}
+            imageFiles={imageUpload.imageFiles}
             onImageChange={(file) => {
               if (file) {
                 imageUpload.handleImageSelect(file);
@@ -103,6 +104,7 @@ export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
                 resetOcr();
               }
             }}
+            onImageRemove={imageUpload.removeImage}
             isCompressing={imageUpload.isCompressing}
             isUploading={imageUpload.isUploading}
             error={imageUpload.error}

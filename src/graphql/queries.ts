@@ -10,6 +10,7 @@ export const getPurchaseRecord = /* GraphQL */ `
       category
       memo
       imageKey
+      imageKeys
       drinkingStatus
       createdAt
       updatedAt
@@ -29,6 +30,7 @@ export const listPurchaseRecords = /* GraphQL */ `
       category
       memo
       imageKey
+      imageKeys
       drinkingStatus
       createdAt
       updatedAt
@@ -50,6 +52,7 @@ export const getDrinkingRecord = /* GraphQL */ `
       rating
       memo
       imageKey
+      imageKeys
       createdAt
       updatedAt
     }
@@ -70,6 +73,7 @@ export const listDrinkingRecords = /* GraphQL */ `
       rating
       memo
       imageKey
+      imageKeys
       createdAt
       updatedAt
     }

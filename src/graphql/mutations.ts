@@ -10,6 +10,7 @@ export const createPurchaseRecord = /* GraphQL */ `
       category
       memo
       imageKey
+      imageKeys
       drinkingStatus
       createdAt
       updatedAt
@@ -57,6 +58,7 @@ export const createDrinkingRecord = /* GraphQL */ `
       rating
       memo
       imageKey
+      imageKeys
       createdAt
       updatedAt
     }
