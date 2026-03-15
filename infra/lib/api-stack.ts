@@ -3,6 +3,8 @@ import * as appsync from 'aws-cdk-lib/aws-appsync';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as logs from 'aws-cdk-lib/aws-logs';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import * as path from 'node:path';
@@ -142,6 +144,28 @@ export class ApiStack extends cdk.Stack {
 
     // Lambda に S3 読み書き権限を付与
     this.imageBucket.grantReadWrite(presignedUrlFunction);
+
+    // S3 画像削除失敗の CloudWatch メトリクスフィルター
+    const deleteFailMetricFilter = new logs.MetricFilter(this, 'ImageDeleteFailMetricFilter', {
+      logGroup: presignedUrlFunction.logGroup,
+      filterPattern: logs.FilterPattern.literal('{"level":"ERROR","action":"deleteImage"'),
+      metricNamespace: `${props.envName}-sakekasu`,
+      metricName: 'ImageDeleteFailCount',
+      metricValue: '1',
+    });
+
+    // 削除失敗アラーム（1時間に5回以上で発火）
+    new cloudwatch.Alarm(this, 'ImageDeleteFailAlarm', {
+      alarmName: `${props.envName}-sakekasu-image-delete-fail`,
+      metric: deleteFailMetricFilter.metric({
+        statistic: 'Sum',
+        period: cdk.Duration.hours(1),
+      }),
+      threshold: 5,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
 
     // AppSync Lambda データソース
     const presignedUrlDataSource = this.graphqlApi.addLambdaDataSource(

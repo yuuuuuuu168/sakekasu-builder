@@ -102,7 +102,7 @@ async function getDownloadUrl(event: AppSyncEvent): Promise<string> {
 }
 
 
-async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean }> {
+async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; imageDeleteFailed?: boolean }> {
   // Pipeline リゾルバーから prev.result 経由で imageKey を受け取る
   const imageKey = event.arguments?.imageKey || event.source?.imageKey;
 
@@ -118,11 +118,17 @@ async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean }> {
     });
 
     await s3Client.send(command);
-    console.log(`Successfully deleted image: ${imageKey}`);
+    console.log(JSON.stringify({ level: 'INFO', action: 'deleteImage', imageKey, result: 'success' }));
     return { success: true };
   } catch (error) {
-    // 画像削除失敗時はエラーをログに記録するが、成功として返す（要件 8.3）
-    console.error(`Failed to delete image: ${imageKey}`, error);
-    return { success: true };
+    // 画像削除失敗時はレコード削除自体は成功扱いとするが、警告を残す
+    console.error(JSON.stringify({
+      level: 'ERROR',
+      action: 'deleteImage',
+      imageKey,
+      result: 'failed',
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return { success: true, imageDeleteFailed: true };
   }
 }
