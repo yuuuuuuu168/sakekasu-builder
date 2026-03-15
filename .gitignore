@@ -25,7 +25,6 @@ dist-ssr
 
 # Amplify
 .amplify/
-amplify_outputs.json
 
 # CDK output
 infra/cdk.out/
