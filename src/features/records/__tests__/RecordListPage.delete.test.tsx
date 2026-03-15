@@ -45,6 +45,7 @@ const purchaseRecord: UnifiedRecord = {
   category: 'NIHONSHU',
   memo: '',
   storeName: '酒のやまや',
+  imageKeys: [],
   createdAt: '2025-01-15T10:00:00.000Z',
   updatedAt: '2025-01-15T10:00:00.000Z',
 };
@@ -60,6 +61,7 @@ const drinkingRecord: UnifiedRecord = {
   placeName: 'Bar MOON',
   drinkingMethod: 'ロック',
   rating: 4,
+  imageKeys: [],
   createdAt: '2025-02-20T19:00:00.000Z',
   updatedAt: '2025-02-20T19:00:00.000Z',
 };

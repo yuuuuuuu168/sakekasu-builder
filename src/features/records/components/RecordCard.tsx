@@ -11,8 +11,8 @@ interface RecordCardProps {
   record: UnifiedRecord;
   onDelete: (id: string, type: RecordType) => void;
   isDeleting: boolean;
-  /** サムネイルクリック時のコールバック（画像URL と銘柄名を通知） */
-  onImageClick?: (imageUrl: string, sakeName: string) => void;
+  /** サムネイルクリック時のコールバック（imageKeys, 銘柄名, クリックされたインデックスを通知） */
+  onImageClick?: (imageKeys: string[], sakeName: string, index: number) => void;
   /** 飲みきりステータス変更時のコールバック */
   onDrinkingStatusChange?: (id: string, newStatus: DrinkingStatus) => void;
   isStatusUpdating?: boolean;
@@ -101,30 +101,29 @@ function ThumbnailSkeleton() {
   );
 }
 
-/** サムネイル表示コンポーネント */
+/** サムネイル表示コンポーネント（先頭画像 + 枚数バッジ） */
 function RecordThumbnail({
-  imageKey,
+  imageKeys,
   sakeName,
   onClickImage,
 }: {
-  imageKey: string | null | undefined;
+  imageKeys: string[];
   sakeName: string;
-  onClickImage: (url: string) => void;
+  onClickImage: (index: number) => void;
 }) {
-  const { imageUrl, isLoading, hasError } = useImageUrl(imageKey ?? null);
+  const firstKey = imageKeys[0] ?? null;
+  const { imageUrl, isLoading, hasError } = useImageUrl(firstKey);
   const [imgError, setImgError] = useState(false);
+  const count = imageKeys.length;
 
-  // imageKey がない場合はプレースホルダー
-  if (!imageKey) {
+  if (count === 0) {
     return <ImagePlaceholder />;
   }
 
-  // 読み込み中
   if (isLoading) {
     return <ThumbnailSkeleton />;
   }
 
-  // エラーまたは URL 取得失敗
   if (hasError || !imageUrl || imgError) {
     return <ImagePlaceholder />;
   }
@@ -132,8 +131,8 @@ function RecordThumbnail({
   return (
     <button
       type="button"
-      onClick={() => onClickImage(imageUrl)}
-      className="h-20 w-20 flex-shrink-0 cursor-pointer overflow-hidden rounded-lg transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-sake-gold/50"
+      onClick={() => onClickImage(0)}
+      className="relative h-20 w-20 flex-shrink-0 cursor-pointer overflow-hidden rounded-lg transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-sake-gold/50"
       aria-label={`${sakeName}の画像を拡大表示`}
       data-testid="record-thumbnail"
     >
@@ -143,6 +142,14 @@ function RecordThumbnail({
         className="h-full w-full object-cover"
         onError={() => setImgError(true)}
       />
+      {count > 1 && (
+        <span
+          className="absolute bottom-1 right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/60 px-1 text-[10px] font-bold text-white"
+          data-testid="image-count-badge"
+        >
+          +{count - 1}
+        </span>
+      )}
     </button>
   );
 }
@@ -152,8 +159,8 @@ export function RecordCard({ record, onDelete, isDeleting, onImageClick, onDrink
   const isPurchase = record.type === 'purchase';
   const priceText = formatPrice(record.price);
 
-  const handleThumbnailClick = (url: string) => {
-    onImageClick?.(url, record.sakeName);
+  const handleThumbnailClick = (index: number) => {
+    onImageClick?.(record.imageKeys, record.sakeName, index);
   };
 
   return (
@@ -168,7 +175,7 @@ export function RecordCard({ record, onDelete, isDeleting, onImageClick, onDrink
       <div className="flex gap-3">
         {/* サムネイル */}
         <RecordThumbnail
-          imageKey={record.imageKey}
+          imageKeys={record.imageKeys}
           sakeName={record.sakeName}
           onClickImage={handleThumbnailClick}
         />

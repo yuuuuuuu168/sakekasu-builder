@@ -8,6 +8,7 @@ const client = generateClient();
 
 export interface SaveDrinkingOptions {
   imageKey?: string | null;
+  imageKeys?: string[];
 }
 
 export interface UseDrinkingStorageReturn {
@@ -34,6 +35,7 @@ export function useDrinkingStorage(): UseDrinkingStorageReturn {
             rating: data.rating,
             memo: data.memo || undefined,
             imageKey: options?.imageKey ?? null,
+            imageKeys: options?.imageKeys?.length ? options.imageKeys : undefined,
           },
         },
       });

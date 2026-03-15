@@ -21,6 +21,7 @@ export interface UnifiedRecord {
   drinkingMethod?: string;
   rating?: number; // 1〜5
   imageKey?: string | null;
+  imageKeys: string[];
   createdAt: string;
   updatedAt: string;
 }

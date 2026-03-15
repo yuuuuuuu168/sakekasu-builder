@@ -20,12 +20,14 @@ interface AppSyncEvent {
     fileName?: string;
     key?: string;
     imageKey?: string;
+    imageKeys?: string[];
   };
   identity: {
     sub: string;
   };
   source?: {
     imageKey?: string | null;
+    imageKeys?: string[] | null;
   };
 }
 
@@ -103,32 +105,45 @@ async function getDownloadUrl(event: AppSyncEvent): Promise<string> {
 
 
 async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; imageDeleteFailed?: boolean }> {
-  // Pipeline リゾルバーから prev.result 経由で imageKey を受け取る
+  // Pipeline リゾルバーから imageKey(単一) と imageKeys(複数) の両方を処理
   const imageKey = event.arguments?.imageKey || event.source?.imageKey;
+  const imageKeys = event.arguments?.imageKeys || event.source?.imageKeys;
 
-  if (!imageKey) {
-    // imageKey がない場合はスキップ（正常系）
+  // 削除対象のキーを統合
+  const keysToDelete: string[] = [];
+  if (imageKeys && imageKeys.length > 0) {
+    keysToDelete.push(...imageKeys);
+  } else if (imageKey) {
+    keysToDelete.push(imageKey);
+  }
+
+  if (keysToDelete.length === 0) {
     return { success: true };
   }
 
-  try {
-    const command = new DeleteObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: imageKey,
-    });
+  let hasFailure = false;
 
-    await s3Client.send(command);
-    console.log(JSON.stringify({ level: 'INFO', action: 'deleteImage', imageKey, result: 'success' }));
-    return { success: true };
-  } catch (error) {
-    // 画像削除失敗時はレコード削除自体は成功扱いとするが、警告を残す
-    console.error(JSON.stringify({
-      level: 'ERROR',
-      action: 'deleteImage',
-      imageKey,
-      result: 'failed',
-      error: error instanceof Error ? error.message : String(error),
-    }));
-    return { success: true, imageDeleteFailed: true };
-  }
+  await Promise.all(
+    keysToDelete.map(async (key) => {
+      try {
+        const command = new DeleteObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+        });
+        await s3Client.send(command);
+        console.log(JSON.stringify({ level: 'INFO', action: 'deleteImage', imageKey: key, result: 'success' }));
+      } catch (error) {
+        hasFailure = true;
+        console.error(JSON.stringify({
+          level: 'ERROR',
+          action: 'deleteImage',
+          imageKey: key,
+          result: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    })
+  );
+
+  return { success: true, imageDeleteFailed: hasFailure };
 }
