@@ -115,7 +115,7 @@ describe('ImageUploadArea OCR 機能', () => {
       isOcrAnalyzing: false,
     });
 
-    expect(screen.getByTestId('image-delete-button')).toBeInTheDocument();
+    expect(screen.getByTestId('image-delete-button-0')).toBeInTheDocument();
   });
 
   // Requirements 4.3: 成功メッセージの表示

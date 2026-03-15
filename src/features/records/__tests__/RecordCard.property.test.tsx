@@ -29,6 +29,7 @@ const arbPurchaseRecord: fc.Arbitrary<UnifiedRecord> = fc.record({
   placeName: fc.constant(undefined),
   drinkingMethod: fc.constant(undefined),
   rating: fc.constant(undefined),
+  imageKeys: fc.constant([] as string[]),
   createdAt: fc.constant(new Date().toISOString()),
   updatedAt: fc.constant(new Date().toISOString()),
 });
@@ -46,6 +47,7 @@ const arbDrinkingRecord: fc.Arbitrary<UnifiedRecord> = fc.record({
   placeName: fc.string({ minLength: 1, maxLength: 50 }),
   drinkingMethod: fc.string({ minLength: 1, maxLength: 20 }),
   rating: fc.integer({ min: 1, max: 5 }),
+  imageKeys: fc.constant([] as string[]),
   createdAt: fc.constant(new Date().toISOString()),
   updatedAt: fc.constant(new Date().toISOString()),
 });

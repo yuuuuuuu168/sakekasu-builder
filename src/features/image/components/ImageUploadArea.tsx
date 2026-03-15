@@ -8,10 +8,14 @@ export interface CompressionInfo {
 }
 
 export interface ImageUploadAreaProps {
-  /** 選択された画像ファイル（圧縮済み） */
+  /** 選択された画像ファイル（後方互換: 単一） */
   imageFile: File | null;
-  /** 画像ファイル変更時のコールバック */
+  /** 選択された画像ファイル一覧 */
+  imageFiles?: File[];
+  /** 画像ファイル変更時のコールバック（後方互換: 単一追加） */
   onImageChange: (file: File | null) => void;
+  /** 特定の画像を削除 */
+  onImageRemove?: (index: number) => void;
   /** 圧縮中フラグ */
   isCompressing: boolean;
   /** アップロード中フラグ */
@@ -28,6 +32,8 @@ export interface ImageUploadAreaProps {
   onOcrTrigger?: () => void;
   /** OCR 結果メッセージ（成功/エラー） */
   ocrMessage?: { text: string; variant: 'success' | 'error' } | null;
+  /** 最大画像数 */
+  maxImages?: number;
 }
 
 function formatMB(bytes: number): string {
@@ -36,7 +42,9 @@ function formatMB(bytes: number): string {
 
 export function ImageUploadArea({
   imageFile,
+  imageFiles: imageFilesProp,
   onImageChange,
+  onImageRemove,
   isCompressing,
   isUploading = false,
   error,
@@ -45,20 +53,15 @@ export function ImageUploadArea({
   isOcrAnalyzing = false,
   onOcrTrigger,
   ocrMessage = null,
+  maxImages = 5,
 }: ImageUploadAreaProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  // プレビュー URL の管理
-  useEffect(() => {
-    if (imageFile) {
-      const url = URL.createObjectURL(imageFile);
-      setPreviewUrl(url);
-      return () => URL.revokeObjectURL(url);
-    }
-    setPreviewUrl(null);
-  }, [imageFile]);
+  // 複数画像対応: imageFiles prop があればそちらを使う、なければ imageFile から配列化
+  const imageFiles = imageFilesProp ?? (imageFile ? [imageFile] : []);
+  const hasImages = imageFiles.length > 0;
+  const canAddMore = imageFiles.length < maxImages;
 
   const handleFileSelect = useCallback(
     (file: File) => {
@@ -70,9 +73,10 @@ export function ImageUploadArea({
 
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) handleFileSelect(file);
-      // 同じファイルを再選択できるようにリセット
+      const files = Array.from(e.target.files || []);
+      for (const file of files) {
+        handleFileSelect(file);
+      }
       e.target.value = '';
     },
     [handleFileSelect],
@@ -99,15 +103,21 @@ export function ImageUploadArea({
       e.stopPropagation();
       setIsDragOver(false);
       if (disabled) return;
-      const file = e.dataTransfer.files?.[0];
-      if (file) handleFileSelect(file);
+      const files = Array.from(e.dataTransfer.files || []);
+      for (const file of files) {
+        handleFileSelect(file);
+      }
     },
     [disabled, handleFileSelect],
   );
 
-  const handleDelete = useCallback(() => {
-    onImageChange(null);
-  }, [onImageChange]);
+  const handleDelete = useCallback((index: number) => {
+    if (onImageRemove) {
+      onImageRemove(index);
+    } else {
+      onImageChange(null);
+    }
+  }, [onImageRemove, onImageChange]);
 
   const handleClick = useCallback(() => {
     if (!disabled && !isCompressing && !isUploading) {
@@ -119,46 +129,68 @@ export function ImageUploadArea({
 
   return (
     <div className="space-y-2" data-testid="image-upload-area">
-      {/* 隠しファイル入力 */}
+      {/* 隠しファイル入力（multiple 対応） */}
       <input
         ref={inputRef}
         type="file"
         accept="image/jpeg,image/png"
+        multiple
         className="hidden"
         onChange={handleInputChange}
         disabled={!isInteractive}
         data-testid="image-file-input"
       />
 
-      {/* プレビュー表示 or ドロップ領域 */}
-      {imageFile && previewUrl ? (
-        <>
-          <PreviewArea
-            previewUrl={previewUrl}
-            onDelete={handleDelete}
-            disabled={!isInteractive}
-          />
-          {/* OCR トリガーボタン */}
-          {onOcrTrigger && (
+      {/* プレビュー一覧 */}
+      {hasImages && (
+        <div className="flex flex-wrap gap-2">
+          {imageFiles.map((file, index) => (
+            <PreviewItem
+              key={`${file.name}-${file.size}-${index}`}
+              file={file}
+              index={index}
+              onDelete={() => handleDelete(index)}
+              disabled={!isInteractive}
+            />
+          ))}
+
+          {/* 追加ボタン */}
+          {canAddMore && isInteractive && (
             <button
               type="button"
-              onClick={onOcrTrigger}
-              disabled={isOcrAnalyzing}
-              className="flex items-center gap-1.5 rounded-md border border-sake-gold/40 bg-sake-gold/10 px-3 py-1.5 text-xs font-medium text-sake-gold transition-colors hover:bg-sake-gold/20 disabled:cursor-not-allowed disabled:opacity-50"
-              data-testid="ocr-trigger-button"
+              onClick={handleClick}
+              className="flex h-24 w-24 items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/30 text-muted-foreground/60 transition-colors hover:border-sake-gold/60 hover:text-sake-gold/60"
+              aria-label="画像を追加"
+              data-testid="image-add-button"
             >
-              {isOcrAnalyzing ? (
-                <>
-                  <SpinnerIcon />
-                  <span>読み取り中...</span>
-                </>
-              ) : (
-                <span>銘柄名を読み取る</span>
-              )}
+              <PlusIcon />
             </button>
           )}
-        </>
-      ) : (
+        </div>
+      )}
+
+      {/* OCR トリガーボタン（画像が1枚以上あるとき） */}
+      {hasImages && onOcrTrigger && (
+        <button
+          type="button"
+          onClick={onOcrTrigger}
+          disabled={isOcrAnalyzing}
+          className="flex items-center gap-1.5 rounded-md border border-sake-gold/40 bg-sake-gold/10 px-3 py-1.5 text-xs font-medium text-sake-gold transition-colors hover:bg-sake-gold/20 disabled:cursor-not-allowed disabled:opacity-50"
+          data-testid="ocr-trigger-button"
+        >
+          {isOcrAnalyzing ? (
+            <>
+              <SpinnerIcon />
+              <span>読み取り中...</span>
+            </>
+          ) : (
+            <span>銘柄名を読み取る</span>
+          )}
+        </button>
+      )}
+
+      {/* ドロップゾーン（画像がないとき） */}
+      {!hasImages && (
         <DropZone
           isDragOver={isDragOver}
           isInteractive={isInteractive}
@@ -172,24 +204,14 @@ export function ImageUploadArea({
       {/* 圧縮中メッセージ */}
       <AnimatePresence>
         {isCompressing && (
-          <StatusMessage
-            key="compressing"
-            icon={<SpinnerIcon />}
-            text="画像を圧縮中..."
-            variant="info"
-          />
+          <StatusMessage key="compressing" icon={<SpinnerIcon />} text="画像を圧縮中..." variant="info" />
         )}
       </AnimatePresence>
 
       {/* アップロード進捗 */}
       <AnimatePresence>
         {isUploading && (
-          <StatusMessage
-            key="uploading"
-            icon={<SpinnerIcon />}
-            text="画像をアップロード中..."
-            variant="info"
-          />
+          <StatusMessage key="uploading" icon={<SpinnerIcon />} text="画像をアップロード中..." variant="info" />
         )}
       </AnimatePresence>
 
@@ -207,14 +229,7 @@ export function ImageUploadArea({
 
       {/* エラーメッセージ */}
       <AnimatePresence>
-        {error && (
-          <StatusMessage
-            key="error"
-            icon={<ErrorIcon />}
-            text={error}
-            variant="error"
-          />
-        )}
+        {error && <StatusMessage key="error" icon={<ErrorIcon />} text={error} variant="error" />}
       </AnimatePresence>
 
       {/* OCR 結果メッセージ */}
@@ -228,6 +243,13 @@ export function ImageUploadArea({
           />
         )}
       </AnimatePresence>
+
+      {/* 画像枚数表示 */}
+      {hasImages && (
+        <p className="text-xs text-muted-foreground/70">
+          {imageFiles.length}/{maxImages}枚
+        </p>
+      )}
     </div>
   );
 }
@@ -281,32 +303,44 @@ function DropZone({
         画像を選択またはドラッグ＆ドロップ
       </p>
       <p className="text-xs text-muted-foreground/70">
-        JPEG・PNG（任意）
+        JPEG・PNG（最大5枚）
       </p>
     </div>
   );
 }
 
-function PreviewArea({
-  previewUrl,
+function PreviewItem({
+  file,
+  index,
   onDelete,
   disabled,
 }: {
-  previewUrl: string;
+  file: File;
+  index: number;
   onDelete: () => void;
   disabled: boolean;
 }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  if (!previewUrl) return null;
+
   return (
     <motion.div
       className="relative inline-block"
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.2 }}
-      data-testid="image-preview"
+      data-testid={`image-preview-${index}`}
     >
       <img
         src={previewUrl}
-        alt="選択された画像のプレビュー"
+        alt={`選択された画像 ${index + 1}`}
         className="h-24 w-24 rounded-lg border border-border object-cover"
       />
       {!disabled && (
@@ -314,8 +348,8 @@ function PreviewArea({
           type="button"
           onClick={onDelete}
           className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow-sm transition-colors hover:bg-destructive/80"
-          aria-label="画像を削除"
-          data-testid="image-delete-button"
+          aria-label={`画像 ${index + 1} を削除`}
+          data-testid={`image-delete-button-${index}`}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -386,32 +420,7 @@ function CameraIcon() {
   );
 }
 
-function SpinnerIcon() {
-  return (
-    <svg
-      className="h-3.5 w-3.5 animate-spin"
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-      />
-    </svg>
-  );
-}
-
-function CheckIcon() {
+function PlusIcon() {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -421,8 +430,26 @@ function CheckIcon() {
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="h-3.5 w-3.5"
+      className="h-6 w-6"
     >
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg className="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
       <polyline points="20 6 9 17 4 12" />
     </svg>
   );
@@ -430,16 +457,7 @@ function CheckIcon() {
 
 function ErrorIcon() {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="h-3.5 w-3.5"
-    >
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
       <circle cx="12" cy="12" r="10" />
       <line x1="12" y1="8" x2="12" y2="12" />
       <line x1="12" y1="16" x2="12.01" y2="16" />

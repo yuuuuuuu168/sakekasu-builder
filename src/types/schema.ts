@@ -28,6 +28,7 @@ export interface PurchaseRecordType extends BaseRecord {
   category: SakeCategory;
   memo: string | null;
   imageKey: string | null;
+  imageKeys: string[] | null;
   drinkingStatus: DrinkingStatus | null;
 }
 
@@ -42,6 +43,7 @@ export interface DrinkingRecordType extends BaseRecord {
   rating: number;
   memo: string | null;
   imageKey: string | null;
+  imageKeys: string[] | null;
 }
 
 // Amplify generateClient<Schema>() 互換の Schema 型

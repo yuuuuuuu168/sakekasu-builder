@@ -6,6 +6,13 @@ import type { UnifiedRecord } from '../types';
 
 const client = generateClient();
 
+/** imageKey(単一) と imageKeys(複数) を統合して配列に正規化 */
+function normalizeImageKeys(imageKey: string | null, imageKeys: string[] | null): string[] {
+  if (imageKeys && imageKeys.length > 0) return imageKeys;
+  if (imageKey) return [imageKey];
+  return [];
+}
+
 export interface UseRecordFetchReturn {
   records: UnifiedRecord[];
   isLoading: boolean;
@@ -27,6 +34,7 @@ export function toPurchaseUnifiedRecord(
     storeName: record.storeName,
     drinkingStatus: record.drinkingStatus ?? 'NOT_STARTED',
     imageKey: record.imageKey,
+    imageKeys: normalizeImageKeys(record.imageKey, record.imageKeys),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
@@ -47,6 +55,7 @@ export function toDrinkingUnifiedRecord(
     drinkingMethod: record.drinkingMethod,
     rating: record.rating,
     imageKey: record.imageKey,
+    imageKeys: normalizeImageKeys(record.imageKey, record.imageKeys),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };

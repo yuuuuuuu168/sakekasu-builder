@@ -79,11 +79,11 @@ export function RecordListPage() {
     handleStatusRollback,
   );
 
-  // ImageModal の状態管理（選択された画像の URL と銘柄名）
-  const [modalImage, setModalImage] = useState<{ url: string; sakeName: string } | null>(null);
+  // ImageModal の状態管理
+  const [modalImage, setModalImage] = useState<{ imageKeys: string[]; sakeName: string; index: number } | null>(null);
 
-  const handleImageClick = useCallback((imageUrl: string, sakeName: string) => {
-    setModalImage({ url: imageUrl, sakeName });
+  const handleImageClick = useCallback((imageKeys: string[], sakeName: string, index: number) => {
+    setModalImage({ imageKeys, sakeName, index });
   }, []);
 
   const handleModalClose = useCallback((open: boolean) => {
@@ -152,7 +152,8 @@ export function RecordListPage() {
         <ImageModal
           open={!!modalImage}
           onOpenChange={handleModalClose}
-          imageUrl={modalImage.url}
+          imageKeys={modalImage.imageKeys}
+          initialIndex={modalImage.index}
           sakeName={modalImage.sakeName}
         />
       )}

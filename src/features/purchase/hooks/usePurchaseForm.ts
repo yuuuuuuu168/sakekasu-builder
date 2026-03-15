@@ -62,17 +62,18 @@ export function usePurchaseForm(): UsePurchaseFormReturn {
 
     // 画像がある場合はアップロードを先に実行
     let imageKey: string | null = null;
-    if (imageUpload.imageFile) {
+    let imageKeys: string[] = [];
+    if (imageUpload.imageFiles.length > 0) {
       const recordId = crypto.randomUUID();
-      const key = await imageUpload.uploadImage('purchase', recordId);
-      if (key === null) {
+      imageKeys = await imageUpload.uploadImages('purchase', recordId);
+      if (imageKeys.length === 0 && imageUpload.imageFiles.length > 0) {
         // アップロード失敗 → エラーは useImageUpload 側で設定済み、入力内容を保持
         return;
       }
-      imageKey = key;
+      imageKey = imageKeys[0] ?? null;
     }
 
-    const result = await savePurchase(formData, { imageKey });
+    const result = await savePurchase(formData, { imageKey, imageKeys });
 
     if (result.success) {
       setFormData(getInitialFormData());
