@@ -72,7 +72,7 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
   const base64Image = Buffer.from(imageBytes).toString('base64');
 
   // Bedrock Claude Haiku でマルチモーダル解析
-  const modelId = process.env.BEDROCK_MODEL_ID ?? 'jp.anthropic.claude-sonnet-4-6';
+  const modelId = process.env.BEDROCK_MODEL_ID ?? 'jp.anthropic.claude-haiku-4-5-20251001-v1:0';
   const requestBody = {
     anthropic_version: 'bedrock-2023-05-31',
     max_tokens: 256,
