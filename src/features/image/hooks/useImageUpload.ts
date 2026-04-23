@@ -144,14 +144,25 @@ export function useImageUpload(): UseImageUploadReturn {
     async (recordType: string, recordId: string): Promise<string[]> => {
       if (imageFiles.length === 0) return [];
 
-      // 事前アップロード済みのキーがある場合はそれを返す
-      if (imageKeys.length > 0) return imageKeys;
+      // 全ファイル分のキーが揃っている場合はそれを返す
+      if (
+        imageKeys.length === imageFiles.length &&
+        imageKeys.every((k) => k)
+      ) {
+        return imageKeys;
+      }
 
       setIsUploading(true);
       try {
         const keys: string[] = [];
-        for (const file of imageFiles) {
-          const key = await uploadSingleFile(file, recordType, recordId);
+        for (let i = 0; i < imageFiles.length; i++) {
+          // OCR 事前アップロード等で既に key がある場合は再利用
+          const existing = imageKeys[i];
+          if (existing) {
+            keys.push(existing);
+            continue;
+          }
+          const key = await uploadSingleFile(imageFiles[i], recordType, recordId);
           if (key === null) {
             setError('画像のアップロードに失敗しました。もう一度お試しください');
             return [];
