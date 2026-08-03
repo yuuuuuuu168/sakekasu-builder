@@ -6,12 +6,13 @@ import { Toaster } from '@/components/ui/sonner';
 import { PurchaseRegistrationPage } from '@/features/purchase/components/PurchaseRegistrationPage';
 import { DrinkingRegistrationPage } from '@/features/drinking/components/DrinkingRegistrationPage';
 import { RecordListPage } from '@/features/records/components/RecordListPage';
+import { StatsPage } from '@/features/stats/components/StatsPage';
 import { AuthProvider, useAuth } from '@/features/auth/AuthContext';
 import { AuthGuard } from '@/features/auth/components/AuthGuard';
 
 Amplify.configure(outputs);
 
-type Page = 'purchase' | 'drinking' | 'records';
+type Page = 'purchase' | 'drinking' | 'records' | 'stats';
 
 /** ナビゲーションバー（認証情報 + ページ切り替え） */
 function NavigationBar({
@@ -41,36 +42,26 @@ function NavigationBar({
 
       {/* ページ切り替えタブ */}
       <div className="mx-auto flex max-w-md">
-        <button
-          onClick={() => onPageChange('purchase')}
-          className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
-            currentPage === 'purchase'
-              ? 'border-b-2 border-sake-gold text-sake-gold'
-              : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-          }`}
-        >
-          🛒 購入登録
-        </button>
-        <button
-          onClick={() => onPageChange('drinking')}
-          className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
-            currentPage === 'drinking'
-              ? 'border-b-2 border-sake-gold text-sake-gold'
-              : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-          }`}
-        >
-          🍶 飲酒登録
-        </button>
-        <button
-          onClick={() => onPageChange('records')}
-          className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
-            currentPage === 'records'
-              ? 'border-b-2 border-sake-gold text-sake-gold'
-              : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-          }`}
-        >
-          📋 記録一覧
-        </button>
+        {(
+          [
+            { page: 'purchase', label: '🛒 購入登録' },
+            { page: 'drinking', label: '🍶 飲酒登録' },
+            { page: 'records', label: '📋 記録一覧' },
+            { page: 'stats', label: '📊 統計' },
+          ] as const
+        ).map(({ page, label }) => (
+          <button
+            key={page}
+            onClick={() => onPageChange(page)}
+            className={`flex-1 whitespace-nowrap px-1 py-3 text-sm font-medium transition-colors ${
+              currentPage === page
+                ? 'border-b-2 border-sake-gold text-sake-gold'
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
     </nav>
   );
@@ -89,8 +80,10 @@ function AppContent() {
         <PurchaseRegistrationPage />
       ) : currentPage === 'drinking' ? (
         <DrinkingRegistrationPage />
-      ) : (
+      ) : currentPage === 'records' ? (
         <RecordListPage />
+      ) : (
+        <StatsPage />
       )}
 
       <Toaster />
