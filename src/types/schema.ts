@@ -31,6 +31,7 @@ export interface PurchaseRecordType extends BaseRecord {
   imageKey: string | null;
   imageKeys: string[] | null;
   drinkingStatus: DrinkingStatus | null;
+  openedAt: string | null;
 }
 
 // DrinkingRecord モデル型

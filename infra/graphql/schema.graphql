@@ -29,6 +29,7 @@ type PurchaseRecord {
   imageKey: String
   imageKeys: [String]
   drinkingStatus: DrinkingStatus
+  openedAt: AWSDateTime
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
 }
@@ -115,6 +116,7 @@ input UpdatePurchaseRecordInput {
   category: SakeCategory
   memo: String
   drinkingStatus: DrinkingStatus
+  openedAt: AWSDateTime
 }
 
 # 飲酒記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）

@@ -11,8 +11,23 @@ interface UseUpdateDrinkingStatusReturn {
   isUpdating: boolean;
 }
 
+/**
+ * ステータス遷移に応じた openedAt の更新値を返す。
+ * undefined は「変更しない」（FINISHED 遷移時は開封日時を保持する）。
+ */
+function getOpenedAtUpdate(newStatus: DrinkingStatus): string | null | undefined {
+  switch (newStatus) {
+    case 'IN_PROGRESS':
+      return new Date().toISOString();
+    case 'NOT_STARTED':
+      return null;
+    case 'FINISHED':
+      return undefined;
+  }
+}
+
 export function useUpdateDrinkingStatus(
-  onOptimisticUpdate: (id: string, newStatus: DrinkingStatus) => void,
+  onOptimisticUpdate: (id: string, newStatus: DrinkingStatus, openedAtUpdate?: string | null) => void,
   onRollback: (id: string, oldStatus: DrinkingStatus) => void,
 ): UseUpdateDrinkingStatusReturn {
   const [isUpdating, setIsUpdating] = useState(false);
@@ -20,14 +35,20 @@ export function useUpdateDrinkingStatus(
   const updateStatus = async (id: string, newStatus: DrinkingStatus) => {
     setIsUpdating(true);
 
+    const openedAtUpdate = getOpenedAtUpdate(newStatus);
+
     // 現在のステータスをロールバック用に推定（呼び出し元で管理）
-    onOptimisticUpdate(id, newStatus);
+    onOptimisticUpdate(id, newStatus, openedAtUpdate);
 
     try {
       await client.graphql({
         query: updatePurchaseRecord,
         variables: {
-          input: { id, drinkingStatus: newStatus },
+          input: {
+            id,
+            drinkingStatus: newStatus,
+            ...(openedAtUpdate !== undefined && { openedAt: openedAtUpdate }),
+          },
         },
       });
       toast.success('ステータスを更新しました');
