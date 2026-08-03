@@ -48,6 +48,17 @@ export interface DrinkingRecordType extends BaseRecord {
   imageKeys: string[] | null;
 }
 
+// ページネーション対応の一覧レスポンス型
+export interface PurchaseRecordConnection {
+  items: PurchaseRecordType[];
+  nextToken: string | null;
+}
+
+export interface DrinkingRecordConnection {
+  items: DrinkingRecordType[];
+  nextToken: string | null;
+}
+
 // Amplify generateClient<Schema>() 互換の Schema 型
 export type Schema = {
   PurchaseRecord: {
