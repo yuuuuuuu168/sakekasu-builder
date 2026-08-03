@@ -34,22 +34,24 @@ export function findPastRatings(
   const query = normalizeSakeName(input);
   if (query.length < MIN_QUERY_LENGTH) return [];
 
-  const groups = new Map<string, { sum: number; count: number; lastDate: string }>();
+  // グループ化キーは正規化した名前を使う（表記ゆれで同一銘柄が分裂しないように）。
+  // 表示用には最初に出現した生の銘柄名を保持する。
+  const groups = new Map<string, { sakeName: string; sum: number; count: number; lastDate: string }>();
   for (const record of records) {
     if (record.rating == null || record.rating <= 0) continue;
     const name = normalizeSakeName(record.sakeName);
     if (!name.includes(query) && !query.includes(name)) continue;
 
-    const group = groups.get(record.sakeName) ?? { sum: 0, count: 0, lastDate: '' };
+    const group = groups.get(name) ?? { sakeName: record.sakeName, sum: 0, count: 0, lastDate: '' };
     group.sum += record.rating;
     group.count += 1;
     if (record.drinkingDate > group.lastDate) group.lastDate = record.drinkingDate;
-    groups.set(record.sakeName, group);
+    groups.set(name, group);
   }
 
-  return [...groups.entries()]
-    .map(([sakeName, g]) => ({
-      sakeName,
+  return [...groups.values()]
+    .map((g) => ({
+      sakeName: g.sakeName,
       avgRating: g.sum / g.count,
       count: g.count,
       lastDate: g.lastDate,
