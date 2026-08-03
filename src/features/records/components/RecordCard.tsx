@@ -47,6 +47,21 @@ function getNextStatus(current: DrinkingStatus): DrinkingStatus {
   }
 }
 
+/**
+ * 開封日時から経過日数ラベルを生成（日付単位で比較）。
+ * 開封当日は「今日開封」、それ以降は「開封からN日」。
+ * openedAt が未設定・不正・未来日付の場合は null（非表示）。
+ */
+function getOpenedDaysLabel(openedAt: string | null | undefined): string | null {
+  if (!openedAt) return null;
+  const opened = new Date(openedAt);
+  if (Number.isNaN(opened.getTime())) return null;
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.floor((startOfDay(new Date()) - startOfDay(opened)) / 86_400_000);
+  if (days < 0) return null;
+  return days === 0 ? '今日開封' : `開封から${days}日`;
+}
+
 /** カテゴリ値から日本語ラベルを取得 */
 function getCategoryLabel(category: string): string {
   const option = CATEGORY_FILTER_OPTIONS.find((o) => o.value === category);
@@ -228,7 +243,7 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
 
           {/* 購入記録: 飲みきりステータス */}
           {isPurchase && record.drinkingStatus && (
-            <div className="mb-2">
+            <div className="mb-2 flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -243,6 +258,14 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
               >
                 {DRINKING_STATUS_ICONS[record.drinkingStatus]} {DRINKING_STATUS_DISPLAY[record.drinkingStatus]}
               </button>
+              {record.drinkingStatus === 'IN_PROGRESS' && getOpenedDaysLabel(record.openedAt) && (
+                <span
+                  className="text-xs font-medium text-amber-700 dark:text-amber-400"
+                  data-testid="opened-days"
+                >
+                  {getOpenedDaysLabel(record.openedAt)}
+                </span>
+              )}
             </div>
           )}
 
