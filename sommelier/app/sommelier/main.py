@@ -189,7 +189,9 @@ def _slim_record(item: dict) -> dict:
     """購入記録をモデル向けに必要フィールドだけへ絞り込む。
 
     ユーザー入力由来の文字列（sakeName / storeName / memo）は長さ上限で
-    切り詰めた上で <user_data> デリミタで囲み、データと指示の境界を明示する。
+    切り詰め、山括弧を全角に無害化した上で <user_data> デリミタで囲み、
+    データと指示の境界を明示する。無害化により値の中に </user_data> を
+    仕込んでも境界をエスケープできない。
     """
     slim = {}
     for key in _RECORD_FIELDS:
@@ -199,7 +201,8 @@ def _slim_record(item: dict) -> dict:
         value = _to_plain(value)
         if key in _USER_TEXT_FIELDS and isinstance(value, str):
             limit = MAX_MEMO_LENGTH if key == "memo" else MAX_TEXT_FIELD_LENGTH
-            value = f"<user_data>{value[:limit]}</user_data>"
+            neutralized = value[:limit].replace("<", "＜").replace(">", "＞")
+            value = f"<user_data>{neutralized}</user_data>"
         slim[key] = value
     return slim
 
