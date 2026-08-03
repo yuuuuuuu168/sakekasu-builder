@@ -24,6 +24,7 @@ export interface PurchaseRecordType extends BaseRecord {
   sakeName: string;
   storeName: string;
   price: number;
+  quantity: number | null;
   purchaseDate: string;
   category: SakeCategory;
   memo: string | null;

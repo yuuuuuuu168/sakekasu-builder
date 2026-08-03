@@ -8,6 +8,7 @@ export function unifiedToPurchaseFormData(record: UnifiedRecord): PurchaseFormDa
     sakeName: record.sakeName,
     storeName: record.storeName ?? '',
     price: record.price != null ? String(record.price) : '',
+    quantity: record.quantity != null ? String(record.quantity) : '1',
     purchaseDate: record.date,
     category: record.category,
     memo: record.memo ?? '',
