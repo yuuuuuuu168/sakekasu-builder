@@ -19,6 +19,7 @@ const formData: PurchaseFormData = {
   sakeName: '獺祭',
   storeName: 'やまや',
   price: '3300',
+  quantity: '2',
   purchaseDate: '2026-01-15',
   category: 'NIHONSHU',
   memo: 'メモ',
@@ -49,6 +50,7 @@ describe('usePurchaseStorage.updatePurchase', () => {
     expect(input.sakeName).toBe('獺祭');
     expect(input.storeName).toBe('やまや');
     expect(input.price).toBe(3300);
+    expect(input.quantity).toBe(2);
     expect(input.purchaseDate).toBe('2026-01-15');
     expect(input.category).toBe('NIHONSHU');
     expect(input.memo).toBe('メモ');

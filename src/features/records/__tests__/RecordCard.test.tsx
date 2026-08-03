@@ -134,6 +134,21 @@ describe('RecordCard', () => {
     expect(screen.queryByTestId('price')).toBeNull();
   });
 
+  it('購入記録の本数が「◯本」で表示される', () => {
+    render(<RecordCard record={{ ...purchaseRecord, quantity: 3 }} {...defaultDeleteProps} />);
+    expect(screen.getByTestId('quantity').textContent).toContain('3本');
+  });
+
+  it('本数が未設定の購入記録では本数が表示されない', () => {
+    render(<RecordCard record={purchaseRecord} {...defaultDeleteProps} />);
+    expect(screen.queryByTestId('quantity')).toBeNull();
+  });
+
+  it('飲酒記録には本数が表示されない', () => {
+    render(<RecordCard record={{ ...drinkingRecord, quantity: 5 }} {...defaultDeleteProps} />);
+    expect(screen.queryByTestId('quantity')).toBeNull();
+  });
+
   // Validates: Requirements 1.2, 1.3
   it('カテゴリラベルが正しい日本語テキストで表示される', () => {
     const categories: Array<{ category: UnifiedRecord['category']; label: string }> = [

@@ -40,6 +40,17 @@ function validatePrice(value: string): string | undefined {
   return undefined;
 }
 
+function validateQuantity(value: string): string | undefined {
+  if (!value || value.trim().length === 0) {
+    return '本数は1以上の整数で入力してください';
+  }
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 1 || !Number.isInteger(num)) {
+    return '本数は1以上の整数で入力してください';
+  }
+  return undefined;
+}
+
 function validatePurchaseDate(value: string): string | undefined {
   if (!value || value.trim().length === 0) {
     return '購入日は必須です';
@@ -65,6 +76,7 @@ const validators: Record<
   sakeName: validateSakeName,
   storeName: validateStoreName,
   price: validatePrice,
+  quantity: validateQuantity,
   purchaseDate: validatePurchaseDate,
   category: validateCategory,
   memo: () => undefined,

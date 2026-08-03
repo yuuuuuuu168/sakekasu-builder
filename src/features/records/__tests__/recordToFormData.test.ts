@@ -14,6 +14,7 @@ const basePurchase: UnifiedRecord = {
   category: 'NIHONSHU',
   memo: '美味しかった',
   storeName: '酒のやまや',
+  quantity: 3,
   drinkingStatus: 'NOT_STARTED',
   imageKeys: ['k1'],
   createdAt: '2026-01-15T00:00:00Z',
@@ -42,23 +43,27 @@ describe('unifiedToPurchaseFormData', () => {
       sakeName: '獺祭 純米大吟醸',
       storeName: '酒のやまや',
       price: '3300',
+      quantity: '3',
       purchaseDate: '2026-01-15',
       category: 'NIHONSHU',
       memo: '美味しかった',
     });
   });
 
-  it('price/memo/storeName が未設定なら空文字にフォールバックする', () => {
+  it('price/memo/storeName/quantity が未設定なら既定値にフォールバックする', () => {
     const record: UnifiedRecord = {
       ...basePurchase,
       price: null,
       memo: undefined,
       storeName: undefined,
+      quantity: undefined,
     };
     const result = unifiedToPurchaseFormData(record);
     expect(result.price).toBe('');
     expect(result.memo).toBe('');
     expect(result.storeName).toBe('');
+    // 本数は未設定でも 1 にフォールバック
+    expect(result.quantity).toBe('1');
   });
 });
 
