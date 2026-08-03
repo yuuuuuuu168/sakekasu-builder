@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { generateClient } from 'aws-amplify/api';
-import { createPurchaseRecord } from '@/graphql/mutations';
+import { createPurchaseRecord, updatePurchaseRecord } from '@/graphql/mutations';
 import type { PurchaseFormData, SaveResult } from '@/features/purchase/types';
 
 const client = generateClient();
@@ -12,6 +12,8 @@ export interface SavePurchaseOptions {
 
 export interface UsePurchaseStorageReturn {
   savePurchase: (data: PurchaseFormData, options?: SavePurchaseOptions) => Promise<SaveResult>;
+  /** 既存の購入記録を更新する（画像は対象外・既存を維持） */
+  updatePurchase: (id: string, data: PurchaseFormData) => Promise<SaveResult>;
   isSaving: boolean;
 }
 
@@ -52,5 +54,37 @@ export function usePurchaseStorage(): UsePurchaseStorageReturn {
     }
   };
 
-  return { savePurchase, isSaving };
+  const updatePurchase = async (id: string, data: PurchaseFormData): Promise<SaveResult> => {
+    setIsSaving(true);
+    try {
+      const result = await client.graphql({
+        query: updatePurchaseRecord,
+        variables: {
+          input: {
+            id,
+            sakeName: data.sakeName,
+            storeName: data.storeName,
+            price: parseInt(data.price, 10),
+            purchaseDate: data.purchaseDate,
+            category: data.category,
+            memo: data.memo || null,
+          },
+        },
+      });
+
+      if ('errors' in result && result.errors && result.errors.length > 0) {
+        console.error('PurchaseRecord update errors:', result.errors);
+        return { success: false, error: '更新に失敗しました。もう一度お試しください' };
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('PurchaseRecord update failed:', error);
+      return { success: false, error: '更新に失敗しました。もう一度お試しください' };
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return { savePurchase, updatePurchase, isSaving };
 }
