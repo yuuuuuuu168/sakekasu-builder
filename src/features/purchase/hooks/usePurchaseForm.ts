@@ -32,6 +32,7 @@ export function getInitialFormData(): PurchaseFormData {
     sakeName: '',
     storeName: '',
     price: '',
+    quantity: '1',
     purchaseDate: getTodayString(),
     category: 'NIHONSHU',
     memo: '',

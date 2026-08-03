@@ -22,6 +22,7 @@ type PurchaseRecord {
   sakeName: String!
   storeName: String!
   price: Int!
+  quantity: Int
   purchaseDate: AWSDate!
   category: SakeCategory!
   memo: String
@@ -94,6 +95,7 @@ input CreatePurchaseRecordInput {
   sakeName: String!
   storeName: String!
   price: Int!
+  quantity: Int
   purchaseDate: AWSDate!
   category: SakeCategory!
   memo: String
@@ -108,6 +110,7 @@ input UpdatePurchaseRecordInput {
   sakeName: String
   storeName: String
   price: Int
+  quantity: Int
   purchaseDate: AWSDate
   category: SakeCategory
   memo: String

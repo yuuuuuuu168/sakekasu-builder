@@ -27,6 +27,8 @@ const nonEmptyNonWhitespaceArb = fc
 
 const nonNegativeIntegerPriceArb = fc.nat({ max: 9999999 }).map(String);
 
+const positiveIntegerQuantityArb = fc.integer({ min: 1, max: 9999 }).map(String);
+
 const pastDateArb = fc.integer({ min: 0, max: 365 * 10 }).map((daysAgo) => {
   const past = new Date();
   past.setDate(past.getDate() - daysAgo);
@@ -43,6 +45,7 @@ const validFormDataArb = fc.record({
   sakeName: nonEmptyNonWhitespaceArb,
   storeName: nonEmptyNonWhitespaceArb,
   price: nonNegativeIntegerPriceArb,
+  quantity: positiveIntegerQuantityArb,
   purchaseDate: pastDateArb,
   category: categoryArb,
   memo: memoArb,
@@ -77,6 +80,7 @@ describe('Property 7: PurchaseRecordのラウンドトリップ', () => {
         expect(passedInput.sakeName).toBe(formData.sakeName);
         expect(passedInput.storeName).toBe(formData.storeName);
         expect(passedInput.price).toBe(parseInt(formData.price, 10));
+        expect(passedInput.quantity).toBe(parseInt(formData.quantity, 10));
         expect(passedInput.purchaseDate).toBe(formData.purchaseDate);
         expect(passedInput.category).toBe(formData.category);
         expect(passedInput.memo).toBe(formData.memo || undefined);
