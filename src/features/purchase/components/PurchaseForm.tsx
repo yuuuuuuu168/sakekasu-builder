@@ -13,6 +13,8 @@ import { DatePickerField } from '@/components/form/DatePickerField';
 import { CategorySelect } from '@/components/form/CategorySelect';
 
 import { usePurchaseForm } from '@/features/purchase/hooks/usePurchaseForm';
+import { usePastRatingHint } from '@/features/purchase/hooks/usePastRatingHint';
+import { PastRatingHint } from '@/features/purchase/components/PastRatingHint';
 import type { PurchaseFormData } from '@/features/purchase/types';
 import { ImageUploadArea } from '@/features/image/components/ImageUploadArea';
 import { useOcrTrigger } from '@/features/image/hooks/useOcrTrigger';
@@ -47,6 +49,9 @@ export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: Purchas
   );
 
   const isSubmitting = isSaving || imageUpload.isUploading || isAnalyzing;
+
+  // リピート判定リマインド: 銘柄名にマッチする過去の飲酒評価を表示
+  const { summaries: pastRatings } = usePastRatingHint(formData.sakeName);
 
   useEffect(() => {
     if (!submitResult) return;
@@ -121,6 +126,7 @@ export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: Purchas
           onBlur={() => handleBlur('sakeName')}
           aria-invalid={!!errors.sakeName}
         />
+        <PastRatingHint summaries={pastRatings} />
       </FormField>
 
       {/* 購入店舗 */}
