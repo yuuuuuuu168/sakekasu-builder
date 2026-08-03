@@ -4,7 +4,10 @@
 状況に合わせた「今何を飲むべきか」の相談に答える。
 """
 
+import base64
+import json
 import os
+from decimal import Decimal
 from typing import Optional
 
 import boto3
@@ -45,17 +48,54 @@ NOT_STARTED（未開封）, IN_PROGRESS（飲み中）, FINISHED（飲みきり�
 
 
 def _get_owner_sub(context) -> str:
-    """JWT sub クレームまたはローカル開発用の環境変数から owner_sub を取得。
+    """JWT の sub クレームまたはローカル開発用の環境変数から owner_sub を取得。
 
-    デプロイ時: AgentCore の JWT Inbound Auth が context.identity に sub をセットする。
+    デプロイ時: JWT Inbound Auth を通過した Authorization ヘッダーが
+    context.request_headers に入って届くため、ペイロードから sub を取り出す。
+    署名検証は AgentCore Runtime の JWT Authorizer 側で完了している前提のため、
+    ここでは再検証しない（Authorizer 未設定でのデプロイは禁止）。
     ローカル dev: LOCAL_DEV_OWNER_SUB 環境変数で任意の Cognito sub を指定可能。
     """
-    identity = getattr(context, "identity", None)
-    if identity is not None:
-        sub = getattr(identity, "sub", None)
-        if sub:
-            return sub
+    headers = getattr(context, "request_headers", None) or {}
+    auth = next((v for k, v in headers.items() if k.lower() == "authorization"), "")
+    if auth.startswith("Bearer "):
+        token = auth[len("Bearer "):]
+        try:
+            payload_b64 = token.split(".")[1]
+            payload_b64 += "=" * (-len(payload_b64) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload_b64))
+            sub = claims.get("sub")
+            if sub:
+                return sub
+        except (IndexError, ValueError) as err:
+            log.warning("JWT ペイロードの解析に失敗: %s", err)
     return os.getenv("LOCAL_DEV_OWNER_SUB", "")
+
+
+# モデルに渡す購入記録のフィールド（トークン節約と不要情報の遮断）
+_RECORD_FIELDS = (
+    "sakeName",
+    "storeName",
+    "price",
+    "quantity",
+    "purchaseDate",
+    "category",
+    "memo",
+    "drinkingStatus",
+    "openedAt",
+)
+
+
+def _to_plain(value):
+    """DynamoDB の Decimal を JSON シリアライズ可能な数値に変換する。"""
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    return value
+
+
+def _slim_record(item: dict) -> dict:
+    """購入記録をモデル向けに必要フィールドだけへ絞り込む。"""
+    return {k: _to_plain(item[k]) for k in _RECORD_FIELDS if item.get(k) is not None}
 
 
 def _build_purchase_records_tool(owner_sub: str):
@@ -82,23 +122,31 @@ def _build_purchase_records_tool(owner_sub: str):
         if not owner_sub:
             return {"error": "認証情報（owner_sub）が取得できません"}
 
+        items = []
         try:
-            response = _purchase_table.query(
-                IndexName="owner-index",
-                KeyConditionExpression="#owner = :owner",
-                ExpressionAttributeNames={"#owner": "owner"},
-                ExpressionAttributeValues={":owner": owner_sub},
-            )
+            query_kwargs = {
+                "IndexName": "owner-index",
+                "KeyConditionExpression": "#owner = :owner",
+                "ExpressionAttributeNames": {"#owner": "owner"},
+                "ExpressionAttributeValues": {":owner": owner_sub},
+            }
+            # 1MB 境界で分割されても全件取得する
+            while True:
+                response = _purchase_table.query(**query_kwargs)
+                items.extend(response.get("Items", []))
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    break
+                query_kwargs["ExclusiveStartKey"] = last_key
         except Exception as err:
             log.error("DynamoDB query failed: %s", err)
             return {"error": "購入記録の取得に失敗しました"}
 
-        items = response.get("Items", [])
         if category:
             items = [i for i in items if i.get("category") == category]
         if drinking_status:
             items = [i for i in items if i.get("drinkingStatus") == drinking_status]
-        return items
+        return [_slim_record(i) for i in items]
 
     return list_my_purchase_records
 
