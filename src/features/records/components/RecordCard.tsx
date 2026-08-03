@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import type { RecordType, UnifiedRecord } from '../types';
 import { CATEGORY_FILTER_OPTIONS, DRINKING_STATUS_DISPLAY } from '../types';
 import { DeleteButton } from './DeleteButton';
+import { EditButton } from './EditButton';
 import { ConfirmDialog } from './ConfirmDialog';
 import { useImageUrl } from '@/features/image/hooks/useImageUrl';
 import type { DrinkingStatus } from '@/types/schema';
@@ -11,6 +12,8 @@ interface RecordCardProps {
   record: UnifiedRecord;
   onDelete: (id: string, type: RecordType) => void;
   isDeleting: boolean;
+  /** 編集ボタンクリック時のコールバック（対象記録を通知） */
+  onEdit?: (record: UnifiedRecord) => void;
   /** サムネイルクリック時のコールバック（imageKeys, 銘柄名, クリックされたインデックスを通知） */
   onImageClick?: (imageKeys: string[], sakeName: string, index: number) => void;
   /** 飲みきりステータス変更時のコールバック */
@@ -154,7 +157,7 @@ function RecordThumbnail({
   );
 }
 
-export function RecordCard({ record, onDelete, isDeleting, onImageClick, onDrinkingStatusChange, isStatusUpdating }: RecordCardProps) {
+export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick, onDrinkingStatusChange, isStatusUpdating }: RecordCardProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const isPurchase = record.type === 'purchase';
   const priceText = formatPrice(record.price);
@@ -202,6 +205,12 @@ export function RecordCard({ record, onDelete, isDeleting, onImageClick, onDrink
               >
                 {record.date}
               </time>
+              {onEdit && (
+                <EditButton
+                  onClick={() => onEdit(record)}
+                  disabled={isDeleting}
+                />
+              )}
               <DeleteButton
                 onClick={() => setConfirmOpen(true)}
                 disabled={isDeleting}

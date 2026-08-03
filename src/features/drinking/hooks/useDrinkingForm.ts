@@ -8,6 +8,13 @@ import { useImageUpload } from '@/features/image/hooks/useImageUpload';
 import type { UseImageUploadReturn } from '@/features/image/hooks/useImageUpload';
 import { getTodayString } from '@/lib/dateUtils';
 
+export interface UseDrinkingFormOptions {
+  /** 編集対象の記録ID。指定時は「編集モード」となり、更新mutationを呼ぶ */
+  recordId?: string;
+  /** フォームの初期値（編集モードでのプリフィル用） */
+  initialData?: DrinkingFormData;
+}
+
 export interface UseDrinkingFormReturn {
   formData: DrinkingFormData;
   errors: DrinkingValidationErrors;
@@ -35,13 +42,18 @@ export function getInitialDrinkingFormData(placeName: string = ''): DrinkingForm
   };
 }
 
-export function useDrinkingForm(): UseDrinkingFormReturn {
-  const [formData, setFormData] = useState<DrinkingFormData>(getInitialDrinkingFormData);
+export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFormReturn {
+  const { recordId, initialData } = options ?? {};
+  const isEditMode = recordId !== undefined;
+
+  const [formData, setFormData] = useState<DrinkingFormData>(
+    () => initialData ?? getInitialDrinkingFormData(),
+  );
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const { errors, validateField, isValid, clearErrors } = useDrinkingValidation();
-  const { saveDrinking, isSaving } = useDrinkingStorage();
+  const { saveDrinking, updateDrinking, isSaving } = useDrinkingStorage();
   const imageUpload = useImageUpload();
 
   const isFormValid = Object.keys(errors).length === 0;
@@ -78,12 +90,23 @@ export function useDrinkingForm(): UseDrinkingFormReturn {
       return;
     }
 
+    // 編集モード: 画像は対象外。テキスト・メタ情報のみ更新し、フォームはリセットしない
+    if (isEditMode) {
+      const result = await updateDrinking(recordId, formData);
+      if (result.success) {
+        setSuccessMessage('更新が完了しました');
+      } else {
+        setErrorMessage(result.error || '更新に失敗しました。もう一度お試しください');
+      }
+      return;
+    }
+
     // 画像がある場合はアップロードを先に実行
     let imageKey: string | null = null;
     let imageKeys: string[] = [];
     if (imageUpload.imageFiles.length > 0) {
-      const recordId = crypto.randomUUID();
-      imageKeys = await imageUpload.uploadImages('drinking', recordId);
+      const newRecordId = crypto.randomUUID();
+      imageKeys = await imageUpload.uploadImages('drinking', newRecordId);
       if (imageKeys.length === 0 && imageUpload.imageFiles.length > 0) {
         // アップロード失敗 → エラーは useImageUpload 側で設定済み、入力内容を保持
         return;
@@ -102,7 +125,7 @@ export function useDrinkingForm(): UseDrinkingFormReturn {
     } else {
       setErrorMessage(result.error || '登録に失敗しました。もう一度お試しください');
     }
-  }, [formData, isValid, saveDrinking, clearErrors, imageUpload]);
+  }, [formData, isValid, isEditMode, recordId, saveDrinking, updateDrinking, clearErrors, imageUpload]);
 
   return {
     formData,
