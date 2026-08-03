@@ -2145,6 +2145,7 @@ dependencies = [
     { name = "bedrock-agentcore" },
     { name = "boto3" },
     { name = "botocore", extra = ["crt"] },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "strands-agents" },
 ]
 
@@ -2154,6 +2155,7 @@ requires-dist = [
     { name = "bedrock-agentcore", specifier = ">=1.0.3" },
     { name = "boto3", specifier = ">=1.35.0" },
     { name = "botocore", extras = ["crt"], specifier = ">=1.35.0" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9.0" },
     { name = "strands-agents", specifier = ">=1.13.0" },
 ]
 
