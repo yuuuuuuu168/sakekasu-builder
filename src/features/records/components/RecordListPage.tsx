@@ -62,12 +62,23 @@ export function RecordListPage() {
     handleSuccess,
   );
 
-  // 飲みきりステータスの楽観的更新
-  const handleStatusOptimisticUpdate = useCallback((id: string, newStatus: DrinkingStatus) => {
-    setDisplayRecords((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, drinkingStatus: newStatus } : r))
-    );
-  }, []);
+  // 飲みきりステータスの楽観的更新（openedAtUpdate が undefined の場合は開封日時を変更しない）
+  const handleStatusOptimisticUpdate = useCallback(
+    (id: string, newStatus: DrinkingStatus, openedAtUpdate?: string | null) => {
+      setDisplayRecords((prev) =>
+        prev.map((r) =>
+          r.id === id
+            ? {
+                ...r,
+                drinkingStatus: newStatus,
+                ...(openedAtUpdate !== undefined && { openedAt: openedAtUpdate }),
+              }
+            : r
+        )
+      );
+    },
+    []
+  );
 
   const handleStatusRollback = useCallback((id: string, oldStatus: DrinkingStatus) => {
     setDisplayRecords((prev) =>
