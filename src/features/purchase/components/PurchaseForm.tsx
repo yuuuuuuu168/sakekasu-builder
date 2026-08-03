@@ -13,6 +13,7 @@ import { DatePickerField } from '@/components/form/DatePickerField';
 import { CategorySelect } from '@/components/form/CategorySelect';
 
 import { usePurchaseForm } from '@/features/purchase/hooks/usePurchaseForm';
+import type { PurchaseFormData } from '@/features/purchase/types';
 import { ImageUploadArea } from '@/features/image/components/ImageUploadArea';
 import { useOcrTrigger } from '@/features/image/hooks/useOcrTrigger';
 
@@ -20,9 +21,14 @@ const MotionButton = motion.create(Button);
 
 interface PurchaseFormProps {
   onSubmitSuccess?: () => void;
+  /** 編集対象の記録ID。指定時は編集モード（更新）となる */
+  recordId?: string;
+  /** 編集モードでのフォーム初期値 */
+  initialData?: PurchaseFormData;
 }
 
-export function PurchaseForm({ onSubmitSuccess }: PurchaseFormProps) {
+export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: PurchaseFormProps) {
+  const isEditMode = recordId !== undefined;
   const {
     formData,
     errors,
@@ -32,7 +38,7 @@ export function PurchaseForm({ onSubmitSuccess }: PurchaseFormProps) {
     handleBlur,
     handleSubmit,
     imageUpload,
-  } = usePurchaseForm();
+  } = usePurchaseForm({ recordId, initialData });
 
   const { handleOcrTrigger, isAnalyzing, ocrMessage, resetOcr } = useOcrTrigger(
     imageUpload,
@@ -45,12 +51,17 @@ export function PurchaseForm({ onSubmitSuccess }: PurchaseFormProps) {
   useEffect(() => {
     if (!submitResult) return;
     if (submitResult.success) {
-      toast.success('登録が完了しました');
+      toast.success(isEditMode ? '更新が完了しました' : '登録が完了しました');
       onSubmitSuccess?.();
     } else {
-      toast.error(submitResult.error ?? '登録に失敗しました。もう一度お試しください');
+      toast.error(
+        submitResult.error ??
+          (isEditMode
+            ? '更新に失敗しました。もう一度お試しください'
+            : '登録に失敗しました。もう一度お試しください'),
+      );
     }
-  }, [submitResult, onSubmitSuccess]);
+  }, [submitResult, onSubmitSuccess, isEditMode]);
 
   const selectedDate = formData.purchaseDate
     ? parse(formData.purchaseDate, 'yyyy-MM-dd', new Date())
@@ -74,29 +85,31 @@ export function PurchaseForm({ onSubmitSuccess }: PurchaseFormProps) {
       transition={{ duration: 0.4, ease: 'easeOut' }}
     >
     <form onSubmit={onFormSubmit} className="space-y-5" data-testid="purchase-form">
-      {/* 画像添付 */}
-      <FormField label="画像（任意）">
-        <ImageUploadArea
-          imageFile={imageUpload.imageFile}
-          imageFiles={imageUpload.imageFiles}
-          onImageChange={(file) => {
-            if (file) {
-              imageUpload.handleImageSelect(file);
-            } else {
-              imageUpload.clearImage();
-              resetOcr();
-            }
-          }}
-          onImageRemove={imageUpload.removeImage}
-          isCompressing={imageUpload.isCompressing}
-          isUploading={imageUpload.isUploading}
-          error={imageUpload.error}
-          disabled={isSubmitting}
-          isOcrAnalyzing={isAnalyzing}
-          onOcrTrigger={handleOcrTrigger}
-          ocrMessage={ocrMessage}
-        />
-      </FormField>
+      {/* 画像添付（編集モードでは画像は変更対象外のため非表示） */}
+      {!isEditMode && (
+        <FormField label="画像（任意）">
+          <ImageUploadArea
+            imageFile={imageUpload.imageFile}
+            imageFiles={imageUpload.imageFiles}
+            onImageChange={(file) => {
+              if (file) {
+                imageUpload.handleImageSelect(file);
+              } else {
+                imageUpload.clearImage();
+                resetOcr();
+              }
+            }}
+            onImageRemove={imageUpload.removeImage}
+            isCompressing={imageUpload.isCompressing}
+            isUploading={imageUpload.isUploading}
+            error={imageUpload.error}
+            disabled={isSubmitting}
+            isOcrAnalyzing={isAnalyzing}
+            onOcrTrigger={handleOcrTrigger}
+            ocrMessage={ocrMessage}
+          />
+        </FormField>
+      )}
 
       {/* 銘柄名 */}
       <FormField label="銘柄名" error={errors.sakeName} required>
@@ -184,8 +197,10 @@ export function PurchaseForm({ onSubmitSuccess }: PurchaseFormProps) {
         {isSubmitting ? (
           <>
             <Loader2 className="size-4 animate-spin" />
-            {imageUpload.isUploading ? '画像アップロード中...' : '登録中...'}
+            {imageUpload.isUploading ? '画像アップロード中...' : isEditMode ? '更新中...' : '登録中...'}
           </>
+        ) : isEditMode ? (
+          '🍶 更新する'
         ) : (
           '🍶 登録する'
         )}
