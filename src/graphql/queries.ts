@@ -21,23 +21,26 @@ export const getPurchaseRecord = /* GraphQL */ `
 `;
 
 export const listPurchaseRecords = /* GraphQL */ `
-  query ListPurchaseRecords {
-    listPurchaseRecords {
-      id
-      owner
-      sakeName
-      storeName
-      price
-      quantity
-      purchaseDate
-      category
-      memo
-      imageKey
-      imageKeys
-      drinkingStatus
-      openedAt
-      createdAt
-      updatedAt
+  query ListPurchaseRecords($limit: Int, $nextToken: String) {
+    listPurchaseRecords(limit: $limit, nextToken: $nextToken) {
+      items {
+        id
+        owner
+        sakeName
+        storeName
+        price
+        quantity
+        purchaseDate
+        category
+        memo
+        imageKey
+        imageKeys
+        drinkingStatus
+        openedAt
+        createdAt
+        updatedAt
+      }
+      nextToken
     }
   }
 `;
@@ -64,22 +67,25 @@ export const getDrinkingRecord = /* GraphQL */ `
 `;
 
 export const listDrinkingRecords = /* GraphQL */ `
-  query ListDrinkingRecords {
-    listDrinkingRecords {
-      id
-      owner
-      sakeName
-      placeName
-      price
-      drinkingDate
-      category
-      drinkingMethod
-      rating
-      memo
-      imageKey
-      imageKeys
-      createdAt
-      updatedAt
+  query ListDrinkingRecords($limit: Int, $nextToken: String) {
+    listDrinkingRecords(limit: $limit, nextToken: $nextToken) {
+      items {
+        id
+        owner
+        sakeName
+        placeName
+        price
+        drinkingDate
+        category
+        drinkingMethod
+        rating
+        memo
+        imageKey
+        imageKeys
+        createdAt
+        updatedAt
+      }
+      nextToken
     }
   }
 `;
