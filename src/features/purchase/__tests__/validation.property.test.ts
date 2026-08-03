@@ -36,7 +36,6 @@ const emptyOrWhitespaceArb = fc.oneof(
 );
 
 const REQUIRED_FIELDS = ['sakeName', 'storeName', 'price', 'quantity', 'purchaseDate', 'category'] as const;
-type RequiredField = (typeof REQUIRED_FIELDS)[number];
 
 /**
  * Property 1: 必須フィールド空欄バリデーション
