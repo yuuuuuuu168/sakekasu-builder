@@ -24,15 +24,30 @@ from model.load import load_model
 app = BedrockAgentCoreApp()
 log = app.logger
 
-TABLE_NAME = os.getenv("PURCHASE_TABLE_NAME", "dev-sakekasu-purchase-records")
+TABLE_NAME = os.getenv("PURCHASE_TABLE_NAME", "")
 AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-1")
 COGNITO_USER_POOL_ID = os.getenv("COGNITO_USER_POOL_ID", "")
+COGNITO_APP_CLIENT_ID = os.getenv("COGNITO_APP_CLIENT_ID", "")
 IS_LOCAL_DEV = os.getenv("LOCAL_DEV") == "1"
+
+# 起動時検証（設定ミスは起動段階で落とすフェイルクローズ）
+if not TABLE_NAME:
+    raise RuntimeError("PURCHASE_TABLE_NAME が未設定です（デフォルト値はありません）")
+if IS_LOCAL_DEV and COGNITO_USER_POOL_ID:
+    raise RuntimeError(
+        "LOCAL_DEV=1 と COGNITO_USER_POOL_ID は同時に設定できません。"
+        "デプロイ環境（envVars で Pool ID 注入）への LOCAL_DEV 混入を防ぐための相互排他です"
+    )
+if not IS_LOCAL_DEV and (not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_ID):
+    raise RuntimeError(
+        "COGNITO_USER_POOL_ID / COGNITO_APP_CLIENT_ID が未設定です（LOCAL_DEV=1 以外では必須）"
+    )
 
 # 悪用時のコスト増幅・リソース枯渇を抑える上限
 MAX_PROMPT_LENGTH = 4000
 MAX_QUERY_PAGES = 10
 MAX_MEMO_LENGTH = 200
+MAX_TEXT_FIELD_LENGTH = 120
 
 _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 _purchase_table = _dynamodb.Table(TABLE_NAME)
@@ -101,8 +116,18 @@ def _verify_and_get_sub(token: str) -> str:
         log.error("JWT 検証中に予期しないエラー: %s", err)
         return ""
 
-    if claims.get("token_use") not in ("access", "id"):
-        log.warning("想定外の token_use: %s", claims.get("token_use"))
+    # audience 拘束: 同じ User Pool の別アプリクライアントのトークンを拒否する
+    token_use = claims.get("token_use")
+    if token_use == "access":
+        if claims.get("client_id") != COGNITO_APP_CLIENT_ID:
+            log.warning("client_id が一致しません")
+            return ""
+    elif token_use == "id":
+        if claims.get("aud") != COGNITO_APP_CLIENT_ID:
+            log.warning("aud が一致しません")
+            return ""
+    else:
+        log.warning("想定外の token_use: %s", token_use)
         return ""
     return claims.get("sub") or ""
 
@@ -151,11 +176,21 @@ def _to_plain(value):
 
 
 def _slim_record(item: dict) -> dict:
-    """購入記録をモデル向けに必要フィールドだけへ絞り込む。memo は長さ上限で切り詰める。"""
-    slim = {k: _to_plain(item[k]) for k in _RECORD_FIELDS if item.get(k) is not None}
-    memo = slim.get("memo")
-    if isinstance(memo, str) and len(memo) > MAX_MEMO_LENGTH:
-        slim["memo"] = memo[:MAX_MEMO_LENGTH]
+    """購入記録をモデル向けに必要フィールドだけへ絞り込む。
+
+    ユーザー入力由来の文字列（sakeName / storeName / memo 等）はすべて
+    長さ上限で切り詰め、プロンプトインジェクションの余地とトークン量を抑える。
+    """
+    slim = {}
+    for key in _RECORD_FIELDS:
+        value = item.get(key)
+        if value is None:
+            continue
+        value = _to_plain(value)
+        if isinstance(value, str):
+            limit = MAX_MEMO_LENGTH if key == "memo" else MAX_TEXT_FIELD_LENGTH
+            value = value[:limit]
+        slim[key] = value
     return slim
 
 
