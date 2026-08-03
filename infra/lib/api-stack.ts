@@ -285,14 +285,14 @@ export function response(ctx) {
 `),
     });
 
-    // list クエリ
+    // list クエリ（limit/nextToken によるページネーション対応）
     dataSource.createResolver(`List${typeName}sResolver`, {
       typeName: 'Query',
       fieldName: `list${typeName}s`,
       runtime: jsRuntime,
       code: appsync.Code.fromInline(`
 export function request(ctx) {
-  return {
+  const req = {
     operation: 'Query',
     index: 'owner-index',
     query: {
@@ -300,14 +300,19 @@ export function request(ctx) {
       expressionNames: { '#owner': 'owner' },
       expressionValues: util.dynamodb.toMapValues({ ':owner': ctx.identity.sub }),
     },
+    limit: ctx.args.limit ?? 100,
   };
+  if (ctx.args.nextToken) {
+    req.nextToken = ctx.args.nextToken;
+  }
+  return req;
 }
 
 export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
-  return ctx.result.items;
+  return { items: ctx.result.items, nextToken: ctx.result.nextToken };
 }
 `),
     });

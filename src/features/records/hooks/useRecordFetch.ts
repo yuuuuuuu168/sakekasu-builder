@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { listPurchaseRecords, listDrinkingRecords } from '@/graphql/queries';
-import type { PurchaseRecordType, DrinkingRecordType } from '@/types/schema';
+import type {
+  PurchaseRecordType,
+  DrinkingRecordType,
+  PurchaseRecordConnection,
+  DrinkingRecordConnection,
+} from '@/types/schema';
+import { fetchAllPages, PAGE_LIMIT } from '@/lib/pagination';
 import type { UnifiedRecord } from '../types';
 
 const client = generateClient();
@@ -65,11 +71,33 @@ export function toDrinkingUnifiedRecord(
 
 
 interface ListPurchaseRecordsResponse {
-  listPurchaseRecords: PurchaseRecordType[];
+  listPurchaseRecords: PurchaseRecordConnection;
 }
 
 interface ListDrinkingRecordsResponse {
-  listDrinkingRecords: DrinkingRecordType[];
+  listDrinkingRecords: DrinkingRecordConnection;
+}
+
+/** 購入記録を nextToken がなくなるまで全ページ取得する */
+async function fetchAllPurchaseRecords(): Promise<PurchaseRecordType[]> {
+  return fetchAllPages(async (nextToken) => {
+    const response = (await client.graphql({
+      query: listPurchaseRecords,
+      variables: { limit: PAGE_LIMIT, nextToken },
+    })) as { data: ListPurchaseRecordsResponse };
+    return response.data?.listPurchaseRecords;
+  });
+}
+
+/** 飲酒記録を nextToken がなくなるまで全ページ取得する */
+async function fetchAllDrinkingRecords(): Promise<DrinkingRecordType[]> {
+  return fetchAllPages(async (nextToken) => {
+    const response = (await client.graphql({
+      query: listDrinkingRecords,
+      variables: { limit: PAGE_LIMIT, nextToken },
+    })) as { data: ListDrinkingRecordsResponse };
+    return response.data?.listDrinkingRecords;
+  });
 }
 
 export function useRecordFetch(): UseRecordFetchReturn {
@@ -82,8 +110,8 @@ export function useRecordFetch(): UseRecordFetchReturn {
     setError(null);
 
     const results = await Promise.allSettled([
-      client.graphql({ query: listPurchaseRecords }),
-      client.graphql({ query: listDrinkingRecords }),
+      fetchAllPurchaseRecords(),
+      fetchAllDrinkingRecords(),
     ]);
 
     const allRecords: UnifiedRecord[] = [];
@@ -92,12 +120,7 @@ export function useRecordFetch(): UseRecordFetchReturn {
     // PurchaseRecord の処理
     const purchaseResult = results[0];
     if (purchaseResult.status === 'fulfilled') {
-      const response = purchaseResult.value as { data: ListPurchaseRecordsResponse };
-      if (response.data?.listPurchaseRecords) {
-        allRecords.push(
-          ...response.data.listPurchaseRecords.map(toPurchaseUnifiedRecord),
-        );
-      }
+      allRecords.push(...purchaseResult.value.map(toPurchaseUnifiedRecord));
     } else {
       console.error('PurchaseRecord list failed:', purchaseResult.reason);
       errors.push('購入記録の取得に失敗しました');
@@ -106,12 +129,7 @@ export function useRecordFetch(): UseRecordFetchReturn {
     // DrinkingRecord の処理
     const drinkingResult = results[1];
     if (drinkingResult.status === 'fulfilled') {
-      const response = drinkingResult.value as { data: ListDrinkingRecordsResponse };
-      if (response.data?.listDrinkingRecords) {
-        allRecords.push(
-          ...response.data.listDrinkingRecords.map(toDrinkingUnifiedRecord),
-        );
-      }
+      allRecords.push(...drinkingResult.value.map(toDrinkingUnifiedRecord));
     } else {
       console.error('DrinkingRecord list failed:', drinkingResult.reason);
       errors.push('飲酒記録の取得に失敗しました');

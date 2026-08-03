@@ -52,6 +52,18 @@ type DrinkingRecord {
   updatedAt: AWSDateTime!
 }
 
+# ページネーション対応の一覧レスポンス（DynamoDB の 1MB 境界を超えても
+# nextToken で続きを取得できるようにする）
+type PurchaseRecordConnection {
+  items: [PurchaseRecord!]!
+  nextToken: String
+}
+
+type DrinkingRecordConnection {
+  items: [DrinkingRecord!]!
+  nextToken: String
+}
+
 # Presigned URL レスポンス
 type PresignedUrlResponse {
   uploadUrl: String!
@@ -68,9 +80,9 @@ type OcrResult {
 # クエリ
 type Query {
   getPurchaseRecord(id: ID!): PurchaseRecord
-  listPurchaseRecords: [PurchaseRecord!]!
+  listPurchaseRecords(limit: Int, nextToken: String): PurchaseRecordConnection!
   getDrinkingRecord(id: ID!): DrinkingRecord
-  listDrinkingRecords: [DrinkingRecord!]!
+  listDrinkingRecords(limit: Int, nextToken: String): DrinkingRecordConnection!
   getDownloadUrl(key: String!): String!
 }
 

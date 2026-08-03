@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { listDrinkingRecords } from '@/graphql/queries';
-import type { DrinkingRecordType } from '@/types/schema';
+import type { DrinkingRecordType, DrinkingRecordConnection } from '@/types/schema';
+import { fetchAllPages, PAGE_LIMIT } from '@/lib/pagination';
 import { findPastRatings, MIN_QUERY_LENGTH } from '../lib/pastRatings';
 import type { PastRatingSummary } from '../lib/pastRatings';
 
@@ -11,7 +12,7 @@ const client = generateClient();
 const DEBOUNCE_MS = 300;
 
 interface ListDrinkingRecordsResponse {
-  listDrinkingRecords: DrinkingRecordType[];
+  listDrinkingRecords: DrinkingRecordConnection;
 }
 
 /**
@@ -37,12 +38,16 @@ export function usePastRatingHint(sakeName: string): { summaries: PastRatingSumm
     hasFetchedRef.current = true;
 
     let cancelled = false;
-    client
-      .graphql({ query: listDrinkingRecords })
-      .then((response) => {
-        const data = (response as { data: ListDrinkingRecordsResponse }).data;
-        if (!cancelled && data?.listDrinkingRecords) {
-          setRecords(data.listDrinkingRecords);
+    fetchAllPages<DrinkingRecordType>(async (nextToken) => {
+      const response = (await client.graphql({
+        query: listDrinkingRecords,
+        variables: { limit: PAGE_LIMIT, nextToken },
+      })) as { data: ListDrinkingRecordsResponse };
+      return response.data?.listDrinkingRecords;
+    })
+      .then((items) => {
+        if (!cancelled) {
+          setRecords(items);
         }
       })
       .catch((error: unknown) => {
