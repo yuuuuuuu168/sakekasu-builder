@@ -55,6 +55,16 @@ describe('findPastRatings', () => {
     expect(findPastRatings(records, '獺祭 純米大吟醸')).toHaveLength(1);
   });
 
+  it('表記ゆれのある同一銘柄が1つのサマリに集計される（分裂しない）', () => {
+    const records = [
+      makeDrinking({ sakeName: '獺祭 純米大吟醸', rating: 5, drinkingDate: '2026-06-01' }),
+      makeDrinking({ sakeName: '獺祭　純米大吟醸', rating: 3, drinkingDate: '2026-07-01' }),
+    ];
+    const result = findPastRatings(records, '獺祭');
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ avgRating: 4, count: 2, lastDate: '2026-07-01' });
+  });
+
   it('2文字未満の入力では検索しない', () => {
     const records = [makeDrinking({ sakeName: '獺', rating: 5 })];
     expect(findPastRatings(records, '獺')).toEqual([]);
