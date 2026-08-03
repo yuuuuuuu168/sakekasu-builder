@@ -6,6 +6,7 @@ import { useDeleteRecord } from '../hooks/useDeleteRecord';
 import { useUpdateDrinkingStatus } from '../hooks/useUpdateDrinkingStatus';
 import { FilterControls } from './FilterControls';
 import { RecordCard } from './RecordCard';
+import { EditRecordDialog } from './EditRecordDialog';
 import { EmptyState } from './EmptyState';
 import { LoadingState } from './LoadingState';
 import { ErrorState } from './ErrorState';
@@ -79,6 +80,23 @@ export function RecordListPage() {
     handleStatusRollback,
   );
 
+  // 編集ダイアログの状態管理
+  const [editingRecord, setEditingRecord] = useState<UnifiedRecord | null>(null);
+
+  const handleEdit = useCallback((record: UnifiedRecord) => {
+    setEditingRecord(record);
+  }, []);
+
+  const handleEditOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      setEditingRecord(null);
+    }
+  }, []);
+
+  const handleUpdated = useCallback(() => {
+    void refetch();
+  }, [refetch]);
+
   // ImageModal の状態管理
   const [modalImage, setModalImage] = useState<{ imageKeys: string[]; sakeName: string; index: number } | null>(null);
 
@@ -137,6 +155,7 @@ export function RecordListPage() {
                   record={record}
                   onDelete={deleteRecord}
                   isDeleting={isDeleting}
+                  onEdit={handleEdit}
                   onImageClick={handleImageClick}
                   onDrinkingStatusChange={updateStatus}
                   isStatusUpdating={isStatusUpdating}
@@ -146,6 +165,13 @@ export function RecordListPage() {
           </div>
         )}
       </div>
+
+      {/* 編集ダイアログ（ページレベルで単一インスタンス） */}
+      <EditRecordDialog
+        record={editingRecord}
+        onOpenChange={handleEditOpenChange}
+        onUpdated={handleUpdated}
+      />
 
       {/* 画像モーダル（ページレベルで単一インスタンス） */}
       {modalImage && (

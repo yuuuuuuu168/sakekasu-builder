@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { generateClient } from 'aws-amplify/api';
-import { createDrinkingRecord } from '@/graphql/mutations';
+import { createDrinkingRecord, updateDrinkingRecord } from '@/graphql/mutations';
 import type { DrinkingFormData } from '../types';
 import type { SaveResult } from '../../purchase/types';
 
@@ -13,6 +13,8 @@ export interface SaveDrinkingOptions {
 
 export interface UseDrinkingStorageReturn {
   saveDrinking: (data: DrinkingFormData, options?: SaveDrinkingOptions) => Promise<SaveResult>;
+  /** 既存の飲酒記録を更新する（画像は対象外・既存を維持） */
+  updateDrinking: (id: string, data: DrinkingFormData) => Promise<SaveResult>;
   isSaving: boolean;
 }
 
@@ -54,5 +56,39 @@ export function useDrinkingStorage(): UseDrinkingStorageReturn {
     }
   };
 
-  return { saveDrinking, isSaving };
+  const updateDrinking = async (id: string, data: DrinkingFormData): Promise<SaveResult> => {
+    setIsSaving(true);
+    try {
+      const result = await client.graphql({
+        query: updateDrinkingRecord,
+        variables: {
+          input: {
+            id,
+            sakeName: data.sakeName,
+            placeName: data.placeName,
+            price: data.price !== '' ? parseInt(data.price, 10) : null,
+            drinkingDate: data.drinkingDate,
+            category: data.category,
+            drinkingMethod: data.drinkingMethod,
+            rating: data.rating,
+            memo: data.memo || null,
+          },
+        },
+      });
+
+      if ('errors' in result && result.errors && result.errors.length > 0) {
+        console.error('DrinkingRecord update errors:', result.errors);
+        return { success: false, error: '更新に失敗しました。もう一度お試しください' };
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('DrinkingRecord update failed:', error);
+      return { success: false, error: '更新に失敗しました。もう一度お試しください' };
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return { saveDrinking, updateDrinking, isSaving };
 }

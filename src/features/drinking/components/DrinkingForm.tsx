@@ -24,15 +24,21 @@ import { StarRating } from './StarRating';
 import { ImageUploadArea } from '@/features/image/components/ImageUploadArea';
 import { useOcrTrigger } from '@/features/image/hooks/useOcrTrigger';
 import { getDrinkingMethodsByCategory, categoryRequiresDrinkingMethod } from '../types';
+import type { DrinkingFormData } from '../types';
 import type { SakeCategory } from '@/features/purchase/types';
 
 const MotionButton = motion.create(Button);
 
 interface DrinkingFormProps {
   onSubmitSuccess?: () => void;
+  /** 編集対象の記録ID。指定時は編集モード（更新）となる */
+  recordId?: string;
+  /** 編集モードでのフォーム初期値 */
+  initialData?: DrinkingFormData;
 }
 
-export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
+export function DrinkingForm({ onSubmitSuccess, recordId, initialData }: DrinkingFormProps) {
+  const isEditMode = recordId !== undefined;
   const {
     formData,
     errors,
@@ -43,7 +49,7 @@ export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
     successMessage,
     errorMessage,
     imageUpload,
-  } = useDrinkingForm();
+  } = useDrinkingForm({ recordId, initialData });
 
   const { handleOcrTrigger, isAnalyzing, ocrMessage, resetOcr } = useOcrTrigger(
     imageUpload,
@@ -91,29 +97,31 @@ export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
       transition={{ duration: 0.4, ease: 'easeOut' }}
     >
       <form onSubmit={onFormSubmit} className="space-y-5" data-testid="drinking-form">
-        {/* 画像添付 */}
-        <FormField label="画像（任意）">
-          <ImageUploadArea
-            imageFile={imageUpload.imageFile}
-            imageFiles={imageUpload.imageFiles}
-            onImageChange={(file) => {
-              if (file) {
-                imageUpload.handleImageSelect(file);
-              } else {
-                imageUpload.clearImage();
-                resetOcr();
-              }
-            }}
-            onImageRemove={imageUpload.removeImage}
-            isCompressing={imageUpload.isCompressing}
-            isUploading={imageUpload.isUploading}
-            error={imageUpload.error}
-            disabled={isSubmitting}
-            isOcrAnalyzing={isAnalyzing}
-            onOcrTrigger={handleOcrTrigger}
-            ocrMessage={ocrMessage}
-          />
-        </FormField>
+        {/* 画像添付（編集モードでは画像は変更対象外のため非表示） */}
+        {!isEditMode && (
+          <FormField label="画像（任意）">
+            <ImageUploadArea
+              imageFile={imageUpload.imageFile}
+              imageFiles={imageUpload.imageFiles}
+              onImageChange={(file) => {
+                if (file) {
+                  imageUpload.handleImageSelect(file);
+                } else {
+                  imageUpload.clearImage();
+                  resetOcr();
+                }
+              }}
+              onImageRemove={imageUpload.removeImage}
+              isCompressing={imageUpload.isCompressing}
+              isUploading={imageUpload.isUploading}
+              error={imageUpload.error}
+              disabled={isSubmitting}
+              isOcrAnalyzing={isAnalyzing}
+              onOcrTrigger={handleOcrTrigger}
+              ocrMessage={ocrMessage}
+            />
+          </FormField>
+        )}
 
         {/* 銘柄名 */}
         <FormField label="銘柄名" error={errors.sakeName} required>
@@ -236,8 +244,10 @@ export function DrinkingForm({ onSubmitSuccess }: DrinkingFormProps) {
           {isSubmitting ? (
             <>
               <Loader2 className="size-4 animate-spin" />
-              {imageUpload.isUploading ? '画像アップロード中...' : '登録中...'}
+              {imageUpload.isUploading ? '画像アップロード中...' : isEditMode ? '更新中...' : '登録中...'}
             </>
+          ) : isEditMode ? (
+            '🍶 更新する'
           ) : (
             '🍶 登録する'
           )}
