@@ -50,6 +50,8 @@ MAX_PROMPT_LENGTH = 4000
 MAX_QUERY_PAGES = 10
 MAX_MEMO_LENGTH = 200
 MAX_TEXT_FIELD_LENGTH = 120
+# HTML エンティティの多重エンコードを展開する最大回数
+_MAX_UNESCAPE_PASSES = 5
 
 _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 _purchase_table = _dynamodb.Table(TABLE_NAME)
@@ -185,11 +187,18 @@ _USER_TEXT_FIELDS = frozenset({"sakeName", "storeName", "memo"})
 def _neutralize_text(text: str) -> str:
     """LLM 文脈に入れるユーザー文字列からタグ構成能力を除去する。
 
-    HTML エンティティ展開（&lt; 等）→ NFKC 正規化（全角 ＜＞ → 半角等）で
-    表記ゆれを正規形に潰してから山括弧を丸括弧に置換する。
-    どの表記経由でも偽の <user_data> 境界タグを構成できない。
+    HTML エンティティ展開（&lt; / 多重エンコードの &amp;lt; 等）→ NFKC 正規化
+    （全角 ＜＞ → 半角、合字の展開等）で表記ゆれを正規形に潰してから
+    山括弧を丸括弧に置換する。どの表記経由でも偽の <user_data> 境界タグを
+    構成できない。NFKC は文字数を増やしうるため、呼び出し側は正規化後の
+    長さで上限を判定すること。
     """
-    text = html.unescape(text)
+    # 多重エンコード（&amp;lt; → &lt; → <）に対応するため冪等になるまで展開する
+    for _ in range(_MAX_UNESCAPE_PASSES):
+        unescaped = html.unescape(text)
+        if unescaped == text:
+            break
+        text = unescaped
     text = unicodedata.normalize("NFKC", text)
     return text.replace("<", "(").replace(">", ")")
 
@@ -311,11 +320,20 @@ async def invoke(payload, context):
     if not isinstance(prompt, str) or not prompt.strip():
         yield "相談内容を入力してください。"
         return
+    # 1段目: 正規化前の長さで足切り（巨大入力の正規化コスト自体を避ける）
     if len(prompt) > MAX_PROMPT_LENGTH:
         yield f"相談内容が長すぎます。{MAX_PROMPT_LENGTH}文字以内でお願いします。"
         return
+
     # ユーザープロンプト経由の偽 <user_data> タグ注入を遮断（ツール結果と同じ無害化）
     prompt = _neutralize_text(prompt)
+
+    # 2段目: NFKC 正規化やエンティティ展開は文字数を増やしうる（合字 U+FDFA が
+    # 18 文字に展開される等）。Bedrock に渡すのは正規化後の文字列なので、
+    # コスト増幅を防ぐため展開後の長さでも必ず判定する
+    if len(prompt) > MAX_PROMPT_LENGTH:
+        yield f"相談内容が長すぎます。{MAX_PROMPT_LENGTH}文字以内でお願いします。"
+        return
 
     tool_fn = _build_purchase_records_tool(owner_sub)
 
