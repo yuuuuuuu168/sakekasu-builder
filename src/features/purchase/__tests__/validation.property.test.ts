@@ -22,6 +22,7 @@ function validBaseData(): PurchaseFormData {
     sakeName: '獺祭',
     storeName: '酒のやまや',
     price: '3000',
+    quantity: '1',
     purchaseDate: getTodayString(),
     category: 'NIHONSHU',
     memo: '',
@@ -34,7 +35,7 @@ const emptyOrWhitespaceArb = fc.oneof(
   fc.integer({ min: 1, max: 5 }).map((n) => ' '.repeat(n)),
 );
 
-const REQUIRED_FIELDS = ['sakeName', 'storeName', 'price', 'purchaseDate', 'category'] as const;
+const REQUIRED_FIELDS = ['sakeName', 'storeName', 'price', 'quantity', 'purchaseDate', 'category'] as const;
 type RequiredField = (typeof REQUIRED_FIELDS)[number];
 
 /**
@@ -285,6 +286,9 @@ describe('Property 4: 有効入力のバリデーション通過', () => {
   /** 0以上の整数を文字列として生成するArbitrary */
   const nonNegativeIntegerPriceArb = fc.nat().map(String);
 
+  /** 1以上の整数（本数）を文字列として生成するArbitrary */
+  const positiveIntegerQuantityArb = fc.integer({ min: 1, max: 9999 }).map(String);
+
   /** 本日以前のランダムな日付をYYYY-MM-DD形式で生成するArbitrary */
   const pastDateArb = fc
     .integer({ min: 0, max: 365 * 10 })
@@ -308,6 +312,7 @@ describe('Property 4: 有効入力のバリデーション通過', () => {
     sakeName: nonEmptyNonWhitespaceArb,
     storeName: nonEmptyNonWhitespaceArb,
     price: nonNegativeIntegerPriceArb,
+    quantity: positiveIntegerQuantityArb,
     purchaseDate: pastDateArb,
     category: categoryArb,
     memo: memoArb,

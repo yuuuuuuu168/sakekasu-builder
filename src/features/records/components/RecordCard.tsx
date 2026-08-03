@@ -273,6 +273,11 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
               </span>
             )}
 
+            {/* 購入記録: 本数 */}
+            {isPurchase && record.quantity != null && (
+              <span data-testid="quantity">📦 {record.quantity}本</span>
+            )}
+
             {/* 飲酒記録: 飲み方 */}
             {!isPurchase && record.drinkingMethod && (
               <span data-testid="drinking-method">🍶 {record.drinkingMethod}</span>

@@ -155,6 +155,27 @@ export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: Purchas
         </div>
       </FormField>
 
+      {/* 本数 */}
+      <FormField label="本数" error={errors.quantity} required>
+        <div className="relative">
+          <Input
+            data-testid="input-quantity"
+            type="number"
+            min="1"
+            step="1"
+            placeholder="1"
+            className="pr-10"
+            value={formData.quantity}
+            onChange={(e) => handleChange('quantity', e.target.value)}
+            onBlur={() => handleBlur('quantity')}
+            aria-invalid={!!errors.quantity}
+          />
+          <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+            本
+          </span>
+        </div>
+      </FormField>
+
       {/* 購入日 */}
       <FormField label="購入日" error={errors.purchaseDate} required>
         <DatePickerField

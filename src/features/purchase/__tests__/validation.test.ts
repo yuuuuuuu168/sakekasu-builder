@@ -12,6 +12,7 @@ function validFormData(): PurchaseFormData {
     sakeName: '獺祭',
     storeName: '酒のやまや',
     price: '3000',
+    quantity: '1',
     purchaseDate: `${yyyy}-${mm}-${dd}`,
     category: 'NIHONSHU',
     memo: '',
@@ -112,6 +113,51 @@ describe('useFormValidation', () => {
       expect(error).toBeUndefined();
     });
 
+    it('本数が空の場合エラーを返す', () => {
+      const { result } = renderHook(() => useFormValidation());
+      let error: string | undefined;
+      act(() => {
+        error = result.current.validateField('quantity', '');
+      });
+      expect(error).toBe('本数は1以上の整数で入力してください');
+    });
+
+    it('本数が0の場合エラーを返す', () => {
+      const { result } = renderHook(() => useFormValidation());
+      let error: string | undefined;
+      act(() => {
+        error = result.current.validateField('quantity', '0');
+      });
+      expect(error).toBe('本数は1以上の整数で入力してください');
+    });
+
+    it('本数が負の値の場合エラーを返す', () => {
+      const { result } = renderHook(() => useFormValidation());
+      let error: string | undefined;
+      act(() => {
+        error = result.current.validateField('quantity', '-1');
+      });
+      expect(error).toBe('本数は1以上の整数で入力してください');
+    });
+
+    it('本数が小数の場合エラーを返す', () => {
+      const { result } = renderHook(() => useFormValidation());
+      let error: string | undefined;
+      act(() => {
+        error = result.current.validateField('quantity', '1.5');
+      });
+      expect(error).toBe('本数は1以上の整数で入力してください');
+    });
+
+    it('本数が1以上の整数の場合は有効', () => {
+      const { result } = renderHook(() => useFormValidation());
+      let error: string | undefined;
+      act(() => {
+        error = result.current.validateField('quantity', '3');
+      });
+      expect(error).toBeUndefined();
+    });
+
     it('購入日が空の場合エラーを返す', () => {
       const { result } = renderHook(() => useFormValidation());
       let error: string | undefined;
@@ -198,6 +244,7 @@ describe('useFormValidation', () => {
           sakeName: '',
           storeName: '',
           price: '',
+          quantity: '',
           purchaseDate: '',
           category: '' as PurchaseFormData['category'],
           memo: '',
@@ -206,6 +253,7 @@ describe('useFormValidation', () => {
       expect(errors.sakeName).toBeDefined();
       expect(errors.storeName).toBeDefined();
       expect(errors.price).toBeDefined();
+      expect(errors.quantity).toBeDefined();
       expect(errors.purchaseDate).toBeDefined();
       expect(errors.category).toBeDefined();
     });

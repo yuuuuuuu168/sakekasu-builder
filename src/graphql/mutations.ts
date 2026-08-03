@@ -6,6 +6,7 @@ export const createPurchaseRecord = /* GraphQL */ `
       sakeName
       storeName
       price
+      quantity
       purchaseDate
       category
       memo
@@ -26,6 +27,7 @@ export const updatePurchaseRecord = /* GraphQL */ `
       sakeName
       storeName
       price
+      quantity
       purchaseDate
       category
       memo
