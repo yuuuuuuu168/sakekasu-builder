@@ -34,6 +34,7 @@ export function toPurchaseUnifiedRecord(
     storeName: record.storeName,
     quantity: record.quantity ?? 1,
     drinkingStatus: record.drinkingStatus ?? 'NOT_STARTED',
+    openedAt: record.openedAt ?? null,
     imageKey: record.imageKey,
     imageKeys: normalizeImageKeys(record.imageKey, record.imageKeys),
     createdAt: record.createdAt,

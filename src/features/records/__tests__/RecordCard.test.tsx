@@ -269,4 +269,68 @@ describe('RecordCard', () => {
       0,
     );
   });
+
+  describe('開封後経過日数表示', () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+
+    it('飲み中かつ開封から3日経過している場合「開封から3日」と表示される', () => {
+      render(
+        <RecordCard
+          record={{ ...purchaseRecord, drinkingStatus: 'IN_PROGRESS', openedAt: daysAgo(3) }}
+          {...defaultDeleteProps}
+        />,
+      );
+      expect(screen.getByTestId('opened-days').textContent).toBe('開封から3日');
+    });
+
+    it('飲み中かつ開封当日の場合「今日開封」と表示される', () => {
+      render(
+        <RecordCard
+          record={{ ...purchaseRecord, drinkingStatus: 'IN_PROGRESS', openedAt: new Date().toISOString() }}
+          {...defaultDeleteProps}
+        />,
+      );
+      expect(screen.getByTestId('opened-days').textContent).toBe('今日開封');
+    });
+
+    it('飲み中でも openedAt が未設定の場合は表示されない（既存レコード互換）', () => {
+      render(
+        <RecordCard
+          record={{ ...purchaseRecord, drinkingStatus: 'IN_PROGRESS', openedAt: null }}
+          {...defaultDeleteProps}
+        />,
+      );
+      expect(screen.queryByTestId('opened-days')).toBeNull();
+    });
+
+    it('未開封の場合は openedAt があっても表示されない', () => {
+      render(
+        <RecordCard
+          record={{ ...purchaseRecord, drinkingStatus: 'NOT_STARTED', openedAt: daysAgo(2) }}
+          {...defaultDeleteProps}
+        />,
+      );
+      expect(screen.queryByTestId('opened-days')).toBeNull();
+    });
+
+    it('飲みきりの場合は openedAt があっても表示されない', () => {
+      render(
+        <RecordCard
+          record={{ ...purchaseRecord, drinkingStatus: 'FINISHED', openedAt: daysAgo(5) }}
+          {...defaultDeleteProps}
+        />,
+      );
+      expect(screen.queryByTestId('opened-days')).toBeNull();
+    });
+
+    it('openedAt が不正な日付文字列の場合は表示されない', () => {
+      render(
+        <RecordCard
+          record={{ ...purchaseRecord, drinkingStatus: 'IN_PROGRESS', openedAt: 'invalid-date' }}
+          {...defaultDeleteProps}
+        />,
+      );
+      expect(screen.queryByTestId('opened-days')).toBeNull();
+    });
+  });
 });

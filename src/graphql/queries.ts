@@ -13,6 +13,7 @@ export const getPurchaseRecord = /* GraphQL */ `
       imageKey
       imageKeys
       drinkingStatus
+      openedAt
       createdAt
       updatedAt
     }
@@ -34,6 +35,7 @@ export const listPurchaseRecords = /* GraphQL */ `
       imageKey
       imageKeys
       drinkingStatus
+      openedAt
       createdAt
       updatedAt
     }
