@@ -1,1 +1,8 @@
-[]
+[
+  {
+    "name": "dev",
+    "description": "sakekasu-builder 開発環境（東京）",
+    "account": "232791540685",
+    "region": "ap-northeast-1"
+  }
+]

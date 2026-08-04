@@ -1,3 +1,16 @@
 {
-  "targets": {}
+  "targets": {
+    "dev": {
+      "resources": {
+        "runtimes": {
+          "sommelier": {
+            "runtimeId": "sommelier_sommelier-Cn5eM865GE",
+            "runtimeArn": "arn:aws:bedrock-agentcore:ap-northeast-1:232791540685:runtime/sommelier_sommelier-Cn5eM865GE",
+            "roleArn": "arn:aws:iam::232791540685:role/AgentCore-sommelier-dev-ApplicationAgentSommelierRu-nIJDH6PrQn9r"
+          }
+        },
+        "stackName": "AgentCore-sommelier-dev"
+      }
+    }
+  }
 }
