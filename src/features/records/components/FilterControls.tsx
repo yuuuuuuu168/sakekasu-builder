@@ -7,6 +7,7 @@ import {
 } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { MAX_SEARCH_QUERY_LENGTH } from '../lib/filterStorage';
 import {
   RECORD_TYPE_OPTIONS,
   CATEGORY_FILTER_OPTIONS,
@@ -204,6 +205,7 @@ export function FilterControls({
           <label className="text-xs text-muted-foreground">キーワード検索</label>
           <Input
             type="text"
+            maxLength={MAX_SEARCH_QUERY_LENGTH}
             placeholder="銘柄・店・場所・メモから検索..."
             value={searchQuery}
             onChange={(e) => onSearchQueryChange(e.target.value)}

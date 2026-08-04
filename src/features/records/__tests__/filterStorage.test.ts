@@ -4,6 +4,7 @@ import {
   saveFilterState,
   clearFilterState,
   DEFAULT_FILTER_STATE,
+  MAX_SEARCH_QUERY_LENGTH,
   type PersistedFilterState,
 } from '../lib/filterStorage';
 
@@ -81,6 +82,16 @@ describe('絞り込み条件の保存と復元', () => {
       rating: 'all',
       sortOption: 'price-asc',
     });
+  });
+
+  it('異常に長い検索語は上限で切り詰めて復元する', () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({ ...customState, searchQuery: 'あ'.repeat(10_000) }),
+    );
+
+    const restored = loadFilterState(USER);
+    expect(restored.searchQuery).toHaveLength(MAX_SEARCH_QUERY_LENGTH);
   });
 
   it('配列など想定外の形が入っていても既定値を返す', () => {

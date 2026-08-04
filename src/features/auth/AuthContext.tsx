@@ -84,6 +84,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     resetSommelierSession();
 
     await amplifySignOut();
+
+    // 絞り込み条件は画面側が effect で保存し続けるため、上の通信を待つ間に
+    // 書き戻されることがある。画面を落とす直前にもう一度消す（削除は冪等）
+    if (user) {
+      clearFilterState(user.userId);
+    }
     setUser(null);
   }, [user]);
 
