@@ -3,23 +3,28 @@ import { AnimatePresence } from 'framer-motion';
 import { FloatingChatButton } from './FloatingChatButton';
 import { ChatWindow } from './ChatWindow';
 import { useSommelierChat } from '../hooks/useSommelierChat';
-import { stubSend } from '../lib/stubSend';
+import { runtimeSend, resetSommelierSession } from '../lib/runtimeSend';
 import { useAuth } from '@/features/auth/AuthContext';
 import type { SendToSommelier } from '../types';
 
 interface SommelierChatProps {
-  /**
-   * 問い合わせの実装。既定は Runtime 接続前のスタブ。
-   * ロードマップ #5 で AgentCore Runtime を呼ぶ実装を渡す。
-   */
+  /** 問い合わせの実装。既定はデプロイ済み AgentCore Runtime の呼び出し */
   send?: SendToSommelier;
+  /**
+   * 会話を破棄するときの後始末。既定は Runtime のセッション切り替え。
+   * send を差し替えたときに、既定の後始末が付いてこないようにする
+   */
+  onResetSession?: () => void;
 }
 
 /**
  * どの画面からでも呼び出せるソムリエ相談 UI。
  * 開閉ボタンとチャットウィンドウをまとめて提供する。
  */
-export function SommelierChat({ send = stubSend }: SommelierChatProps) {
+export function SommelierChat({
+  send = runtimeSend,
+  onResetSession = resetSommelierSession,
+}: SommelierChatProps) {
   const [isOpen, setIsOpen] = useState(false);
   // 履歴は端末に保存するため、同じ端末を別アカウントで使っても
   // 前の利用者の相談内容が見えないようユーザー単位で分ける
@@ -37,6 +42,12 @@ export function SommelierChat({ send = stubSend }: SommelierChatProps) {
     [sendMessage],
   );
 
+  // 会話を破棄するときは送信側のセッションも切り替える
+  const handleReset = useCallback(() => {
+    onResetSession();
+    reset();
+  }, [onResetSession, reset]);
+
   return (
     <>
       <AnimatePresence>
@@ -46,7 +57,7 @@ export function SommelierChat({ send = stubSend }: SommelierChatProps) {
             isResponding={isResponding}
             onSend={handleSend}
             onStop={stop}
-            onReset={reset}
+            onReset={handleReset}
             onClose={close}
           />
         )}
