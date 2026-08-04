@@ -1,7 +1,8 @@
-import { useState, useCallback } from 'react';
-import type { DrinkingFormData, DrinkingValidationErrors } from '../types';
-import { categoryRequiresDrinkingMethod } from '../types';
+import { useState, useCallback, useRef } from 'react';
+import type { DrinkingFormData, DrinkingValidationErrors, StockDrinkDraft } from '../types';
+import { categoryRequiresDrinkingMethod, STOCK_DRINK_PLACE_NAME } from '../types';
 import type { SakeCategory } from '../../purchase/types';
+import { markPurchaseAsInProgress } from '@/features/purchase/lib/purchaseStatus';
 import { useDrinkingValidation } from './useDrinkingValidation';
 import { useDrinkingStorage } from './useDrinkingStorage';
 import { useImageUpload } from '@/features/image/hooks/useImageUpload';
@@ -13,12 +14,22 @@ export interface UseDrinkingFormOptions {
   recordId?: string;
   /** フォームの初期値（編集モードでのプリフィル用） */
   initialData?: DrinkingFormData;
+  /** 在庫（購入記録）から登録する場合の紐づけ情報 */
+  stockDraft?: StockDrinkDraft | null;
+  /** 在庫からの登録が完了したときの通知（紐づけ解除に使う） */
+  onStockDrinkSaved?: () => void;
 }
 
 export interface UseDrinkingFormReturn {
   formData: DrinkingFormData;
   errors: DrinkingValidationErrors;
   isSaving: boolean;
+  /**
+   * 送信開始からフォームのリセット完了までを覆うフラグ。
+   * isSaving は保存 mutation の間しか true にならないため、その後の
+   * 在庫ステータス更新の間にボタンが復活して二重送信できてしまう
+   */
+  isSubmitting: boolean;
   isFormValid: boolean;
   handleChange: (field: keyof DrinkingFormData, value: string | number) => void;
   handleBlur: (field: keyof DrinkingFormData) => void;
@@ -42,12 +53,25 @@ export function getInitialDrinkingFormData(placeName: string = ''): DrinkingForm
   };
 }
 
+/**
+ * 在庫（購入記録）から飲む場合のフォーム初期値。
+ * 銘柄名とカテゴリを引き継ぎ、飲んだ場所は自宅を既定にする。
+ */
+export function getStockDrinkFormData(draft: StockDrinkDraft): DrinkingFormData {
+  return {
+    ...getInitialDrinkingFormData(STOCK_DRINK_PLACE_NAME),
+    sakeName: draft.sakeName,
+    category: draft.category,
+    drinkingMethod: categoryRequiresDrinkingMethod(draft.category) ? '' : '-',
+  };
+}
+
 export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFormReturn {
-  const { recordId, initialData } = options ?? {};
+  const { recordId, initialData, stockDraft, onStockDrinkSaved } = options ?? {};
   const isEditMode = recordId !== undefined;
 
   const [formData, setFormData] = useState<DrinkingFormData>(
-    () => initialData ?? getInitialDrinkingFormData(),
+    () => initialData ?? (stockDraft ? getStockDrinkFormData(stockDraft) : getInitialDrinkingFormData()),
   );
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -82,55 +106,88 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
     [validateField, formData],
   );
 
+  // 送信中フラグ。state だけだと連打の 2 回目が再レンダー前に走るので ref も併用する
+  const submittingRef = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleSubmit = useCallback(async () => {
-    setSuccessMessage(null);
-    setErrorMessage(null);
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setIsSubmitting(true);
 
-    if (!isValid(formData)) {
-      return;
-    }
+    try {
+      setSuccessMessage(null);
+      setErrorMessage(null);
 
-    // 編集モード: 画像は対象外。テキスト・メタ情報のみ更新し、フォームはリセットしない
-    if (isEditMode) {
-      const result = await updateDrinking(recordId, formData);
-      if (result.success) {
-        setSuccessMessage('更新が完了しました');
-      } else {
-        setErrorMessage(result.error || '更新に失敗しました。もう一度お試しください');
-      }
-      return;
-    }
-
-    // 画像がある場合はアップロードを先に実行
-    let imageKey: string | null = null;
-    let imageKeys: string[] = [];
-    if (imageUpload.imageFiles.length > 0) {
-      const newRecordId = crypto.randomUUID();
-      imageKeys = await imageUpload.uploadImages('drinking', newRecordId);
-      if (imageKeys.length === 0 && imageUpload.imageFiles.length > 0) {
-        // アップロード失敗 → エラーは useImageUpload 側で設定済み、入力内容を保持
+      if (!isValid(formData)) {
         return;
       }
-      imageKey = imageKeys[0] ?? null;
-    }
 
-    const result = await saveDrinking(formData, { imageKey, imageKeys });
+      // 編集モード: 画像は対象外。テキスト・メタ情報のみ更新し、フォームはリセットしない
+      if (isEditMode) {
+        const result = await updateDrinking(recordId, formData);
+        if (result.success) {
+          setSuccessMessage('更新が完了しました');
+        } else {
+          setErrorMessage(result.error || '更新に失敗しました。もう一度お試しください');
+        }
+        return;
+      }
 
-    if (result.success) {
+      // 画像がある場合はアップロードを先に実行
+      let imageKey: string | null = null;
+      let imageKeys: string[] = [];
+      if (imageUpload.imageFiles.length > 0) {
+        const newRecordId = crypto.randomUUID();
+        imageKeys = await imageUpload.uploadImages('drinking', newRecordId);
+        if (imageKeys.length === 0 && imageUpload.imageFiles.length > 0) {
+          // アップロード失敗 → エラーは useImageUpload 側で設定済み、入力内容を保持
+          return;
+        }
+        imageKey = imageKeys[0] ?? null;
+      }
+
+      const result = await saveDrinking(formData, {
+        imageKey,
+        imageKeys,
+        purchaseRecordId: stockDraft?.purchaseRecordId ?? null,
+      });
+
+      if (!result.success) {
+        setErrorMessage(result.error || '登録に失敗しました。もう一度お試しください');
+        return;
+      }
+
+      // 在庫から登録した場合は開封を試みる。未開封かどうかの判定はサーバ側の条件式に
+      // 任せているので、クライアントが持つステータスが古くても開封日時は壊れない。
+      // ここで失敗しても飲酒記録自体は登録済みなのでメッセージだけ変える
+      let message = '登録が完了しました';
+      if (stockDraft) {
+        const opened = await markPurchaseAsInProgress(stockDraft.purchaseRecordId);
+        if (opened === 'opened') {
+          message = '登録が完了しました。在庫を「飲み中」に更新しました';
+        } else if (opened === 'failed') {
+          message = '登録は完了しましたが、在庫のステータス更新に失敗しました';
+        }
+        onStockDrinkSaved?.();
+      }
+
       // 飲んだ場所を保持してリセット
       setFormData(getInitialDrinkingFormData(formData.placeName));
       clearErrors();
       imageUpload.clearImage();
-      setSuccessMessage('登録が完了しました');
-    } else {
-      setErrorMessage(result.error || '登録に失敗しました。もう一度お試しください');
+      setSuccessMessage(message);
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
     }
-  }, [formData, isValid, isEditMode, recordId, saveDrinking, updateDrinking, clearErrors, imageUpload]);
+  }, [formData, isValid, isEditMode, recordId, saveDrinking, updateDrinking, clearErrors, imageUpload, stockDraft, onStockDrinkSaved]);
 
   return {
     formData,
     errors,
     isSaving,
+    isSubmitting,
     isFormValid,
     handleChange,
     handleBlur,

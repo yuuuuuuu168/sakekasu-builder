@@ -18,6 +18,8 @@ const mockUseRecordList = vi.mocked(useRecordList);
 
 const baseMockReturn = {
   records: [],
+  allRecords: [],
+  drinkingStatusFilter: 'all' as const,
   isLoading: false,
   error: null,
   recordType: 'all' as const,
@@ -29,8 +31,12 @@ const baseMockReturn = {
   setCategory: vi.fn(),
   setSortOption: vi.fn(),
   setSearchQuery: vi.fn(),
+  setDrinkingStatusFilter: vi.fn(),
   resetFilters: vi.fn(),
   refetch: vi.fn(),
+  removeRecord: vi.fn(),
+  restoreRecord: vi.fn(),
+  patchRecord: vi.fn(),
 };
 
 describe('RecordListPage', () => {

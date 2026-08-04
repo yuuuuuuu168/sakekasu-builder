@@ -9,6 +9,8 @@ const client = generateClient();
 export interface SaveDrinkingOptions {
   imageKey?: string | null;
   imageKeys?: string[];
+  /** 在庫（購入記録）から登録する場合の紐づけ先 */
+  purchaseRecordId?: string | null;
 }
 
 export interface UseDrinkingStorageReturn {
@@ -38,6 +40,7 @@ export function useDrinkingStorage(): UseDrinkingStorageReturn {
             memo: data.memo || undefined,
             imageKey: options?.imageKey ?? null,
             imageKeys: options?.imageKeys?.length ? options.imageKeys : undefined,
+            purchaseRecordId: options?.purchaseRecordId ?? undefined,
           },
         },
       });
