@@ -48,6 +48,16 @@ export const deletePurchaseRecord = /* GraphQL */ `
   }
 `;
 
+export const markPurchaseOpened = /* GraphQL */ `
+  mutation MarkPurchaseOpened($id: ID!) {
+    markPurchaseOpened(id: $id) {
+      id
+      drinkingStatus
+      openedAt
+    }
+  }
+`;
+
 export const createDrinkingRecord = /* GraphQL */ `
   mutation CreateDrinkingRecord($input: CreateDrinkingRecordInput!) {
     createDrinkingRecord(input: $input) {

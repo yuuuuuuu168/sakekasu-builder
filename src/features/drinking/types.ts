@@ -1,5 +1,4 @@
 import type { SakeCategory } from '../purchase/types';
-import type { DrinkingStatus } from '@/types/schema';
 
 // 飲み方の型定義
 export type DrinkingMethod = string;
@@ -13,8 +12,6 @@ export interface StockDrinkDraft {
   purchaseRecordId: string;
   sakeName: string;
   category: SakeCategory;
-  /** 引き継いだ時点の飲みきりステータス（未開封なら登録時に飲み中へ更新する） */
-  drinkingStatus: DrinkingStatus;
 }
 
 /** 在庫から飲む場合の「飲んだ場所」の初期値 */

@@ -80,11 +80,12 @@ function AppContent() {
   const [stockDraftKey, setStockDraftKey] = useState(0);
 
   const handleDrinkFromStock = useCallback((record: UnifiedRecord) => {
+    // 飲みきりステータスは持ち回さない。開封済みかどうかの判定は
+    // markPurchaseOpened の条件式でサーバ側が行う
     setStockDraft({
       purchaseRecordId: record.id,
       sakeName: record.sakeName,
       category: record.category,
-      drinkingStatus: record.drinkingStatus ?? 'NOT_STARTED',
     });
     setStockDraftKey((key) => key + 1);
     setCurrentPage('drinking');
