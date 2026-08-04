@@ -34,6 +34,7 @@
 | 26 | 一覧画面の画像表示高速化 | ✅ 実装済み |
 | 27 | 一覧画面上部に在庫本数サマリー表示（ウイスキー◯本・日本酒◯本のみ） | ✅ 実装済み |
 | 28 | データ保護（DynamoDB PITR・削除保護、S3 バージョニング） | ✅ 実装済み |
+| 29 | 監視とアラート通知（AI・サービス正常性・外形監視 → Slack） | ✅ 実装済み ※デプロイ前に手動登録あり |
 
 ### 検索・フィルタ強化（#18・完了）
 
@@ -151,6 +152,91 @@ AWS_PROFILE=sakekasu-builder agentcore deploy --target dev
 ```
 
 Runtime の ARN はフロントの `src/features/sommelier/config.ts` に持つ（`VITE_SOMMELIER_RUNTIME_ARN` で上書き可）。Runtime を作り直したら更新する。
+
+## 監視とアラート通知（#29）
+
+異常を人間が気づく前に Slack へ流す。きっかけは、ソムリエが数時間おかしくなったのに気づけず、原因の切り分けにも時間がかかったこと。
+
+```
+CloudWatch アラーム ─┐
+外形監視 Lambda ─────┼→ SNS → Slack 通知 Lambda → Slack（Incoming Webhook）
+カナリア Lambda ─────┘
+```
+
+アラームは**発報だけでなく復旧も通知する**ので、鳴りっぱなしなのか直ったのかが Slack だけで分かる。
+
+### 監視項目（17アラーム）
+
+| 分類 | 監視対象 | 発報条件 |
+|------|---------|---------|
+| AI・ソムリエ | 認証拒否（`InboundAuthorizationFailure`） | 5分で3回以上。例外の種類ごとに分けて監視 |
+| AI・ソムリエ | システムエラー / スロットル | 5分で1回以上 |
+| AI・OCR | Lambda エラー | 15分で3回以上 |
+| AI・OCR | スロットル | 15分で1回以上 |
+| サービス | AppSync 5XX | 5分で5回以上 |
+| サービス | Lambda エラー（presigned-url / ocr-analyzer） | 15分で5回以上 |
+| サービス | DynamoDB スロットル（2テーブル） | 5分で1回以上 |
+| サービス | 画像削除の失敗 | 1時間で5回以上 |
+| 外形監視 | フロント配信 / ソムリエ Runtime / AppSync | 2回続けて到達不可 |
+| 外形監視 | ソムリエとの実会話（カナリア） | 失敗したら即時 |
+| 通知経路 | Slack 通知 Lambda のエラー | 1回以上 |
+
+**認証拒否の監視が今回の障害への直接の答え**。実際に障害当時のメトリクスを確認したところ、`UnauthorizedInboundTokenException` が3回記録されていた。これを監視していれば即座に気づけた。
+
+### 外形監視の考え方
+
+到達性の確認（5分ごと）は、**認証情報を持たずに**行う。ソムリエ Runtime と AppSync はあえて認証なしで叩き、**401/403 が返ることを正常**とみなす。これで「エンドポイントが生きている」ことと「認証が働いている」ことを、監視側に鍵を持たせずに確認できる。
+
+実際に会話できるかはカナリア（6時間ごと）が見る。こちらは監視用ユーザーでサインインして短い相談を投げ、応答が返るまでを確認する。毎回 LLM を呼ぶため頻度を抑えている。
+
+### デプロイ前の準備
+
+Webhook URL と監視ユーザーのパスワードはリポジトリに置けないため、**先に手動で登録**する。CDK は名前で参照するだけ。
+
+```bash
+# 1. Slack の Incoming Webhook URL を登録する
+AWS_PROFILE=sakekasu-builder aws ssm put-parameter \
+  --name /dev-sakekasu/monitoring/slack-webhook-url \
+  --type SecureString \
+  --value 'https://hooks.slack.com/services/XXX/YYY/ZZZ' \
+  --region ap-northeast-1
+
+# 2. カナリア用の Cognito ユーザーを作る（パスワードは自分で決める）
+AWS_PROFILE=sakekasu-builder aws cognito-idp admin-create-user \
+  --user-pool-id ap-northeast-1_eZOfInCT4 \
+  --username canary@example.com \
+  --message-action SUPPRESS \
+  --region ap-northeast-1
+AWS_PROFILE=sakekasu-builder aws cognito-idp admin-set-user-password \
+  --user-pool-id ap-northeast-1_eZOfInCT4 \
+  --username canary@example.com \
+  --password '<決めたパスワード>' --permanent \
+  --region ap-northeast-1
+
+# 3. その認証情報を Secrets Manager に入れる
+AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
+  --name dev-sakekasu/monitoring/canary-user \
+  --secret-string '{"username":"canary@example.com","password":"<決めたパスワード>"}' \
+  --region ap-northeast-1
+
+# 4. デプロイ
+cd infra
+AWS_PROFILE=sakekasu-builder npx cdk deploy --all -c env=dev
+```
+
+カナリアがサインインするため、UserPoolClient に `ADMIN_USER_PASSWORD_AUTH` を追加している。このフローは IAM 認証済みの呼び出し元（＝カナリアの Lambda ロール）からしか使えず、ブラウザからは利用できない。
+
+Runtime の ARN とサイト URL は CDK コンテキストで差し替えられる。
+
+```bash
+npx cdk deploy sakekasu-dev-monitoring -c env=dev \
+  -c sommelierRuntimeArn=arn:aws:bedrock-agentcore:... \
+  -c siteUrl=https://example.com
+```
+
+### 費用の目安
+
+概算で**月5ドル前後**。内訳は CloudWatch アラーム17件（$0.10/件）とカスタムメトリクス8種（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。カナリアの Bedrock 呼び出しは月120回・短い応答のため数円程度。
 
 ## 技術スタック
 
