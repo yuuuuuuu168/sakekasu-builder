@@ -22,7 +22,7 @@ import io
 import sys
 
 import boto3
-from PIL import Image
+from PIL import Image, ImageOps
 
 # フロントエンド（src/features/image/）と揃える必要がある定数
 THUMBNAIL_PREFIX = "thumb_"
@@ -41,8 +41,15 @@ def is_thumbnail(key: str) -> bool:
 
 
 def make_thumbnail(data: bytes) -> bytes:
-    """画像バイト列から長辺 320px の JPEG サムネイルを作る。"""
+    """画像バイト列から長辺 320px の JPEG サムネイルを作る。
+
+    スマートフォンの写真は「横向きのピクセル + EXIF の向き情報」で保存され、
+    ブラウザは EXIF を見て回転表示する。縮小時に EXIF は失われるため、
+    先に exif_transpose() でピクセル自体を正しい向きに直しておかないと
+    サムネイルだけ横倒しになる。
+    """
     with Image.open(io.BytesIO(data)) as img:
+        img = ImageOps.exif_transpose(img)
         img = img.convert("RGB")
         img.thumbnail((THUMBNAIL_MAX_EDGE, THUMBNAIL_MAX_EDGE))
         buffer = io.BytesIO()
@@ -58,6 +65,11 @@ def main() -> int:
         "--dry-run",
         action="store_true",
         help="S3 に書き込まず、対象と削減見込みだけ表示する",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="既存のサムネイルも作り直す（生成ロジック修正後の再実行用）",
     )
     args = parser.parse_args()
 
@@ -78,7 +90,7 @@ def main() -> int:
 
             thumb_key = to_thumbnail_key(key)
             # 同じページ内に既にサムネイルがあればスキップ（再実行しても安全）
-            if thumb_key in keys:
+            if thumb_key in keys and not args.overwrite:
                 skipped += 1
                 continue
 
