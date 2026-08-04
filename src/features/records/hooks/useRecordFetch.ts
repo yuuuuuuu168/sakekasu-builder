@@ -62,6 +62,7 @@ export function toDrinkingUnifiedRecord(
     placeName: record.placeName,
     drinkingMethod: record.drinkingMethod,
     rating: record.rating,
+    purchaseRecordId: record.purchaseRecordId ?? null,
     imageKey: record.imageKey,
     imageKeys: normalizeImageKeys(record.imageKey, record.imageKeys),
     createdAt: record.createdAt,

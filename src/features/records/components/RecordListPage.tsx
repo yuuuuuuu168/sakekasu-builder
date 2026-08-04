@@ -1,22 +1,30 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useRecordList } from '../hooks/useRecordList';
 import { useDeleteRecord } from '../hooks/useDeleteRecord';
 import { useUpdateDrinkingStatus } from '../hooks/useUpdateDrinkingStatus';
 import { FilterControls } from './FilterControls';
+import { InventorySummary } from './InventorySummary';
 import { RecordCard } from './RecordCard';
 import { EditRecordDialog } from './EditRecordDialog';
 import { EmptyState } from './EmptyState';
 import { LoadingState } from './LoadingState';
 import { ErrorState } from './ErrorState';
 import { ImageModal } from '@/features/image/components/ImageModal';
+import { buildLinkedDrinkingIndex } from '../lib/linkedDrinking';
 import type { UnifiedRecord } from '../types';
 import type { DrinkingStatus } from '@/types/schema';
 
-export function RecordListPage() {
+interface RecordListPageProps {
+  /** 在庫（購入記録）から飲酒登録へ進むときのコールバック */
+  onDrinkFromStock?: (record: UnifiedRecord) => void;
+}
+
+export function RecordListPage({ onDrinkFromStock }: RecordListPageProps = {}) {
   const {
     records,
+    allRecords,
     isLoading,
     error,
     recordType,
@@ -32,63 +40,48 @@ export function RecordListPage() {
     setDrinkingStatusFilter,
     resetFilters,
     refetch,
+    removeRecord,
+    restoreRecord,
+    patchRecord,
   } = useRecordList();
-
-  // 楽観的UI更新用のローカル state
-  const [displayRecords, setDisplayRecords] = useState<UnifiedRecord[]>(records);
-
-  // records が変更されたら displayRecords を同期
-  useEffect(() => {
-    setDisplayRecords(records);
-  }, [records]);
-
-  // 楽観的に記録を除去
-  const handleOptimisticRemove = useCallback((id: string) => {
-    setDisplayRecords((prev) => prev.filter((r) => r.id !== id));
-  }, []);
-
-  // 失敗時に記録を復元
-  const handleRollback = useCallback((record: UnifiedRecord) => {
-    setDisplayRecords((prev) => [...prev, record]);
-  }, []);
 
   // 成功時のコールバック（no-op: ダイアログ閉じはRecordCard側で管理）
   const handleSuccess = useCallback(() => {}, []);
 
   const { deleteRecord, isDeleting } = useDeleteRecord(
-    records,
-    handleOptimisticRemove,
-    handleRollback,
+    allRecords,
+    removeRecord,
+    restoreRecord,
     handleSuccess,
   );
 
   // 飲みきりステータスの楽観的更新（openedAtUpdate が undefined の場合は開封日時を変更しない）
   const handleStatusOptimisticUpdate = useCallback(
     (id: string, newStatus: DrinkingStatus, openedAtUpdate?: string | null) => {
-      setDisplayRecords((prev) =>
-        prev.map((r) =>
-          r.id === id
-            ? {
-                ...r,
-                drinkingStatus: newStatus,
-                ...(openedAtUpdate !== undefined && { openedAt: openedAtUpdate }),
-              }
-            : r
-        )
-      );
+      patchRecord(id, {
+        drinkingStatus: newStatus,
+        ...(openedAtUpdate !== undefined && { openedAt: openedAtUpdate }),
+      });
     },
-    []
+    [patchRecord],
   );
 
-  const handleStatusRollback = useCallback((id: string, oldStatus: DrinkingStatus) => {
-    setDisplayRecords((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, drinkingStatus: oldStatus } : r))
-    );
-  }, []);
+  const handleStatusRollback = useCallback(
+    (id: string, oldStatus: DrinkingStatus) => {
+      patchRecord(id, { drinkingStatus: oldStatus });
+    },
+    [patchRecord],
+  );
 
   const { updateStatus, isUpdating: isStatusUpdating } = useUpdateDrinkingStatus(
     handleStatusOptimisticUpdate,
     handleStatusRollback,
+  );
+
+  // 購入記録 → 紐づいた飲酒記録の感想を引くための索引
+  const linkedDrinkingIndex = useMemo(
+    () => buildLinkedDrinkingIndex(allRecords),
+    [allRecords],
   );
 
   // 編集ダイアログの状態管理
@@ -132,6 +125,13 @@ export function RecordListPage() {
           <ThemeToggle />
         </header>
 
+        {/* 在庫本数サマリー（フィルタに関係なく全体の在庫を表示） */}
+        {!isLoading && !error && (
+          <div className="mb-4">
+            <InventorySummary records={allRecords} />
+          </div>
+        )}
+
         {/* フィルタ・ソートコントロール */}
         <div className="mb-6">
           <FilterControls
@@ -155,12 +155,12 @@ export function RecordListPage() {
           <LoadingState />
         ) : error ? (
           <ErrorState message={error} onRetry={refetch} />
-        ) : displayRecords.length === 0 ? (
+        ) : records.length === 0 ? (
           <EmptyState hasActiveFilter={hasActiveFilter} />
         ) : (
           <div className="space-y-4">
             <AnimatePresence>
-              {displayRecords.map((record) => (
+              {records.map((record) => (
                 <RecordCard
                   key={record.id}
                   record={record}
@@ -170,6 +170,8 @@ export function RecordListPage() {
                   onImageClick={handleImageClick}
                   onDrinkingStatusChange={updateStatus}
                   isStatusUpdating={isStatusUpdating}
+                  onDrinkFromStock={onDrinkFromStock}
+                  linkedDrinking={linkedDrinkingIndex.get(record.id)}
                 />
               ))}
             </AnimatePresence>

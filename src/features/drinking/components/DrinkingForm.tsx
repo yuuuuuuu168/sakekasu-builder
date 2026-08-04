@@ -24,7 +24,7 @@ import { StarRating } from './StarRating';
 import { ImageUploadArea } from '@/features/image/components/ImageUploadArea';
 import { useOcrTrigger } from '@/features/image/hooks/useOcrTrigger';
 import { getDrinkingMethodsByCategory, categoryRequiresDrinkingMethod } from '../types';
-import type { DrinkingFormData } from '../types';
+import type { DrinkingFormData, StockDrinkDraft } from '../types';
 import type { SakeCategory } from '@/features/purchase/types';
 
 const MotionButton = motion.create(Button);
@@ -35,9 +35,19 @@ interface DrinkingFormProps {
   recordId?: string;
   /** 編集モードでのフォーム初期値 */
   initialData?: DrinkingFormData;
+  /** 在庫（購入記録）から登録する場合の紐づけ情報 */
+  stockDraft?: StockDrinkDraft | null;
+  /** 在庫からの登録完了・紐づけ解除の通知 */
+  onStockDraftClear?: () => void;
 }
 
-export function DrinkingForm({ onSubmitSuccess, recordId, initialData }: DrinkingFormProps) {
+export function DrinkingForm({
+  onSubmitSuccess,
+  recordId,
+  initialData,
+  stockDraft,
+  onStockDraftClear,
+}: DrinkingFormProps) {
   const isEditMode = recordId !== undefined;
   const {
     formData,
@@ -49,7 +59,12 @@ export function DrinkingForm({ onSubmitSuccess, recordId, initialData }: Drinkin
     successMessage,
     errorMessage,
     imageUpload,
-  } = useDrinkingForm({ recordId, initialData });
+  } = useDrinkingForm({
+    recordId,
+    initialData,
+    stockDraft,
+    onStockDrinkSaved: onStockDraftClear,
+  });
 
   const { handleOcrTrigger, isAnalyzing, ocrMessage, resetOcr } = useOcrTrigger(
     imageUpload,
@@ -97,6 +112,28 @@ export function DrinkingForm({ onSubmitSuccess, recordId, initialData }: Drinkin
       transition={{ duration: 0.4, ease: 'easeOut' }}
     >
       <form onSubmit={onFormSubmit} className="space-y-5" data-testid="drinking-form">
+        {/* 在庫との紐づけ表示 */}
+        {stockDraft && (
+          <div
+            className="flex items-center justify-between gap-2 rounded-lg border border-sake-gold/40 bg-sake-gold/10 px-3 py-2"
+            data-testid="stock-link-banner"
+          >
+            <span className="min-w-0 text-sm text-gray-700 dark:text-gray-200">
+              🍶 在庫の「
+              <span className="font-bold">{stockDraft.sakeName}</span>
+              」として登録します
+            </span>
+            <button
+              type="button"
+              onClick={onStockDraftClear}
+              className="shrink-0 rounded px-2 py-1 text-xs text-gray-500 underline transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              data-testid="stock-link-clear"
+            >
+              紐づけを解除
+            </button>
+          </div>
+        )}
+
         {/* 画像添付（編集モードでは画像は変更対象外のため非表示） */}
         {!isEditMode && (
           <FormField label="画像（任意）">

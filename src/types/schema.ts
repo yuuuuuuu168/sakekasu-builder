@@ -46,6 +46,8 @@ export interface DrinkingRecordType extends BaseRecord {
   memo: string | null;
   imageKey: string | null;
   imageKeys: string[] | null;
+  /** 在庫（購入記録）から登録した場合の紐づけ先。手入力の記録では null */
+  purchaseRecordId: string | null;
 }
 
 // ページネーション対応の一覧レスポンス型

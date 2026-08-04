@@ -63,6 +63,7 @@ export const createDrinkingRecord = /* GraphQL */ `
       memo
       imageKey
       imageKeys
+      purchaseRecordId
       createdAt
       updatedAt
     }

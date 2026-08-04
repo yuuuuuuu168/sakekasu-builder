@@ -7,6 +7,7 @@ import { EditButton } from './EditButton';
 import { ConfirmDialog } from './ConfirmDialog';
 import { useImageUrl } from '@/features/image/hooks/useImageUrl';
 import { toThumbnailKey } from '@/features/image/lib/thumbnailKey';
+import type { LinkedDrinkingSummary } from '../lib/linkedDrinking';
 import type { DrinkingStatus } from '@/types/schema';
 
 interface RecordCardProps {
@@ -20,6 +21,10 @@ interface RecordCardProps {
   /** 飲みきりステータス変更時のコールバック */
   onDrinkingStatusChange?: (id: string, newStatus: DrinkingStatus) => void;
   isStatusUpdating?: boolean;
+  /** 在庫から飲酒登録へ進むときのコールバック（購入記録のみ） */
+  onDrinkFromStock?: (record: UnifiedRecord) => void;
+  /** この購入記録に紐づいた飲酒記録の集計（購入記録のみ） */
+  linkedDrinking?: LinkedDrinkingSummary;
 }
 
 /** 飲みきりステータスのスタイル定義 */
@@ -201,10 +206,13 @@ function RecordThumbnail({
   );
 }
 
-export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick, onDrinkingStatusChange, isStatusUpdating }: RecordCardProps) {
+export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick, onDrinkingStatusChange, isStatusUpdating, onDrinkFromStock, linkedDrinking }: RecordCardProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const isPurchase = record.type === 'purchase';
   const priceText = formatPrice(record.price);
+  // 飲みきった在庫からは登録できないようにする
+  const canDrinkFromStock =
+    isPurchase && !!onDrinkFromStock && (record.drinkingStatus ?? 'NOT_STARTED') !== 'FINISHED';
 
   const handleThumbnailClick = (index: number) => {
     onImageClick?.(record.imageKeys, record.sakeName, index);
@@ -270,9 +278,10 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
             {record.sakeName}
           </h3>
 
-          {/* 購入記録: 飲みきりステータス */}
-          {isPurchase && record.drinkingStatus && (
-            <div className="mb-2 flex items-center gap-2">
+          {/* 購入記録: 飲みきりステータス + 在庫からの飲酒登録 */}
+          {isPurchase && (record.drinkingStatus || canDrinkFromStock) && (
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              {record.drinkingStatus && (
               <button
                 type="button"
                 onClick={() => {
@@ -287,6 +296,7 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
               >
                 {DRINKING_STATUS_ICONS[record.drinkingStatus]} {DRINKING_STATUS_DISPLAY[record.drinkingStatus]}
               </button>
+              )}
               {record.drinkingStatus === 'IN_PROGRESS' && getOpenedDaysLabel(record.openedAt) && (
                 <span
                   className="text-xs font-medium text-amber-700 dark:text-amber-400"
@@ -294,6 +304,17 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
                 >
                   {getOpenedDaysLabel(record.openedAt)}
                 </span>
+              )}
+              {canDrinkFromStock && (
+                <button
+                  type="button"
+                  onClick={() => onDrinkFromStock?.(record)}
+                  className="rounded-lg border border-sake-gold/40 bg-sake-gold/10 px-3 py-1.5 text-sm font-bold text-sake-gold shadow-sm transition-all hover:scale-105 hover:shadow-md active:scale-95"
+                  data-testid="drink-from-stock"
+                  title="この在庫の飲酒記録を登録する"
+                >
+                  🍶 これを飲む
+                </button>
               )}
             </div>
           )}
@@ -335,6 +356,36 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
               <span data-testid="drinking-method">🍶 {record.drinkingMethod}</span>
             )}
           </div>
+
+          {/* 購入記録: 紐づいた飲酒記録の感想 */}
+          {isPurchase && linkedDrinking && (
+            <div
+              className="mt-2 rounded-lg border border-sake-gold/20 bg-sake-gold/5 px-2.5 py-1.5 text-xs"
+              data-testid="linked-drinking"
+            >
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-gray-600 dark:text-gray-300">
+                <span className="font-semibold">🍶 飲んだ記録 {linkedDrinking.count}件</span>
+                {linkedDrinking.averageRating !== null && (
+                  <span className="text-yellow-500" data-testid="linked-drinking-rating">
+                    ★ {linkedDrinking.averageRating}
+                  </span>
+                )}
+                {linkedDrinking.latestDate && (
+                  <span className="text-gray-500 dark:text-gray-400">
+                    最終 {linkedDrinking.latestDate}
+                  </span>
+                )}
+              </div>
+              {linkedDrinking.latestMemo && (
+                <p
+                  className="mt-1 line-clamp-2 text-gray-600 dark:text-gray-400"
+                  data-testid="linked-drinking-memo"
+                >
+                  {linkedDrinking.latestMemo}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* 飲酒記録: 評価 */}
           {!isPurchase && record.rating != null && record.rating > 0 && (
