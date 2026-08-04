@@ -62,6 +62,11 @@ _RAW_TRUNCATE_FACTOR = 4
 _UNSAFE_TEXT_PLACEHOLDER = "(表示できない値)"
 # JWKS キャッシュの有効期間（秒）。期限切れ時の再取得で鍵ローテーションに追従する
 _JWKS_CACHE_SECONDS = 300
+# JWKS 取得の HTTP タイムアウト（秒）。ロック保持時間の上限になる
+# （既定の 30 秒ではロックを長時間占有しスレッドプールを枯渇させうる）
+_JWKS_FETCH_TIMEOUT = 5
+# JWKS ロックの獲得待ち上限（秒）。超過したスレッドはワーカーを解放して失敗させる
+_JWKS_LOCK_TIMEOUT = 6
 
 _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 _purchase_table = _dynamodb.Table(TABLE_NAME)
@@ -116,17 +121,30 @@ def _get_signing_keys():
     (3) 失敗したスレッドの put(None) が成功結果を上書きする、といった競合が起きる。
     フェッチ中は他スレッドを待たせるが、待った側は温まったキャッシュを引くため
     外向きフェッチは1回で済む。イベントループはスレッド退避により止まらない。
+
+    待ち行列が無限に伸びないよう、二重のタイムアウトで最悪時間を有界にする:
+    ロック保持時間は HTTP タイムアウト（_JWKS_FETCH_TIMEOUT）で、待ち時間は
+    ロック獲得タイムアウト（_JWKS_LOCK_TIMEOUT）で上限を設ける。
+    獲得できなかったスレッドはワーカーを解放して失敗（＝認証拒否）する。
     """
     global _jwks_client
-    with _jwks_lock:
+    if not _jwks_lock.acquire(timeout=_JWKS_LOCK_TIMEOUT):
+        # ここで待ち続けるとスレッドプールを占有して全体が応答不能になるため、
+        # 待ちを打ち切って認証失敗にする（フェイルクローズ）
+        log.warning("JWKS ロックの獲得がタイムアウトしました")
+        return []
+    try:
         if _jwks_client is None:
             _jwks_client = PyJWKClient(
                 f"{_cognito_issuer()}/.well-known/jwks.json",
                 cache_keys=True,
                 cache_jwk_set=True,
                 lifespan=_JWKS_CACHE_SECONDS,
+                timeout=_JWKS_FETCH_TIMEOUT,
             )
         return _jwks_client.get_signing_keys()
+    finally:
+        _jwks_lock.release()
 
 
 def _find_cached_signing_key(token: str):
