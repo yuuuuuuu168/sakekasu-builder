@@ -9,6 +9,7 @@
 - ローカル開発のなりすまし用 LOCAL_DEV_OWNER_SUB は LOCAL_DEV=1 の時のみ有効
 """
 
+import asyncio
 import html
 import os
 import unicodedata
@@ -115,14 +116,19 @@ def _get_jwks_client() -> PyJWKClient:
 
 
 def _find_cached_signing_key(token: str):
-    """キャッシュ済み JWK セットの中からトークンの kid に一致する鍵を返す。
+    """トークンの kid に一致する署名鍵を JWK セットから返す。
 
     PyJWKClient.get_signing_key_from_jwt() は kid が見つからないと
     refresh=True で JWKS を強制再取得するため、未知の kid を並べた
     リクエストが Cognito への外向きフェッチ増幅に使える。
-    ここではキャッシュ内の照合だけを行い、見つからなければ再取得せず拒否する。
-    鍵ローテーションはキャッシュ期限（_JWKS_CACHE_SECONDS）切れ時の
-    通常の再取得で反映される。
+    ここでは強制再取得を伴わない get_signing_keys() だけを使い、
+    kid が一致しなければ再取得せずに拒否する。
+
+    注意: get_signing_keys() はキャッシュが空または期限切れ
+    （_JWKS_CACHE_SECONDS 経過）のとき、urllib による**同期 HTTP 取得**を行う。
+    そのため本関数は完全なノンブロッキングではなく、呼び出し側は
+    イベントループを止めないようワーカースレッドで実行すること。
+    鍵ローテーションはこの期限切れ時の再取得で反映される。
     """
     kid = jwt.get_unverified_header(token).get("kid")
     if not kid:
@@ -364,7 +370,9 @@ async def invoke(payload, context):
     log.info("Invoking sommelier agent")
 
     # 認証ガード: 検証済み sub がなければ Bedrock を呼ばずに終了（フェイルクローズ）
-    owner_sub = _get_owner_sub(context)
+    # JWKS 取得は同期 HTTP を含みうるため、別スレッドに逃がして
+    # イベントループ（＝他の同時リクエスト）を止めない
+    owner_sub = await asyncio.to_thread(_get_owner_sub, context)
     if not owner_sub:
         log.warning("認証されていないリクエストを拒否しました")
         yield "認証情報を確認できませんでした。ログインし直してからもう一度お試しください。"
