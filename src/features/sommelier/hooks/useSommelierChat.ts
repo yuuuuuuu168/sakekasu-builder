@@ -76,6 +76,9 @@ export function useSommelierChat(
       const trimmed = prompt.trim();
       if (!trimmed || isResponding) return;
 
+      // 今回の発言を積む前の会話を、文脈として送る
+      const history = messagesRef.current;
+
       const assistantId = createId('assistant');
       applyMessages((prev) => [
         ...prev,
@@ -95,7 +98,10 @@ export function useSommelierChat(
 
       try {
         let content = '';
-        for await (const chunk of send(trimmed, { signal: controller.signal })) {
+        for await (const chunk of send(trimmed, {
+          signal: controller.signal,
+          history,
+        })) {
           if (controller.signal.aborted) break;
           content += chunk;
           updateAssistant({ content });

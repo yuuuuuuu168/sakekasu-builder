@@ -53,6 +53,10 @@ MAX_PROMPT_LENGTH = 4000
 MAX_QUERY_PAGES = 10
 MAX_MEMO_LENGTH = 200
 MAX_TEXT_FIELD_LENGTH = 120
+# 会話の文脈として受け取る過去の発言数の上限（直近から数える）
+MAX_HISTORY_MESSAGES = 10
+# 過去の発言1件あたりの文字数上限
+MAX_HISTORY_MESSAGE_LENGTH = 2000
 # エンティティ展開＋NFKC 正規化を反復する最大回数
 _MAX_NORMALIZE_PASSES = 10
 # 正規化前に切り詰める倍率（保存値が巨大でも正規化コストを一定に保つ）
@@ -453,6 +457,41 @@ def _build_purchase_records_tool(owner_sub: str):
     return list_my_purchase_records
 
 
+def _build_history(raw) -> list:
+    """クライアントから届いた会話履歴を Agent に渡せる形へ整える。
+
+    履歴はクライアント側の値なので、プロンプトと同じ無害化を通し、
+    件数と長さの上限も課す（コスト増幅と注入の両方を抑える）。
+    role が user/assistant 以外のものや、無害化で破棄されたものは落とす。
+    """
+    if not isinstance(raw, list):
+        return []
+
+    messages = []
+    for item in raw[-MAX_HISTORY_MESSAGES:]:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role not in ("user", "assistant") or not isinstance(content, str):
+            continue
+
+        text = _neutralize_text(content[:MAX_HISTORY_MESSAGE_LENGTH])
+        if not text or not text.strip():
+            continue
+
+        messages.append({"role": role, "content": [{"text": text}]})
+
+    # 先頭が assistant だとモデルが会話の始まりとして扱えないため落とす
+    while messages and messages[0]["role"] != "user":
+        messages.pop(0)
+    # 末尾も assistant で終える。直後に今回の発言（user）が続くため、
+    # user が連続するとモデルが受け付けない
+    while messages and messages[-1]["role"] != "assistant":
+        messages.pop()
+    return messages
+
+
 @app.entrypoint
 async def invoke(payload, context):
     log.info("Invoking sommelier agent")
@@ -496,10 +535,15 @@ async def invoke(payload, context):
 
     tool_fn = _build_purchase_records_tool(owner_sub)
 
+    # 直前までの会話を渡して文脈を引き継ぐ。Runtime はリクエストごとに
+    # 状態を持たないため、履歴はクライアントから受け取る
+    history = _build_history(payload.get("history") if isinstance(payload, dict) else None)
+
     agent = Agent(
         model=load_model(),
         system_prompt=SYSTEM_PROMPT,
         tools=[tool_fn],
+        messages=history,
     )
 
     stream = agent.stream_async(prompt)
