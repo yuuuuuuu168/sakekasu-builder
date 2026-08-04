@@ -1,8 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import type { UnifiedRecord, RecordTypeFilter, CategoryFilter } from '../types';
+import type {
+  UnifiedRecord,
+  RecordTypeFilter,
+  CategoryFilter,
+  RatingFilter,
+  RecordFilters,
+} from '../types';
+import { DEFAULT_FILTERS } from '../types';
 import { SAKE_CATEGORIES } from '../../purchase/types';
-import { filterRecords, fuzzyMatch } from '../hooks/useRecordFilter';
+import { filterRecords, fuzzyMatch, matchesSearchQuery } from '../hooks/useRecordFilter';
+
+// --- Helpers ---
+
+/** 既定値をベースに、指定した条件だけ上書きしたフィルタを作る */
+function filters(overrides: Partial<RecordFilters> = {}): RecordFilters {
+  return { ...DEFAULT_FILTERS, ...overrides };
+}
 
 // --- Arbitrary generators ---
 
@@ -25,6 +39,7 @@ const arbUnifiedRecord: fc.Arbitrary<UnifiedRecord> = fc.record({
   placeName: fc.option(fc.string({ minLength: 1, maxLength: 50 }), { nil: undefined }),
   drinkingMethod: fc.option(fc.string({ minLength: 1, maxLength: 20 }), { nil: undefined }),
   rating: fc.option(fc.integer({ min: 1, max: 5 }), { nil: undefined }),
+  imageKeys: fc.constant([]),
   createdAt: fc.constant(new Date().toISOString()),
   updatedAt: fc.constant(new Date().toISOString()),
 });
@@ -32,6 +47,7 @@ const arbUnifiedRecord: fc.Arbitrary<UnifiedRecord> = fc.record({
 const arbRecordTypeFilter = fc.constantFrom<RecordTypeFilter>('all', 'purchase', 'drinking');
 const arbCategoryFilter = fc.constantFrom<CategoryFilter>('all', ...SAKE_CATEGORIES);
 const arbSearchQuery = fc.oneof(fc.constant(''), fc.string({ minLength: 1, maxLength: 10 }));
+const arbRatingFilter = fc.constantFrom<RatingFilter>('all', 1, 2, 3, 4, 5);
 
 // --- Property Tests ---
 
@@ -42,7 +58,7 @@ describe('Feature: sake-record-list, Property 1: 記録種別フィルタの正�
         fc.array(arbUnifiedRecord),
         arbRecordTypeFilter,
         (records, typeFilter) => {
-          const result = filterRecords(records, typeFilter, 'all');
+          const result = filterRecords(records, filters({ recordType: typeFilter }));
 
           if (typeFilter === 'all') {
             expect(result.length).toBe(records.length);
@@ -66,7 +82,7 @@ describe('Feature: sake-record-list, Property 2: カテゴリフィルタの正�
         fc.array(arbUnifiedRecord),
         arbCategoryFilter,
         (records, categoryFilter) => {
-          const result = filterRecords(records, 'all', categoryFilter);
+          const result = filterRecords(records, filters({ category: categoryFilter }));
 
           if (categoryFilter === 'all') {
             expect(result.length).toBe(records.length);
@@ -89,16 +105,17 @@ describe('Feature: sake-record-list, Property 3: フィルタの合成（AND条�
         arbRecordTypeFilter,
         arbCategoryFilter,
         (records, typeFilter, categoryFilter) => {
-          const combined = filterRecords(records, typeFilter, categoryFilter);
+          const combined = filterRecords(
+            records,
+            filters({ recordType: typeFilter, category: categoryFilter })
+          );
           const sequential1 = filterRecords(
-            filterRecords(records, typeFilter, 'all'),
-            'all',
-            categoryFilter
+            filterRecords(records, filters({ recordType: typeFilter })),
+            filters({ category: categoryFilter })
           );
           const sequential2 = filterRecords(
-            filterRecords(records, 'all', categoryFilter),
-            typeFilter,
-            'all'
+            filterRecords(records, filters({ category: categoryFilter })),
+            filters({ recordType: typeFilter })
           );
 
           expect(combined).toEqual(sequential1);
@@ -119,8 +136,17 @@ describe('Feature: sake-record-list, Property 6: フィルタはレコードを�
         arbRecordTypeFilter,
         arbCategoryFilter,
         arbSearchQuery,
-        (records, typeFilter, categoryFilter, searchQuery) => {
-          const result = filterRecords(records, typeFilter, categoryFilter, searchQuery);
+        arbRatingFilter,
+        (records, typeFilter, categoryFilter, searchQuery, ratingFilter) => {
+          const result = filterRecords(
+            records,
+            filters({
+              recordType: typeFilter,
+              category: categoryFilter,
+              searchQuery,
+              rating: ratingFilter,
+            })
+          );
 
           expect(result.length).toBeLessThanOrEqual(records.length);
 
@@ -135,13 +161,13 @@ describe('Feature: sake-record-list, Property 6: フィルタはレコードを�
 });
 
 
-describe('Feature: sake-record-list, Property 8: 酒名曖昧検索の正確性', () => {
+describe('Feature: sake-record-list, Property 8: キーワード検索の正確性', () => {
   it('検索クエリが空の場合、全レコードが返る', () => {
     fc.assert(
       fc.property(
         fc.array(arbUnifiedRecord),
         (records) => {
-          const result = filterRecords(records, 'all', 'all', '');
+          const result = filterRecords(records, filters({ searchQuery: '' }));
           expect(result.length).toBe(records.length);
         }
       ),
@@ -172,22 +198,81 @@ describe('Feature: sake-record-list, Property 8: 酒名曖昧検索の正確性'
     expect(fuzzyMatch('hello', 'xyz')).toBe(false);
   });
 
-  it('検索結果の全レコードがクエリにfuzzyマッチする', () => {
+  it('検索結果の全レコードがいずれかの項目でクエリにマッチする', () => {
     fc.assert(
       fc.property(
         fc.array(arbUnifiedRecord),
         fc.string({ minLength: 1, maxLength: 5 }),
         (records, query) => {
-          const result = filterRecords(records, 'all', 'all', query);
+          const result = filterRecords(records, filters({ searchQuery: query }));
           const normalizedQuery = query.toLowerCase().trim();
           if (normalizedQuery !== '') {
             for (const r of result) {
-              expect(fuzzyMatch(r.sakeName.toLowerCase(), normalizedQuery)).toBe(true);
+              expect(matchesSearchQuery(r, normalizedQuery)).toBe(true);
             }
           }
         }
       ),
       { numRuns: 100 }
+    );
+  });
+});
+
+
+describe('Feature: sake-record-list, Property 9: 評価フィルタの正確性', () => {
+  it('★N以上フィルタの結果は評価N以上の飲酒記録だけになる', () => {
+    fc.assert(
+      fc.property(
+        fc.array(arbUnifiedRecord),
+        fc.integer({ min: 1, max: 5 }),
+        (records, threshold) => {
+          const result = filterRecords(
+            records,
+            filters({ rating: threshold as RatingFilter })
+          );
+
+          for (const r of result) {
+            expect(r.type).toBe('drinking');
+            expect(r.rating ?? 0).toBeGreaterThanOrEqual(threshold);
+          }
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('しきい値を上げると結果は減りこそすれ増えない（単調性）', () => {
+    fc.assert(
+      fc.property(
+        fc.array(arbUnifiedRecord),
+        fc.integer({ min: 1, max: 4 }),
+        (records, threshold) => {
+          const looser = filterRecords(records, filters({ rating: threshold as RatingFilter }));
+          const stricter = filterRecords(
+            records,
+            filters({ rating: (threshold + 1) as RatingFilter })
+          );
+
+          expect(stricter.length).toBeLessThanOrEqual(looser.length);
+          for (const item of stricter) {
+            expect(looser).toContainEqual(item);
+          }
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('評価フィルタ all は評価を理由に絞り込まない', () => {
+    fc.assert(
+      fc.property(
+        fc.array(arbUnifiedRecord),
+        (records) => {
+          const result = filterRecords(records, filters({ rating: 'all' }));
+          expect(result.length).toBe(records.length);
+        }
+      ),
+      { numRuns: 50 }
     );
   });
 });

@@ -25,6 +25,11 @@ vi.mock('@/components/ThemeToggle', () => ({
   ThemeToggle: () => <div data-testid="theme-toggle" />,
 }));
 
+// 絞り込み条件の保存先を決めるためにサインイン中のユーザーを参照する
+vi.mock('@/features/auth/AuthContext', () => ({
+  useAuth: () => ({ user: { userId: 'test-user', email: 'a@example.com' } }),
+}));
+
 // 楽観的更新は useRecordList が持つため、取得層だけをモックして本物のフックを動かす
 const mockUseRecordFetch = vi.fn();
 vi.mock('../hooks/useRecordFetch', () => ({
