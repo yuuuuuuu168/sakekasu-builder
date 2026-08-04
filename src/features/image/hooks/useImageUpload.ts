@@ -2,7 +2,8 @@ import { useState, useCallback } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { generateUploadUrl } from '@/graphql/mutations';
 import { validateImageFile } from '../utils/imageValidator';
-import { compressImage } from '../utils/imageCompressor';
+import { compressImage, createThumbnail } from '../utils/imageCompressor';
+import { toThumbnailFileName } from '../lib/thumbnailKey';
 
 const client = generateClient();
 
@@ -103,8 +104,8 @@ export function useImageUpload(): UseImageUploadReturn {
     setImageKeys((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  /** 単一ファイルのアップロード処理 */
-  const uploadSingleFile = async (
+  /** S3 へ1ファイルを PUT してキーを返す */
+  const putToS3 = async (
     file: File,
     recordType: string,
     recordId: string,
@@ -137,6 +138,41 @@ export function useImageUpload(): UseImageUploadReturn {
       return null;
     }
 
+    return key;
+  };
+
+  /**
+   * 一覧表示用のサムネイルを原画の兄弟キーとして保存する。
+   *
+   * 記録に保存するのは原画キーのみで、表示側はそこからサムネイルキーを
+   * 導出する。失敗しても原画へフォールバックできるため、登録処理は止めない。
+   */
+  const uploadThumbnail = async (
+    file: File,
+    recordType: string,
+    recordId: string,
+  ): Promise<void> => {
+    try {
+      const thumbnail = await createThumbnail(
+        file,
+        toThumbnailFileName(file.name),
+      );
+      await putToS3(thumbnail, recordType, recordId);
+    } catch (err) {
+      console.error('サムネイルの生成・アップロードに失敗しました:', err);
+    }
+  };
+
+  /** 単一ファイルのアップロード処理（原画＋サムネイル） */
+  const uploadSingleFile = async (
+    file: File,
+    recordType: string,
+    recordId: string,
+  ): Promise<string | null> => {
+    const key = await putToS3(file, recordType, recordId);
+    if (key === null) return null;
+
+    await uploadThumbnail(file, recordType, recordId);
     return key;
   };
 

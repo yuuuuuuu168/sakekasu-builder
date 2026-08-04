@@ -1,17 +1,10 @@
 import { useState, useEffect } from 'react';
-import { generateClient } from 'aws-amplify/api';
-import { getDownloadUrl } from '@/graphql/queries';
-
-const client = generateClient();
+import { fetchDownloadUrl } from '../lib/downloadUrlCache';
 
 export interface UseImageUrlsReturn {
   imageUrls: string[];
   isLoading: boolean;
   hasError: boolean;
-}
-
-interface GetDownloadUrlResponse {
-  getDownloadUrl: string;
 }
 
 /**
@@ -37,20 +30,10 @@ export function useImageUrls(imageKeys: string[]): UseImageUrlsReturn {
       setHasError(false);
 
       try {
-        const results = await Promise.all(
-          imageKeys.map((key) =>
-            client.graphql({
-              query: getDownloadUrl,
-              variables: { key },
-            }),
-          ),
-        );
+        const urls = await Promise.all(imageKeys.map(fetchDownloadUrl));
 
         if (cancelled) return;
 
-        const urls = results.map(
-          (r) => (r as { data: GetDownloadUrlResponse }).data.getDownloadUrl,
-        );
         setImageUrls(urls);
       } catch (err) {
         if (cancelled) return;
