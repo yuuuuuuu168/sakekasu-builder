@@ -55,7 +55,8 @@ export function ChatWindow({
       transition={{ duration: 0.18, ease: 'easeOut' }}
       role="dialog"
       aria-label="酒ソムリエとの相談"
-      className="fixed bottom-20 right-4 z-50 flex h-[70vh] max-h-[560px] w-[calc(100vw-2rem)] max-w-sm flex-col overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl dark:border-white/10 dark:bg-dark-bg sm:right-6"
+      // dvh を使うのは、iOS でアドレスバーの出入りにより vh がずれるため
+      className="fixed bottom-20 right-4 z-50 flex h-[70dvh] max-h-[560px] w-[calc(100vw-2rem)] max-w-sm flex-col overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl dark:border-white/10 dark:bg-dark-bg sm:right-6"
       data-testid="sommelier-chat-window"
     >
       {/* ヘッダー */}
