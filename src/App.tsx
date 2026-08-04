@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Amplify } from 'aws-amplify';
 import outputs from '../amplify_outputs.json';
 import { ThemeProvider } from '@/components/ThemeProvider';
@@ -10,6 +10,8 @@ import { StatsPage } from '@/features/stats/components/StatsPage';
 import { SommelierChat } from '@/features/sommelier/components/SommelierChat';
 import { AuthProvider, useAuth } from '@/features/auth/AuthContext';
 import { AuthGuard } from '@/features/auth/components/AuthGuard';
+import type { StockDrinkDraft } from '@/features/drinking/types';
+import type { UnifiedRecord } from '@/features/records/types';
 
 Amplify.configure(outputs);
 
@@ -71,6 +73,27 @@ function NavigationBar({
 /** メインアプリコンテンツ（認証済みユーザー向け） */
 function AppContent() {
   const [currentPage, setCurrentPage] = useState<Page>('purchase');
+  // 在庫（購入記録）から飲酒登録へ引き継ぐ情報
+  const [stockDraft, setStockDraft] = useState<StockDrinkDraft | null>(null);
+  // 新しい在庫を選び直したときだけフォームを作り直すためのキー。
+  // 紐づけ解除では変えないので、入力済みの内容は消えない
+  const [stockDraftKey, setStockDraftKey] = useState(0);
+
+  const handleDrinkFromStock = useCallback((record: UnifiedRecord) => {
+    // 飲みきりステータスは持ち回さない。開封済みかどうかの判定は
+    // markPurchaseOpened の条件式でサーバ側が行う
+    setStockDraft({
+      purchaseRecordId: record.id,
+      sakeName: record.sakeName,
+      category: record.category,
+    });
+    setStockDraftKey((key) => key + 1);
+    setCurrentPage('drinking');
+  }, []);
+
+  const handleStockDraftClear = useCallback(() => {
+    setStockDraft(null);
+  }, []);
 
   return (
     <>
@@ -80,9 +103,13 @@ function AppContent() {
       {currentPage === 'purchase' ? (
         <PurchaseRegistrationPage />
       ) : currentPage === 'drinking' ? (
-        <DrinkingRegistrationPage />
+        <DrinkingRegistrationPage
+          key={stockDraftKey}
+          stockDraft={stockDraft}
+          onStockDraftClear={handleStockDraftClear}
+        />
       ) : currentPage === 'records' ? (
-        <RecordListPage />
+        <RecordListPage onDrinkFromStock={handleDrinkFromStock} />
       ) : (
         <StatsPage />
       )}

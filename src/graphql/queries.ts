@@ -60,6 +60,7 @@ export const getDrinkingRecord = /* GraphQL */ `
       memo
       imageKey
       imageKeys
+      purchaseRecordId
       createdAt
       updatedAt
     }
@@ -82,6 +83,7 @@ export const listDrinkingRecords = /* GraphQL */ `
         memo
         imageKey
         imageKeys
+        purchaseRecordId
         createdAt
         updatedAt
       }

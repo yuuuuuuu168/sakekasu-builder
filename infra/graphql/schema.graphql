@@ -48,6 +48,8 @@ type DrinkingRecord {
   memo: String
   imageKey: String
   imageKeys: [String]
+  # 在庫（購入記録）から登録した場合の紐づけ先。手入力の記録では null
+  purchaseRecordId: ID
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
 }
@@ -91,6 +93,9 @@ type Mutation {
   createPurchaseRecord(input: CreatePurchaseRecordInput!): PurchaseRecord
   updatePurchaseRecord(input: UpdatePurchaseRecordInput!): PurchaseRecord
   deletePurchaseRecord(id: ID!): PurchaseRecord
+  # 購入記録を「飲み中」にして開封日時を記録する。
+  # すでに開封済み（飲み中・飲みきり）の場合は何も変更せず null を返す
+  markPurchaseOpened(id: ID!): PurchaseRecord
   createDrinkingRecord(input: CreateDrinkingRecordInput!): DrinkingRecord
   updateDrinkingRecord(input: UpdateDrinkingRecordInput!): DrinkingRecord
   deleteDrinkingRecord(id: ID!): DrinkingRecord
@@ -143,6 +148,7 @@ input CreateDrinkingRecordInput {
   memo: String
   imageKey: String
   imageKeys: [String]
+  purchaseRecordId: ID
 }
 
 # 飲酒記録更新用 Input（id は必須、他はオプション）
