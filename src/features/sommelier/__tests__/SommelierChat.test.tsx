@@ -6,6 +6,7 @@ vi.mock('@/features/auth/AuthContext', () => ({
 }));
 
 import { SommelierChat } from '../components/SommelierChat';
+import { SommelierError } from '../lib/errors';
 import type { SendToSommelier } from '../types';
 
 /** 指定した文字列を1文字ずつ返す送信実装 */
@@ -15,6 +16,18 @@ function makeSend(reply: string): SendToSommelier {
       if (signal.aborted) return;
       yield char;
     }
+  };
+}
+
+/**
+ * 必ず失敗する送信実装。
+ * 何も yield せず throw するだけのジェネレータは require-yield に触れるため、
+ * ここに集約して例外だけを差し替える
+ */
+function makeFailingSend(error: unknown): SendToSommelier {
+  // eslint-disable-next-line require-yield
+  return async function* () {
+    throw error;
   };
 }
 
@@ -147,9 +160,7 @@ describe('SommelierChat', () => {
   });
 
   it('応答が失敗したらエラーを表示する', async () => {
-    const failing: SendToSommelier = async function* () {
-      throw new Error('network error');
-    };
+    const failing = makeFailingSend(new Error('network error'));
     vi.spyOn(console, 'error').mockImplementation(() => {});
     render(<SommelierChat send={failing} />);
     openChat();
@@ -160,6 +171,71 @@ describe('SommelierChat', () => {
     fireEvent.click(screen.getByTestId('chat-send'));
 
     expect(await screen.findByTestId('chat-error')).toBeTruthy();
+    vi.mocked(console.error).mockRestore();
+  });
+
+  it('中断で AbortError が投げられてもエラーとして表示しない', async () => {
+    // 実際の runtimeSend は abort されると fetch が AbortError を投げる
+    const abortingSend: SendToSommelier = async function* (_prompt, { signal }) {
+      yield '考え';
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) return resolve();
+        signal.addEventListener('abort', () => resolve());
+      });
+      throw new DOMException('中断されました', 'AbortError');
+    };
+
+    render(<SommelierChat send={abortingSend} />);
+    openChat();
+
+    fireEvent.change(screen.getByTestId('chat-input'), {
+      target: { value: '長い相談' },
+    });
+    fireEvent.click(screen.getByTestId('chat-send'));
+
+    fireEvent.click(await screen.findByTestId('chat-stop'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-send')).toBeTruthy();
+    });
+    // 自分で止めただけなので、受信済みの内容を残して静かに終わる
+    expect(screen.queryByTestId('chat-error')).toBeNull();
+    expect(screen.getByText(/考え/)).toBeTruthy();
+  });
+
+  it('認証切れは再サインインを促す文言を出す', async () => {
+    const failing = makeFailingSend(new SommelierError('auth', '内部メッセージ'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<SommelierChat send={failing} />);
+    openChat();
+
+    fireEvent.change(screen.getByTestId('chat-input'), {
+      target: { value: '相談' },
+    });
+    fireEvent.click(screen.getByTestId('chat-send'));
+
+    const error = await screen.findByTestId('chat-error');
+    expect(error.textContent).toContain('サインイン');
+    // 内部メッセージは画面に出さない
+    expect(error.textContent).not.toContain('内部メッセージ');
+    vi.mocked(console.error).mockRestore();
+  });
+
+  it('通信断は接続の確認を促す文言を出す', async () => {
+    const failing = makeFailingSend(new TypeError('Failed to fetch'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<SommelierChat send={failing} />);
+    openChat();
+
+    fireEvent.change(screen.getByTestId('chat-input'), {
+      target: { value: '相談' },
+    });
+    fireEvent.click(screen.getByTestId('chat-send'));
+
+    // 種類の判別は runtimeSend が行うため、素の TypeError はここでは unknown 扱い
+    expect((await screen.findByTestId('chat-error')).textContent).toContain(
+      '応答の取得に失敗',
+    );
     vi.mocked(console.error).mockRestore();
   });
 
