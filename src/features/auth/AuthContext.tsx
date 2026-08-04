@@ -16,6 +16,7 @@ import {
 } from 'aws-amplify/auth';
 import { clearMessages } from '@/features/sommelier/lib/chatStorage';
 import { resetSommelierSession } from '@/features/sommelier/lib/runtimeSend';
+import { clearFilterState } from '@/features/records/lib/filterStorage';
 
 /** 認証済みユーザーの型 */
 export interface AuthUser {
@@ -74,14 +75,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     // 端末に残る利用者固有のデータを消してからサインアウトする。
-    // 相談履歴には購入・飲酒の内容が含まれるため、共有端末で
+    // 相談履歴や検索語には購入・飲酒の内容が含まれるため、共有端末で
     // 次の利用者に残さない。Runtime のセッションも切り替える
     if (user) {
       clearMessages(user.userId);
+      clearFilterState(user.userId);
     }
     resetSommelierSession();
 
     await amplifySignOut();
+
+    // 絞り込み条件は画面側が effect で保存し続けるため、上の通信を待つ間に
+    // 書き戻されることがある。画面を落とす直前にもう一度消す（削除は冪等）
+    if (user) {
+      clearFilterState(user.userId);
+    }
     setUser(null);
   }, [user]);
 
