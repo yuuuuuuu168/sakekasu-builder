@@ -35,10 +35,9 @@ export class ApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
 
-    const removalPolicy =
-      props.envName === 'prod'
-        ? cdk.RemovalPolicy.RETAIN
-        : cdk.RemovalPolicy.DESTROY;
+    // 利用者の記録・画像は dev 環境にも実データが入るため、環境名によらず
+    // スタック削除時に残す。削除する場合は明示的に手動操作を要求する
+    const removalPolicy = cdk.RemovalPolicy.RETAIN;
 
     // PurchaseRecord テーブル
     this.purchaseTable = new dynamodb.Table(this, 'PurchaseRecordTable', {
@@ -46,6 +45,10 @@ export class ApiStack extends cdk.Stack {
       partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy,
+      // 誤操作・誤った変更からの復旧手段（35日以内の任意時点に復元可能）
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      // API/コンソールからの誤削除を拒否する（削除には明示的な無効化が必要）
+      deletionProtection: true,
     });
 
     this.purchaseTable.addGlobalSecondaryIndex({
@@ -60,6 +63,8 @@ export class ApiStack extends cdk.Stack {
       partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      deletionProtection: true,
     });
 
     this.drinkingTable.addGlobalSecondaryIndex({
@@ -103,6 +108,8 @@ export class ApiStack extends cdk.Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       removalPolicy,
+      // 画像の誤削除・誤上書きから復旧できるようにする
+      versioned: true,
       cors: [
         {
           allowedOrigins: [
