@@ -32,12 +32,14 @@ export function RecordListPage({ onDrinkFromStock }: RecordListPageProps = {}) {
     sortOption,
     searchQuery,
     drinkingStatusFilter,
+    ratingFilter,
     hasActiveFilter,
     setRecordType,
     setCategory,
     setSortOption,
     setSearchQuery,
     setDrinkingStatusFilter,
+    setRatingFilter,
     resetFilters,
     refetch,
     removeRecord,
@@ -140,12 +142,14 @@ export function RecordListPage({ onDrinkFromStock }: RecordListPageProps = {}) {
             searchQuery={searchQuery}
             sortOption={sortOption}
             drinkingStatusFilter={drinkingStatusFilter}
+            ratingFilter={ratingFilter}
             hasActiveFilter={hasActiveFilter}
             onRecordTypeChange={setRecordType}
             onCategoryChange={setCategory}
             onSearchQueryChange={setSearchQuery}
             onSortChange={setSortOption}
             onDrinkingStatusChange={setDrinkingStatusFilter}
+            onRatingChange={setRatingFilter}
             onReset={resetFilters}
           />
         </div>
