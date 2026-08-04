@@ -10,13 +10,21 @@ import type { SendToSommelier } from '../types';
 interface SommelierChatProps {
   /** 問い合わせの実装。既定はデプロイ済み AgentCore Runtime の呼び出し */
   send?: SendToSommelier;
+  /**
+   * 会話を破棄するときの後始末。既定は Runtime のセッション切り替え。
+   * send を差し替えたときに、既定の後始末が付いてこないようにする
+   */
+  onResetSession?: () => void;
 }
 
 /**
  * どの画面からでも呼び出せるソムリエ相談 UI。
  * 開閉ボタンとチャットウィンドウをまとめて提供する。
  */
-export function SommelierChat({ send = runtimeSend }: SommelierChatProps) {
+export function SommelierChat({
+  send = runtimeSend,
+  onResetSession = resetSommelierSession,
+}: SommelierChatProps) {
   const [isOpen, setIsOpen] = useState(false);
   // 履歴は端末に保存するため、同じ端末を別アカウントで使っても
   // 前の利用者の相談内容が見えないようユーザー単位で分ける
@@ -34,11 +42,11 @@ export function SommelierChat({ send = runtimeSend }: SommelierChatProps) {
     [sendMessage],
   );
 
-  // 会話を破棄するときは Runtime 側のセッションも切り替える
+  // 会話を破棄するときは送信側のセッションも切り替える
   const handleReset = useCallback(() => {
-    resetSommelierSession();
+    onResetSession();
     reset();
-  }, [reset]);
+  }, [onResetSession, reset]);
 
   return (
     <>

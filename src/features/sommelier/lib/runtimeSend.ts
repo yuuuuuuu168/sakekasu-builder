@@ -62,8 +62,10 @@ function parseDataLine(line: string): string | null {
     return null;
   } catch (err) {
     if (err instanceof SyntaxError) {
-      // JSON でない行はそのまま本文として扱う
-      return payload;
+      // Runtime は必ず JSON エンコードされた文字列を返すため、
+      // そうでない行は表示せず捨てる（内部情報を画面に出さない）
+      console.warn('解釈できない応答行を無視しました');
+      return null;
     }
     throw err;
   }

@@ -153,3 +153,28 @@ describe('runtimeSend', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('parseDataLine の防御', () => {
+  beforeEach(() => {
+    resetSommelierSession();
+    fetchAuthSessionMock.mockResolvedValue({
+      tokens: { accessToken: { toString: () => 'test-token' } },
+    });
+  });
+
+  it('JSON でない行は表示せず捨てる（内部情報を出さない）', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async () =>
+        sseResponse([
+          'data: <html>internal error page</html>\n\n',
+          'data: "正常な応答"\n\n',
+        ]),
+      ),
+    );
+
+    // 生のペイロードが本文に混ざらないこと
+    expect(await collect(runtimeSend('相談', { signal }))).toBe('正常な応答');
+  });
+});
