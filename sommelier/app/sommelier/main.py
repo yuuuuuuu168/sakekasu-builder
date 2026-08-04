@@ -50,8 +50,10 @@ MAX_PROMPT_LENGTH = 4000
 MAX_QUERY_PAGES = 10
 MAX_MEMO_LENGTH = 200
 MAX_TEXT_FIELD_LENGTH = 120
-# HTML エンティティの多重エンコードを展開する最大回数
-_MAX_UNESCAPE_PASSES = 5
+# エンティティ展開＋NFKC 正規化を反復する最大回数
+_MAX_NORMALIZE_PASSES = 10
+# 正規化前に切り詰める倍率（保存値が巨大でも正規化コストを一定に保つ）
+_RAW_TRUNCATE_FACTOR = 4
 
 _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 _purchase_table = _dynamodb.Table(TABLE_NAME)
@@ -193,14 +195,17 @@ def _neutralize_text(text: str) -> str:
     構成できない。NFKC は文字数を増やしうるため、呼び出し側は正規化後の
     長さで上限を判定すること。
     """
-    # 多重エンコード（&amp;lt; → &lt; → <）に対応するため冪等になるまで展開する
-    for _ in range(_MAX_UNESCAPE_PASSES):
-        unescaped = html.unescape(text)
-        if unescaped == text:
+    # エンティティ展開と NFKC 正規化は互いに新しい入力を生む（NFKC が全角 ＆ を
+    # & に変えてエンティティを再合成する等）ため、両者を1組にして
+    # 変化がなくなるまで反復する
+    for _ in range(_MAX_NORMALIZE_PASSES):
+        normalized = unicodedata.normalize("NFKC", html.unescape(text))
+        if normalized == text:
             break
-        text = unescaped
-    text = unicodedata.normalize("NFKC", text)
-    return text.replace("<", "(").replace(">", ")")
+        text = normalized
+    # 反復上限に達しても安全なように & 自体を無害化する。& がなければ
+    # いかなるエンティティ形式（&lt; / &#60; / &#x3c;）も再構成できない
+    return text.replace("<", "(").replace(">", ")").replace("&", "＆")
 
 
 def _to_plain(value):
@@ -226,7 +231,10 @@ def _slim_record(item: dict) -> dict:
         value = _to_plain(value)
         if key in _USER_TEXT_FIELDS and isinstance(value, str):
             limit = MAX_MEMO_LENGTH if key == "memo" else MAX_TEXT_FIELD_LENGTH
-            value = f"<user_data>{_neutralize_text(value)[:limit]}</user_data>"
+            # 正規化前に粗く切り詰めて、巨大な保存値による CPU 増幅を防ぐ
+            # （NFKC 展開分の余裕を持たせてから、正規化後に本来の上限で切る）
+            raw = value[: limit * _RAW_TRUNCATE_FACTOR]
+            value = f"<user_data>{_neutralize_text(raw)[:limit]}</user_data>"
         slim[key] = value
     return slim
 
