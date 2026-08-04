@@ -20,6 +20,12 @@ const QUALITY_STEP = 0.1;
 /** 解像度縮小スケール（段階的に縮小） */
 const RESOLUTION_SCALES = [0.75, 0.5, 0.25];
 
+/** サムネイルの最大辺（px）。一覧のサムネ枠は 80px だが Retina を考慮 */
+const THUMBNAIL_MAX_EDGE = 320;
+
+/** サムネイルの JPEG 品質 */
+const THUMBNAIL_QUALITY = 0.7;
+
 export interface CompressionResult {
   file: File;
   originalSize: number;
@@ -188,4 +194,35 @@ export async function compressImage(file: File): Promise<CompressionResult> {
       '画像の圧縮に失敗しました。5MB以下の画像を選択してください',
     );
   }
+}
+
+/**
+ * 一覧表示用のサムネイルを生成する
+ *
+ * 一覧では 80px 四方の枠にしか使わないのに原画（最大 5MB）を
+ * ダウンロードしていたため、長辺 320px・JPEG 品質 0.7 の
+ * 小さな画像を別途作って表示に使う。
+ *
+ * @param file - 元の画像ファイル
+ * @param fileName - 生成するサムネイルのファイル名
+ * @returns サムネイルの File（JPEG）
+ * @throws 画像の読み込み・変換に失敗した場合
+ */
+export async function createThumbnail(
+  file: File,
+  fileName: string,
+): Promise<File> {
+  const img = await loadImage(file);
+  const { naturalWidth: width, naturalHeight: height } = img;
+
+  // 長辺を THUMBNAIL_MAX_EDGE に収める（元が小さい場合は拡大しない）
+  const scale = Math.min(1, THUMBNAIL_MAX_EDGE / Math.max(width, height));
+  const blob = await canvasToBlob(
+    img,
+    Math.max(1, Math.round(width * scale)),
+    Math.max(1, Math.round(height * scale)),
+    THUMBNAIL_QUALITY,
+  );
+
+  return new File([blob], fileName, { type: 'image/jpeg' });
 }

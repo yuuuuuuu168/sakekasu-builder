@@ -11,10 +11,14 @@ vi.mock('aws-amplify/api', () => ({
 }));
 
 import { useImageUrl } from '../hooks/useImageUrl';
+import { clearDownloadUrlCache } from '../lib/downloadUrlCache';
 
 describe('useImageUrl', () => {
   beforeEach(() => {
     mockGraphql.mockReset();
+    // Presigned URL はモジュールレベルでキャッシュされるため、
+    // テスト間で前のケースの URL を引かないよう破棄する
+    clearDownloadUrlCache();
   });
 
   it('imageKey が null の場合は URL 取得をスキップする', () => {
