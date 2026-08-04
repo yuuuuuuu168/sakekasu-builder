@@ -52,7 +52,7 @@ export function DrinkingForm({
   const {
     formData,
     errors,
-    isSaving,
+    isSubmitting: isSubmittingForm,
     handleChange,
     handleBlur,
     handleSubmit,
@@ -72,7 +72,8 @@ export function DrinkingForm({
     (sakeName) => handleChange('sakeName', sakeName),
   );
 
-  const isSubmitting = isSaving || imageUpload.isUploading || isAnalyzing;
+  // 保存だけでなく在庫ステータス更新やフォームのリセットが終わるまで押せないようにする
+  const isSubmitting = isSubmittingForm || imageUpload.isUploading || isAnalyzing;
 
   useEffect(() => {
     if (successMessage) {

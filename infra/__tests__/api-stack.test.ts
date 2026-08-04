@@ -99,7 +99,17 @@ describe('ApiStack', () => {
 
   // Requirements 3.5, 4.6: AppSync リゾルバーが存在する
   it('AppSync リゾルバーが存在する', () => {
-    template.resourceCountIs('AWS::AppSync::Resolver', 13);
+    // CRUD 13本 + markPurchaseOpened
+    template.resourceCountIs('AWS::AppSync::Resolver', 14);
+  });
+
+  // 在庫からの開封は未開封のときだけ更新する（openedAt の上書き防止）
+  it('markPurchaseOpened リゾルバーが未開封を条件にしている', () => {
+    template.hasResourceProperties('AWS::AppSync::Resolver', {
+      TypeName: 'Mutation',
+      FieldName: 'markPurchaseOpened',
+      Code: Match.stringLikeRegexp('attribute_not_exists\\(#drinkingStatus\\) OR #drinkingStatus = :notStarted'),
+    });
   });
 
   // Requirements 3.7: GraphqlApiUrl の CfnOutput が存在する

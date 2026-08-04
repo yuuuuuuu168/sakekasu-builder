@@ -238,6 +238,11 @@ export class ApiStack extends cdk.Stack {
     this.createResolvers(this.purchaseDataSource, 'PurchaseRecord', presignedUrlDataSource);
     this.createResolvers(this.drinkingDataSource, 'DrinkingRecord', presignedUrlDataSource);
 
+    // 在庫から飲酒記録を登録したときの「開封」専用リゾルバー。
+    // 汎用の updatePurchaseRecord と分けているのは、未開封のときだけ更新する条件を
+    // 付けたいため（汎用側に条件を付けるとステータスの手動切り替えが壊れる）
+    this.createMarkPurchaseOpenedResolver();
+
     // CloudFormation 出力
     new cdk.CfnOutput(this, 'GraphqlApiUrl', {
       value: this.graphqlApi.graphqlUrl,
@@ -247,6 +252,61 @@ export class ApiStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'ApiRegion', {
       value: this.region,
       description: 'API リソースの AWS リージョン',
+    });
+  }
+
+  /**
+   * markPurchaseOpened リゾルバーを作成する。
+   *
+   * 未開封（drinkingStatus が NOT_STARTED、または飲みきり機能導入前で属性なし）の
+   * ときだけ「飲み中」にして開封日時を記録する。すでに開封済み・他人の記録の場合は
+   * 条件式で弾き、エラーではなく null を返して呼び出し側に「変更なし」を伝える。
+   * これにより再送・二重送信・端末間のズレがあっても openedAt は上書きされない。
+   */
+  private createMarkPurchaseOpenedResolver(): void {
+    this.purchaseDataSource.createResolver('MarkPurchaseOpenedResolver', {
+      typeName: 'Mutation',
+      fieldName: 'markPurchaseOpened',
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) {
+  const now = util.time.nowISO8601();
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({ id: ctx.args.id }),
+    update: {
+      expression: 'SET #drinkingStatus = :inProgress, #openedAt = :now, #updatedAt = :now',
+      expressionNames: {
+        '#drinkingStatus': 'drinkingStatus',
+        '#openedAt': 'openedAt',
+        '#updatedAt': 'updatedAt',
+      },
+      expressionValues: util.dynamodb.toMapValues({ ':inProgress': 'IN_PROGRESS', ':now': now }),
+    },
+    condition: {
+      expression:
+        '#owner = :expectedOwner AND (attribute_not_exists(#drinkingStatus) OR #drinkingStatus = :notStarted)',
+      expressionNames: { '#owner': 'owner', '#drinkingStatus': 'drinkingStatus' },
+      expressionValues: util.dynamodb.toMapValues({
+        ':expectedOwner': ctx.identity.sub,
+        ':notStarted': 'NOT_STARTED',
+      }),
+    },
+  };
+}
+
+export function response(ctx) {
+  if (ctx.error) {
+    // 条件不成立（開封済み or 他人の記録）は「変更なし」として扱う。
+    // 所有者かどうかを応答から区別できないようにする意図もある
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      return null;
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return ctx.result;
+}
+`),
     });
   }
 

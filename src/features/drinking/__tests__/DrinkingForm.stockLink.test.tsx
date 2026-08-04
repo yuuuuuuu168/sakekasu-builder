@@ -21,7 +21,7 @@ vi.mock('@/features/drinking/hooks/useDrinkingStorage', () => ({
 }));
 
 // 購入記録のステータス更新をモック
-const mockMarkPurchaseAsInProgress = vi.fn(async () => true);
+const mockMarkPurchaseAsInProgress = vi.fn(async () => 'opened');
 vi.mock('@/features/purchase/lib/purchaseStatus', () => ({
   markPurchaseAsInProgress: (...args: unknown[]) => mockMarkPurchaseAsInProgress(...args),
 }));
@@ -33,7 +33,6 @@ const whiskyDraft: StockDrinkDraft = {
   purchaseRecordId: 'purchase-001',
   sakeName: '山崎 12年',
   category: 'WHISKY',
-  drinkingStatus: 'NOT_STARTED',
 };
 
 // 送信を伴うテストでは、飲み方の選択が不要なカテゴリを使って Select 操作を避ける
@@ -41,7 +40,6 @@ const beerDraft: StockDrinkDraft = {
   purchaseRecordId: 'purchase-002',
   sakeName: 'よなよなエール',
   category: 'BEER',
-  drinkingStatus: 'NOT_STARTED',
 };
 
 /** 評価を入れてフォームを送信する */
@@ -55,7 +53,7 @@ describe('DrinkingForm 在庫との紐づけ', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSaveDrinking.mockResolvedValue({ success: true });
-    mockMarkPurchaseAsInProgress.mockResolvedValue(true);
+    mockMarkPurchaseAsInProgress.mockResolvedValue('opened');
   });
 
   it('銘柄名とカテゴリが在庫から引き継がれ、紐づけバナーが出る', () => {
@@ -98,15 +96,29 @@ describe('DrinkingForm 在庫との紐づけ', () => {
     });
   });
 
-  it('すでに飲み中の在庫ではステータスを更新しない', async () => {
-    render(<DrinkingForm stockDraft={{ ...beerDraft, drinkingStatus: 'IN_PROGRESS' }} />);
+  it('すでに開封済みだった場合はステータス更新の文言を出さない', async () => {
+    // 未開封かどうかはサーバ側の条件式が判定する。変更なしなら unchanged が返る
+    mockMarkPurchaseAsInProgress.mockResolvedValue('unchanged');
+    render(<DrinkingForm stockDraft={beerDraft} />);
 
     rateAndSubmit();
 
     await waitFor(() => {
-      expect(mockSaveDrinking).toHaveBeenCalled();
+      expect(mockToastSuccess).toHaveBeenCalledWith('登録が完了しました');
     });
-    expect(mockMarkPurchaseAsInProgress).not.toHaveBeenCalled();
+  });
+
+  it('在庫ステータスの更新に失敗しても登録自体は成功として扱う', async () => {
+    mockMarkPurchaseAsInProgress.mockResolvedValue('failed');
+    render(<DrinkingForm stockDraft={beerDraft} />);
+
+    rateAndSubmit();
+
+    await waitFor(() => {
+      expect(mockToastSuccess).toHaveBeenCalledWith(
+        '登録は完了しましたが、在庫のステータス更新に失敗しました',
+      );
+    });
   });
 
   it('紐づけがない場合は purchaseRecordId が null で送られる', async () => {
@@ -127,6 +139,35 @@ describe('DrinkingForm 在庫との紐づけ', () => {
       );
     });
     expect(mockMarkPurchaseAsInProgress).not.toHaveBeenCalled();
+  });
+
+  it('連打しても登録は1回しか走らない', async () => {
+    // 在庫ステータス更新の途中でボタンが復活しないことを確かめる
+    let resolveMark: (v: string) => void = () => {};
+    mockMarkPurchaseAsInProgress.mockImplementation(
+      () => new Promise((resolve) => { resolveMark = resolve; }),
+    );
+
+    render(<DrinkingForm stockDraft={beerDraft} />);
+
+    fireEvent.click(screen.getByTestId('star-3'));
+    fireEvent.click(screen.getByTestId('submit-button'));
+
+    await waitFor(() => {
+      expect(mockMarkPurchaseAsInProgress).toHaveBeenCalledTimes(1);
+    });
+
+    // 在庫ステータス更新の完了を待たずに再送信を試みる
+    fireEvent.click(screen.getByTestId('submit-button'));
+    fireEvent.submit(screen.getByTestId('drinking-form'));
+
+    resolveMark('opened');
+
+    await waitFor(() => {
+      expect(mockToastSuccess).toHaveBeenCalled();
+    });
+    expect(mockSaveDrinking).toHaveBeenCalledTimes(1);
+    expect(mockMarkPurchaseAsInProgress).toHaveBeenCalledTimes(1);
   });
 
   it('紐づけ解除ボタンで解除が通知される', () => {

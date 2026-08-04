@@ -93,6 +93,9 @@ type Mutation {
   createPurchaseRecord(input: CreatePurchaseRecordInput!): PurchaseRecord
   updatePurchaseRecord(input: UpdatePurchaseRecordInput!): PurchaseRecord
   deletePurchaseRecord(id: ID!): PurchaseRecord
+  # 購入記録を「飲み中」にして開封日時を記録する。
+  # すでに開封済み（飲み中・飲みきり）の場合は何も変更せず null を返す
+  markPurchaseOpened(id: ID!): PurchaseRecord
   createDrinkingRecord(input: CreateDrinkingRecordInput!): DrinkingRecord
   updateDrinkingRecord(input: UpdateDrinkingRecordInput!): DrinkingRecord
   deleteDrinkingRecord(id: ID!): DrinkingRecord
