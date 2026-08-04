@@ -33,9 +33,30 @@ export interface UnifiedRecord {
 export type RecordTypeFilter = 'all' | 'purchase' | 'drinking';
 export type CategoryFilter = 'all' | SakeCategory;
 export type DrinkingStatusFilter = 'all' | DrinkingStatus;
+/** 評価フィルタ。数値は「その星数以上」を意味する */
+export type RatingFilter = 'all' | 1 | 2 | 3 | 4 | 5;
+
+/** 一覧に適用する絞り込み条件のまとまり */
+export interface RecordFilters {
+  recordType: RecordTypeFilter;
+  category: CategoryFilter;
+  searchQuery: string;
+  drinkingStatus: DrinkingStatusFilter;
+  rating: RatingFilter;
+}
+
+export const DEFAULT_FILTERS: RecordFilters = {
+  recordType: 'all',
+  category: 'all',
+  searchQuery: '',
+  drinkingStatus: 'all',
+  rating: 'all',
+};
 
 // ソートオプション
 export type SortOption = 'date-desc' | 'date-asc' | 'price-desc' | 'price-asc' | 'rating-desc' | 'rating-asc';
+
+export const DEFAULT_SORT_OPTION: SortOption = 'date-desc';
 
 // ソートオプションのラベルマッピング
 export const SORT_OPTIONS: { value: SortOption; label: string }[] = [
@@ -60,6 +81,16 @@ export const DRINKING_STATUS_OPTIONS: { value: DrinkingStatusFilter; label: stri
   { value: 'NOT_STARTED', label: '未開封' },
   { value: 'IN_PROGRESS', label: '飲み中' },
   { value: 'FINISHED', label: '飲みきり' },
+];
+
+// 評価フィルタのラベルマッピング（高い方から並べる）
+export const RATING_FILTER_OPTIONS: { value: RatingFilter; label: string }[] = [
+  { value: 'all', label: 'すべて' },
+  { value: 5, label: '★5' },
+  { value: 4, label: '★4以上' },
+  { value: 3, label: '★3以上' },
+  { value: 2, label: '★2以上' },
+  { value: 1, label: '★1以上' },
 ];
 
 // 飲みきりステータスの表示ラベル

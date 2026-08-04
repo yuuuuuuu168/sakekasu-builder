@@ -1,36 +1,56 @@
-import type {
-  UnifiedRecord,
-  RecordTypeFilter,
-  CategoryFilter,
-  DrinkingStatusFilter,
-} from '../types';
+import type { UnifiedRecord, RecordFilters } from '../types';
 
 /**
  * レコードをフィルタリングする純粋関数。
- * 記録種別フィルタ、カテゴリフィルタ、飲みきりステータスフィルタ、酒名検索をAND条件で適用する。
- * 酒名検索は曖昧検索（各文字が順番に含まれるfuzzy match）。
+ * 記録種別・カテゴリ・飲みきりステータス・評価・キーワード検索をAND条件で適用する。
  */
 export function filterRecords(
   records: UnifiedRecord[],
-  recordType: RecordTypeFilter,
-  category: CategoryFilter,
-  searchQuery: string = '',
-  drinkingStatusFilter: DrinkingStatusFilter = 'all'
+  filters: RecordFilters
 ): UnifiedRecord[] {
-  const query = searchQuery.toLowerCase().trim();
+  const query = filters.searchQuery.toLowerCase().trim();
 
   return records.filter((record) => {
     const matchesType =
-      recordType === 'all' || record.type === recordType;
+      filters.recordType === 'all' || record.type === filters.recordType;
     const matchesCategory =
-      category === 'all' || record.category === category;
-    const matchesSearch =
-      query === '' || fuzzyMatch(record.sakeName.toLowerCase(), query);
+      filters.category === 'all' || record.category === filters.category;
+    const matchesSearch = query === '' || matchesSearchQuery(record, query);
     const matchesDrinkingStatus =
-      drinkingStatusFilter === 'all' ||
-      (record.type === 'purchase' && record.drinkingStatus === drinkingStatusFilter);
-    return matchesType && matchesCategory && matchesSearch && matchesDrinkingStatus;
+      filters.drinkingStatus === 'all' ||
+      (record.type === 'purchase' && record.drinkingStatus === filters.drinkingStatus);
+    const matchesRating =
+      filters.rating === 'all' ||
+      (record.type === 'drinking' && (record.rating ?? 0) >= filters.rating);
+    return (
+      matchesType &&
+      matchesCategory &&
+      matchesSearch &&
+      matchesDrinkingStatus &&
+      matchesRating
+    );
   });
+}
+
+/**
+ * キーワード検索の判定。酒名・店名・場所・飲み方・メモを横断して探す。
+ *
+ * 酒名だけは曖昧検索にする（うろ覚えや部分入力から辿れるようにするため）。
+ * 店名やメモまで曖昧検索にすると、離れた位置の文字が拾われて
+ * 無関係な記録が大量に混ざるので、こちらは部分一致で判定する。
+ */
+export function matchesSearchQuery(record: UnifiedRecord, query: string): boolean {
+  if (fuzzyMatch(record.sakeName.toLowerCase(), query)) return true;
+
+  const otherFields = [
+    record.storeName,
+    record.placeName,
+    record.drinkingMethod,
+    record.memo,
+  ];
+  return otherFields.some(
+    (value) => value != null && value.toLowerCase().includes(query)
+  );
 }
 
 /**
