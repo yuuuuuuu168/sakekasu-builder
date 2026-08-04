@@ -19,5 +19,9 @@ export interface ChatMessage {
  */
 export type SendToSommelier = (
   prompt: string,
-  options: { signal: AbortSignal },
+  options: {
+    signal: AbortSignal;
+    /** 直前までの会話。文脈を引き継ぐために送る（今回の発言は含まない） */
+    history: ChatMessage[];
+  },
 ) => AsyncIterable<string>;

@@ -9,6 +9,9 @@ import type { SendToSommelier } from '../types';
 /** AgentCore がセッション識別に使うヘッダー。33文字以上が必要 */
 const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
 
+/** 文脈として送る過去の発言数（エージェント側の上限と揃える） */
+const MAX_HISTORY_MESSAGES = 10;
+
 let sessionId: string | null = null;
 
 /** 会話が続く間は同じセッション ID を使い、Runtime のセッションを再利用する */
@@ -77,8 +80,18 @@ function parseDataLine(line: string): string | null {
  * Cognito のアクセストークンを Bearer で送る。Runtime 側は
  * JWT Authorizer とアプリ内の JWKS 検証の二段で認証している。
  */
-export const runtimeSend: SendToSommelier = async function* (prompt, { signal }) {
+export const runtimeSend: SendToSommelier = async function* (
+  prompt,
+  { signal, history },
+) {
   const token = await getAccessToken();
+
+  // 直近のやり取りだけを文脈として送る（送信量とコストを抑えるため）。
+  // 応答に失敗した発言は文脈として役に立たないので除く
+  const recentHistory = history
+    .filter((m) => !m.error && m.content.trim().length > 0)
+    .slice(-MAX_HISTORY_MESSAGES)
+    .map((m) => ({ role: m.role, content: m.content }));
 
   const response = await fetch(invocationUrl(), {
     method: 'POST',
@@ -87,7 +100,7 @@ export const runtimeSend: SendToSommelier = async function* (prompt, { signal })
       Authorization: `Bearer ${token}`,
       [SESSION_HEADER]: getSessionId(),
     },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, history: recentHistory }),
     signal,
   });
 
