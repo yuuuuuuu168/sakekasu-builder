@@ -15,7 +15,12 @@
       "codeLocation": "app/sommelier/",
       "runtimeVersion": "PYTHON_3_14",
       "networkMode": "PUBLIC",
-      "protocol": "HTTP"
+      "protocol": "HTTP",
+      "envVars": [
+        { "name": "PURCHASE_TABLE_NAME", "value": "dev-sakekasu-purchase-records" },
+        { "name": "COGNITO_USER_POOL_ID", "value": "ap-northeast-1_eZOfInCT4" },
+        { "name": "COGNITO_APP_CLIENT_ID", "value": "3a4unc2dbutrkm2hjn887s1h9m" }
+      ]
     }
   ],
   "memories": [],
