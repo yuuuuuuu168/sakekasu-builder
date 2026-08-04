@@ -12,6 +12,7 @@
 import asyncio
 import html
 import os
+import threading
 import unicodedata
 from decimal import Decimal
 from typing import Optional
@@ -97,22 +98,35 @@ NOT_STARTED（未開封）, IN_PROGRESS（飲み中）, FINISHED（飲みきり�
 
 
 _jwks_client: Optional[PyJWKClient] = None
+# JWKS クライアントの生成とキャッシュアクセスを直列化するロック
+_jwks_lock = threading.Lock()
 
 
 def _cognito_issuer() -> str:
     return f"https://cognito-idp.{AWS_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}"
 
 
-def _get_jwks_client() -> PyJWKClient:
+def _get_signing_keys():
+    """JWKS 署名鍵の一覧を返す。JWKS への一切のアクセスをロックで直列化する。
+
+    認証処理は asyncio.to_thread でワーカースレッド上を並行に走るが、
+    PyJWKClient の遅延生成も内部の JWKSetCache もスレッドセーフではない。
+    ロックなしでは (1) 複数スレッドが別々のクライアントを生成してキャッシュが
+    分裂する、(2) 期限切れ時に全スレッドが同時フェッチする（thundering herd）、
+    (3) 失敗したスレッドの put(None) が成功結果を上書きする、といった競合が起きる。
+    フェッチ中は他スレッドを待たせるが、待った側は温まったキャッシュを引くため
+    外向きフェッチは1回で済む。イベントループはスレッド退避により止まらない。
+    """
     global _jwks_client
-    if _jwks_client is None:
-        _jwks_client = PyJWKClient(
-            f"{_cognito_issuer()}/.well-known/jwks.json",
-            cache_keys=True,
-            cache_jwk_set=True,
-            lifespan=_JWKS_CACHE_SECONDS,
-        )
-    return _jwks_client
+    with _jwks_lock:
+        if _jwks_client is None:
+            _jwks_client = PyJWKClient(
+                f"{_cognito_issuer()}/.well-known/jwks.json",
+                cache_keys=True,
+                cache_jwk_set=True,
+                lifespan=_JWKS_CACHE_SECONDS,
+            )
+        return _jwks_client.get_signing_keys()
 
 
 def _find_cached_signing_key(token: str):
@@ -133,7 +147,7 @@ def _find_cached_signing_key(token: str):
     kid = jwt.get_unverified_header(token).get("kid")
     if not kid:
         return None
-    for key in _get_jwks_client().get_signing_keys():
+    for key in _get_signing_keys():
         if key.key_id == kid:
             return key
     return None
