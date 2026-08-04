@@ -7,6 +7,7 @@ import { PurchaseRegistrationPage } from '@/features/purchase/components/Purchas
 import { DrinkingRegistrationPage } from '@/features/drinking/components/DrinkingRegistrationPage';
 import { RecordListPage } from '@/features/records/components/RecordListPage';
 import { StatsPage } from '@/features/stats/components/StatsPage';
+import { SommelierChat } from '@/features/sommelier/components/SommelierChat';
 import { AuthProvider, useAuth } from '@/features/auth/AuthContext';
 import { AuthGuard } from '@/features/auth/components/AuthGuard';
 
@@ -85,6 +86,9 @@ function AppContent() {
       ) : (
         <StatsPage />
       )}
+
+      {/* どの画面からでも相談できるようページ切り替えの外に置く */}
+      <SommelierChat />
 
       <Toaster />
     </>
