@@ -145,6 +145,14 @@ function RecordThumbnail({
     setImgError(false);
   }, [firstKey]);
 
+  // URL の取得自体に失敗した場合も原画へ切り替える。
+  // ここで諦めるとサムネイル側の一時的な失敗で画像が出なくなる
+  useEffect(() => {
+    if (hasError && !useOriginal) {
+      setUseOriginal(true);
+    }
+  }, [hasError, useOriginal]);
+
   const handleImgError = () => {
     if (!useOriginal) {
       setUseOriginal(true);
