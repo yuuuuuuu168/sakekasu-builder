@@ -13,6 +13,9 @@ const PURCHASE_TABLE_ENV = 'PURCHASE_TABLE_NAME';
 /** エージェントが参照する購入記録テーブルの GSI 名（main.py と一致させる） */
 const OWNER_INDEX_NAME = 'owner-index';
 
+/** DynamoDB のテーブル名として許可する形式（ワイルドカードや区切り文字を弾く） */
+const DYNAMODB_TABLE_NAME_PATTERN = /^[a-zA-Z0-9_.-]{3,255}$/;
+
 export interface AgentCoreStackProps extends StackProps {
   /**
    * The AgentCore project specification containing agents, memories, and credentials.
@@ -75,9 +78,23 @@ export class AgentCoreStack extends Stack {
           `エージェント "${agent.name}" に ${PURCHASE_TABLE_ENV} が設定されていません`,
         );
       }
+      // formatArn は文字列連結なので、設定ファイルの値をそのまま渡すと
+      // "*" や "/" を仕込まれた場合に権限が意図せず広がる。
+      // DynamoDB のテーブル名として妥当な文字だけを許可する
+      if (!DYNAMODB_TABLE_NAME_PATTERN.test(tableName)) {
+        throw new Error(
+          `${PURCHASE_TABLE_ENV} の値が不正です: "${tableName}"（使用できるのは英数字と _ . - の3〜255文字）`,
+        );
+      }
 
       const environment = this.application.environments.get(agent.name);
-      if (!environment) continue;
+      // 権限を付けられないまま進むと、権限不足のエージェントが黙って
+      // デプロイされる。設定ミスは synth 時に落とす（フェイルクローズ）
+      if (!environment) {
+        throw new Error(
+          `エージェント "${agent.name}" の環境が見つからないため権限を付与できません`,
+        );
+      }
 
       const tableArn = Stack.of(this).formatArn({
         service: 'dynamodb',
