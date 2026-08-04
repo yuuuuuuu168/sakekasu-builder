@@ -63,12 +63,18 @@ export function useRecordList(): UseRecordListReturn {
     setAllRecords(fetchedRecords);
   }, [fetchedRecords]);
 
-  // タブを移動して戻ってきたときに絞り込み直さなくて済むよう、前回の条件を復元する
+  // タブを移動して戻ってきたときに絞り込み直さなくて済むよう、前回の条件を復元する。
+  //
+  // マウント時点で userId が確定していることが前提。AuthGuard が認証解決まで
+  // 配下を描画しないため成り立つ（filterPersistence.integration.test.tsx で担保）。
+  // この前提が崩れると空IDで初期化され、既定値が保存済みの条件を上書きしてしまう
   const [filterState, setFilterState] = useState<PersistedFilterState>(() =>
     loadFilterState(userId),
   );
 
   useEffect(() => {
+    // サインアウト後など、ユーザーが確定していないときは書き込まない
+    if (!userId) return;
     saveFilterState(userId, filterState);
   }, [userId, filterState]);
 

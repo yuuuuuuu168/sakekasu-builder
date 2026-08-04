@@ -14,6 +14,9 @@ vi.mock('aws-amplify/auth', () => ({
 
 const { AuthProvider, useAuth } = await import('@/features/auth/AuthContext');
 const { saveMessages, loadMessages } = await import('../lib/chatStorage');
+const { saveFilterState, loadFilterState, DEFAULT_FILTER_STATE } = await import(
+  '@/features/records/lib/filterStorage'
+);
 
 const wrapper = ({ children }: { children: ReactNode }) => (
   <AuthProvider>{children}</AuthProvider>
@@ -42,5 +45,34 @@ describe('サインアウト時の後始末', () => {
     expect(loadMessages('user-a')).toEqual([]);
     expect(amplifySignOut).toHaveBeenCalled();
     expect(result.current.user).toBeNull();
+  });
+
+  it('絞り込み条件も端末から消す（検索語に銘柄名が残るため）', async () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.user?.userId).toBe('user-a'));
+
+    saveFilterState('user-a', { ...DEFAULT_FILTER_STATE, searchQuery: '山崎' });
+
+    await act(async () => {
+      await result.current.signOut();
+    });
+
+    expect(loadFilterState('user-a')).toEqual(DEFAULT_FILTER_STATE);
+  });
+
+  it('サインアウト通信の最中に条件が保存し直されても残らない', async () => {
+    // 画面側は effect で保存し続けるため、通信を待つ間の書き戻しを再現する
+    amplifySignOut.mockImplementationOnce(async () => {
+      saveFilterState('user-a', { ...DEFAULT_FILTER_STATE, searchQuery: '獺祭' });
+    });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.user?.userId).toBe('user-a'));
+
+    await act(async () => {
+      await result.current.signOut();
+    });
+
+    expect(loadFilterState('user-a')).toEqual(DEFAULT_FILTER_STATE);
   });
 });

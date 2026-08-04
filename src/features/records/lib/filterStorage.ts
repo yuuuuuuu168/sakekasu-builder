@@ -10,6 +10,12 @@ import {
   type SortOption,
 } from '../types';
 
+/**
+ * 検索語の上限。曖昧検索は記録数 × クエリ長で走るため、
+ * 壊れた値や書き換えられた localStorage で無駄に長い文字列を掴まないようにする
+ */
+export const MAX_SEARCH_QUERY_LENGTH = 200;
+
 /** 保存する絞り込み状態（並び替えも含める） */
 export interface PersistedFilterState extends RecordFilters {
   sortOption: SortOption;
@@ -61,7 +67,9 @@ export function loadFilterState(userId: string): PersistedFilterState {
       rating: pickValid(stored.rating, RATING_FILTER_OPTIONS, DEFAULT_FILTERS.rating),
       sortOption: pickValid(stored.sortOption, SORT_OPTIONS, DEFAULT_SORT_OPTION),
       searchQuery:
-        typeof stored.searchQuery === 'string' ? stored.searchQuery : DEFAULT_FILTERS.searchQuery,
+        typeof stored.searchQuery === 'string'
+          ? stored.searchQuery.slice(0, MAX_SEARCH_QUERY_LENGTH)
+          : DEFAULT_FILTERS.searchQuery,
     };
   } catch (err) {
     console.error('絞り込み条件の読み込みに失敗しました:', err);
