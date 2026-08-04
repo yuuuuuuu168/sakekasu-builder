@@ -1,5 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+
+vi.mock('@/features/auth/AuthContext', () => ({
+  useAuth: () => ({ user: { userId: 'test-user', email: 'a@example.com' } }),
+}));
+
 import { SommelierChat } from '../components/SommelierChat';
 import type { SendToSommelier } from '../types';
 
@@ -27,6 +32,10 @@ function openChat() {
 }
 
 describe('SommelierChat', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   it('初期状態ではボタンだけが表示される', () => {
     render(<SommelierChat send={makeSend('ok')} />);
 
@@ -152,6 +161,51 @@ describe('SommelierChat', () => {
 
     expect(await screen.findByTestId('chat-error')).toBeTruthy();
     vi.mocked(console.error).mockRestore();
+  });
+
+  it('再マウント後も前回の会話が残っている（リロード相当）', async () => {
+    const { unmount } = render(<SommelierChat send={makeSend('応答です')} />);
+    openChat();
+
+    fireEvent.change(screen.getByTestId('chat-input'), {
+      target: { value: '前回の相談' },
+    });
+    fireEvent.click(screen.getByTestId('chat-send'));
+    // 応答が完了すると停止ボタンが送信ボタンに戻る。保存はこの時点で行われる
+    await waitFor(() => {
+      expect(screen.getByText('応答です')).toBeTruthy();
+      expect(screen.queryByTestId('chat-stop')).toBeNull();
+    });
+
+    unmount();
+
+    render(<SommelierChat send={makeSend('別の応答')} />);
+    openChat();
+
+    expect(screen.getByText('前回の相談')).toBeTruthy();
+    expect(screen.getByText('応答です')).toBeTruthy();
+  });
+
+  it('「新しい相談」の後は再マウントしても履歴が復活しない', async () => {
+    const { unmount } = render(<SommelierChat send={makeSend('応答')} />);
+    openChat();
+
+    fireEvent.change(screen.getByTestId('chat-input'), {
+      target: { value: '消える相談' },
+    });
+    fireEvent.click(screen.getByTestId('chat-send'));
+    await screen.findByText('消える相談');
+
+    fireEvent.click(screen.getByTestId('chat-reset'));
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-empty-state')).toBeTruthy();
+    });
+    unmount();
+
+    render(<SommelierChat send={makeSend('応答')} />);
+    openChat();
+
+    expect(screen.queryByText('消える相談')).toBeNull();
   });
 
   it('「新しい相談」で会話を破棄できる', async () => {

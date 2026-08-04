@@ -4,6 +4,7 @@ import { FloatingChatButton } from './FloatingChatButton';
 import { ChatWindow } from './ChatWindow';
 import { useSommelierChat } from '../hooks/useSommelierChat';
 import { stubSend } from '../lib/stubSend';
+import { useAuth } from '@/features/auth/AuthContext';
 import type { SendToSommelier } from '../types';
 
 interface SommelierChatProps {
@@ -20,8 +21,11 @@ interface SommelierChatProps {
  */
 export function SommelierChat({ send = stubSend }: SommelierChatProps) {
   const [isOpen, setIsOpen] = useState(false);
+  // 履歴は端末に保存するため、同じ端末を別アカウントで使っても
+  // 前の利用者の相談内容が見えないようユーザー単位で分ける
+  const { user } = useAuth();
   const { messages, isResponding, sendMessage, stop, reset } =
-    useSommelierChat(send);
+    useSommelierChat(send, user?.userId ?? '');
 
   const toggle = useCallback(() => setIsOpen((prev) => !prev), []);
   const close = useCallback(() => setIsOpen(false), []);
