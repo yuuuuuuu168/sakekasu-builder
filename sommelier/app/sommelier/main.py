@@ -13,6 +13,7 @@ import asyncio
 import html
 import os
 import threading
+import time
 import unicodedata
 from decimal import Decimal
 from typing import Optional
@@ -65,8 +66,13 @@ _JWKS_CACHE_SECONDS = 300
 # JWKS 取得の HTTP タイムアウト（秒）。ロック保持時間の上限になる
 # （既定の 30 秒ではロックを長時間占有しスレッドプールを枯渇させうる）
 _JWKS_FETCH_TIMEOUT = 5
-# JWKS ロックの獲得待ち上限（秒）。超過したスレッドはワーカーを解放して失敗させる
-_JWKS_LOCK_TIMEOUT = 6
+# JWKS ロックの獲得待ち上限（秒）。urllib の timeout はソケット操作ごとの上限で
+# TLS ハンドシェイク等で複数回発生しうるため、フェッチ上限より十分に長くとる
+_JWKS_LOCK_TIMEOUT = 15
+# 取得失敗後に再取得を試みないクールダウン（秒）。失敗の連鎖増幅を防ぐ
+_JWKS_FAILURE_COOLDOWN = 30
+# 取得失敗時に代替利用する古い鍵の最大許容経過時間（秒）
+_JWKS_STALE_MAX_AGE = 24 * 60 * 60
 
 _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 _purchase_table = _dynamodb.Table(TABLE_NAME)
@@ -105,6 +111,11 @@ NOT_STARTED（未開封）, IN_PROGRESS（飲み中）, FINISHED（飲みきり�
 _jwks_client: Optional[PyJWKClient] = None
 # JWKS クライアントの生成とキャッシュアクセスを直列化するロック
 _jwks_lock = threading.Lock()
+# 直近に取得できた署名鍵と取得時刻（取得失敗時のフォールバック用）
+_jwks_last_good_keys: Optional[list] = None
+_jwks_last_good_at = 0.0
+# サーキットブレーカー: この時刻まで再取得を試みない
+_jwks_retry_after = 0.0
 
 
 def _cognito_issuer() -> str:
@@ -125,15 +136,25 @@ def _get_signing_keys():
     待ち行列が無限に伸びないよう、二重のタイムアウトで最悪時間を有界にする:
     ロック保持時間は HTTP タイムアウト（_JWKS_FETCH_TIMEOUT）で、待ち時間は
     ロック獲得タイムアウト（_JWKS_LOCK_TIMEOUT）で上限を設ける。
-    獲得できなかったスレッドはワーカーを解放して失敗（＝認証拒否）する。
+
+    さらに Cognito 側の一時的な不調で全ユーザーが締め出されないよう、
+    取得失敗時は直近の取得成功分（stale）にフォールバックする。
+    PyJWT の fetch_data() は失敗時にも finally で jwk_set_cache.put(None) を
+    実行してキャッシュを汚染するため、健全な鍵は本モジュール側で保持する。
+    失敗直後はクールダウン中の再取得を行わず、失敗の連鎖増幅を防ぐ。
     """
-    global _jwks_client
+    global _jwks_client, _jwks_last_good_keys, _jwks_last_good_at, _jwks_retry_after
+
     if not _jwks_lock.acquire(timeout=_JWKS_LOCK_TIMEOUT):
         # ここで待ち続けるとスレッドプールを占有して全体が応答不能になるため、
-        # 待ちを打ち切って認証失敗にする（フェイルクローズ）
+        # 待ちを打ち切る。健全な鍵が残っていれば正規利用者を巻き込まずに済む
         log.warning("JWKS ロックの獲得がタイムアウトしました")
-        return []
+        return _stale_signing_keys()
     try:
+        # クールダウン中は外向きフェッチを試みず stale で凌ぐ
+        if time.monotonic() < _jwks_retry_after:
+            return _stale_signing_keys()
+
         if _jwks_client is None:
             _jwks_client = PyJWKClient(
                 f"{_cognito_issuer()}/.well-known/jwks.json",
@@ -142,9 +163,37 @@ def _get_signing_keys():
                 lifespan=_JWKS_CACHE_SECONDS,
                 timeout=_JWKS_FETCH_TIMEOUT,
             )
-        return _jwks_client.get_signing_keys()
+        try:
+            keys = _jwks_client.get_signing_keys()
+        except Exception as err:
+            _jwks_retry_after = time.monotonic() + _JWKS_FAILURE_COOLDOWN
+            log.error("JWKS の取得に失敗しました（stale にフォールバック）: %s", err)
+            return _stale_signing_keys()
+
+        if keys:
+            _jwks_last_good_keys = keys
+            _jwks_last_good_at = time.monotonic()
+            return keys
+        return _stale_signing_keys()
     finally:
         _jwks_lock.release()
+
+
+def _stale_signing_keys():
+    """取得失敗時に代替利用する、直近に取得できた署名鍵を返す。
+
+    署名鍵は公開情報でローテーション頻度も低いため、Cognito 側の一時障害中に
+    古い鍵で検証を続けても署名の正当性は損なわれない。ただし無期限に使うと
+    ローテーション済みの鍵を受け入れ続けるため、経過時間で打ち切る。
+    """
+    if _jwks_last_good_keys is None:
+        return []
+    age = time.monotonic() - _jwks_last_good_at
+    if age > _JWKS_STALE_MAX_AGE:
+        log.error("保持している JWKS が古すぎるため使用しません（経過 %.0f 秒）", age)
+        return []
+    log.warning("JWKS の取得に失敗したため直近の鍵を使用します（経過 %.0f 秒）", age)
+    return _jwks_last_good_keys
 
 
 def _find_cached_signing_key(token: str):
