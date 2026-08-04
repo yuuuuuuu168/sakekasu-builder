@@ -16,6 +16,14 @@
       "runtimeVersion": "PYTHON_3_14",
       "networkMode": "PUBLIC",
       "protocol": "HTTP",
+      "authorizerType": "CUSTOM_JWT",
+      "authorizerConfiguration": {
+        "customJwtAuthorizer": {
+          "discoveryUrl": "https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_eZOfInCT4/.well-known/openid-configuration",
+          "allowedClients": ["3a4unc2dbutrkm2hjn887s1h9m"]
+        }
+      },
+      "requestHeaderAllowlist": ["Authorization"],
       "envVars": [
         { "name": "PURCHASE_TABLE_NAME", "value": "dev-sakekasu-purchase-records" },
         { "name": "COGNITO_USER_POOL_ID", "value": "ap-northeast-1_eZOfInCT4" },
