@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatMessage, SendToSommelier } from '../types';
 import { clearMessages, loadMessages, saveMessages } from '../lib/chatStorage';
+import { SommelierError, isAbortError, messageForError } from '../lib/errors';
 
 export interface UseSommelierChatReturn {
   messages: ChatMessage[];
@@ -108,11 +109,18 @@ export function useSommelierChat(
         }
         updateAssistant({ isStreaming: false });
       } catch (err) {
-        console.error('ソムリエへの問い合わせに失敗しました:', err);
-        updateAssistant({
-          isStreaming: false,
-          error: '応答の取得に失敗しました。時間をおいてもう一度お試しください。',
-        });
+        // 停止ボタンによる中断は失敗ではないので、そのまま受信済みの内容を残す
+        if (isAbortError(err) || controller.signal.aborted) {
+          updateAssistant({ isStreaming: false });
+        } else {
+          const kind = err instanceof SommelierError ? err.kind : 'unknown';
+          // 種類を添えて出す。画面の文言だけでは切り分けられないため
+          console.error(`ソムリエへの問い合わせに失敗しました [${kind}]:`, err);
+          updateAssistant({
+            isStreaming: false,
+            error: messageForError(err),
+          });
+        }
       } finally {
         if (abortRef.current === controller) {
           abortRef.current = null;
