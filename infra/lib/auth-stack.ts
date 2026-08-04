@@ -44,6 +44,10 @@ export class AuthStack extends cdk.Stack {
       userPoolClientName: `${props.envName}-sakekasu-client`,
       authFlows: {
         userSrp: true,
+        // 外形監視の カナリアが監視用ユーザーでサインインするために使う。
+        // このフローは IAM 認証済みの呼び出し元（= 監視 Lambda のロール）からしか
+        // 使えず、ブラウザからは利用できない
+        adminUserPassword: true,
       },
       accessTokenValidity: cdk.Duration.hours(1),
       refreshTokenValidity: cdk.Duration.days(30),
