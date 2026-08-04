@@ -1,4 +1,4 @@
-// Feature: cdk-backend-auth, Property 4: 環境別削除ポリシー
+// Feature: cdk-backend-auth, Property 4: 利用者データの保護
 
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
@@ -10,19 +10,20 @@ import { ApiStack } from '../lib/api-stack.js';
 /**
  * **Validates: Requirements 4.5**
  *
- * Property 4: 環境別削除ポリシー
+ * Property 4: 利用者データの保護
  *
- * 任意の環境名に対して、DynamoDB テーブルの削除ポリシーは
- * 環境名が "prod" の場合 RETAIN、それ以外の場合 DESTROY に設定されること。
+ * 記録テーブルには dev 環境にも実データが入るため、環境名によらず
+ * スタック削除時に残し、誤削除を拒否し、任意時点への復元手段を持つこと。
  *
  * CloudFormation では:
  * - cdk.RemovalPolicy.RETAIN → DeletionPolicy: 'Retain'
- * - cdk.RemovalPolicy.DESTROY → DeletionPolicy: 'Delete'
+ * - deletionProtection: true → DeletionProtectionEnabled: true
+ * - pointInTimeRecoveryEnabled: true → PointInTimeRecoverySpecification
  */
-describe('Property 4: 環境別削除ポリシー', () => {
+describe('Property 4: 利用者データの保護', () => {
   const envNameArb = fc.constantFrom('dev', 'staging', 'prod');
 
-  it('DynamoDB テーブルの DeletionPolicy が環境名に応じて正しく設定される', () => {
+  it('DynamoDB テーブルが環境名によらず保護設定を持つ', () => {
     fc.assert(
       fc.property(envNameArb, (envName) => {
         const app = new cdk.App();
@@ -36,8 +37,6 @@ describe('Property 4: 環境別削除ポリシー', () => {
         const template = Template.fromStack(apiStack);
         const resources = template.toJSON().Resources;
 
-        const expectedPolicy = envName === 'prod' ? 'Retain' : 'Delete';
-
         // DynamoDB テーブルリソースをすべて検査
         const dynamoTables = Object.entries(resources).filter(
           ([_, resource]: [string, any]) =>
@@ -48,13 +47,51 @@ describe('Property 4: 環境別削除ポリシー', () => {
         expect(dynamoTables.length).toBe(2);
 
         for (const [logicalId, resource] of dynamoTables) {
+          const table = resource as any;
+
           expect(
-            (resource as any).DeletionPolicy,
-            `${logicalId} の DeletionPolicy が ${expectedPolicy} であること（envName=${envName}）`,
-          ).toBe(expectedPolicy);
+            table.DeletionPolicy,
+            `${logicalId} の DeletionPolicy が Retain であること（envName=${envName}）`,
+          ).toBe('Retain');
+
+          expect(
+            table.UpdateReplacePolicy,
+            `${logicalId} の UpdateReplacePolicy が Retain であること（envName=${envName}）`,
+          ).toBe('Retain');
+
+          expect(
+            table.Properties?.DeletionProtectionEnabled,
+            `${logicalId} の削除保護が有効であること（envName=${envName}）`,
+          ).toBe(true);
+
+          expect(
+            table.Properties?.PointInTimeRecoverySpecification
+              ?.PointInTimeRecoveryEnabled,
+            `${logicalId} の PITR が有効であること（envName=${envName}）`,
+          ).toBe(true);
         }
       }),
-      { numRuns: 100 },
+      // 環境名は3種類しかなく1回の試行が CDK synth を伴うため試行数を絞る
+      { numRuns: 3 },
     );
+  }, 60_000);
+
+  it('画像バケットが保持設定とバージョニングを持つ', () => {
+    const app = new cdk.App();
+    const authStack = new AuthStack(app, 'TestAuthBucket', { envName: 'dev' });
+    const apiStack = new ApiStack(app, 'TestApiBucket', {
+      envName: 'dev',
+      userPool: authStack.userPool,
+    });
+    const resources = Template.fromStack(apiStack).toJSON().Resources;
+
+    const buckets = Object.entries(resources).filter(
+      ([_, resource]: [string, any]) => resource.Type === 'AWS::S3::Bucket',
+    );
+    expect(buckets.length).toBe(1);
+
+    const [, bucket] = buckets[0] as [string, any];
+    expect(bucket.DeletionPolicy).toBe('Retain');
+    expect(bucket.Properties?.VersioningConfiguration?.Status).toBe('Enabled');
   });
 });
