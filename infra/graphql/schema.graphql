@@ -48,6 +48,8 @@ type DrinkingRecord {
   memo: String
   imageKey: String
   imageKeys: [String]
+  # 在庫（購入記録）から登録した場合の紐づけ先。手入力の記録では null
+  purchaseRecordId: ID
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
 }
@@ -143,6 +145,7 @@ input CreateDrinkingRecordInput {
   memo: String
   imageKey: String
   imageKeys: [String]
+  purchaseRecordId: ID
 }
 
 # 飲酒記録更新用 Input（id は必須、他はオプション）

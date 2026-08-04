@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import type { UnifiedRecord } from '../types';
 
 // --- Mocks ---
@@ -25,10 +25,10 @@ vi.mock('@/components/ThemeToggle', () => ({
   ThemeToggle: () => <div data-testid="theme-toggle" />,
 }));
 
-// Mock useRecordList to provide controlled test data
-const mockUseRecordList = vi.fn();
-vi.mock('../hooks/useRecordList', () => ({
-  useRecordList: (...args: unknown[]) => mockUseRecordList(...args),
+// 楽観的更新は useRecordList が持つため、取得層だけをモックして本物のフックを動かす
+const mockUseRecordFetch = vi.fn();
+vi.mock('../hooks/useRecordFetch', () => ({
+  useRecordFetch: (...args: unknown[]) => mockUseRecordFetch(...args),
 }));
 
 // Import after mocks
@@ -68,29 +68,27 @@ const drinkingRecord: UnifiedRecord = {
 
 const testRecords = [purchaseRecord, drinkingRecord];
 
-const baseMockReturn = {
-  records: testRecords,
-  isLoading: false,
-  error: null,
-  recordType: 'all' as const,
-  category: 'all' as const,
-  sortOption: 'date-desc' as const,
-  searchQuery: '',
-  hasActiveFilter: false,
-  setRecordType: vi.fn(),
-  setCategory: vi.fn(),
-  setSortOption: vi.fn(),
-  setSearchQuery: vi.fn(),
-  resetFilters: vi.fn(),
-  refetch: vi.fn(),
-};
+/** 指定した銘柄のカードにある削除ボタンを押す（並び順に依存しないようにする） */
+function clickDeleteButtonOf(sakeName: string) {
+  const card = screen
+    .getAllByTestId('record-card')
+    .find((el) => within(el).queryByText(sakeName) !== null);
+  if (!card) throw new Error(`card not found: ${sakeName}`);
+  fireEvent.click(within(card).getByRole('button', { name: '削除' }));
+}
 
 // --- Tests ---
 
 describe('RecordListPage 削除統合テスト', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseRecordList.mockReturnValue({ ...baseMockReturn, records: testRecords });
+    // records は参照が変わると再同期が走るため、同じ配列を返し続ける
+    mockUseRecordFetch.mockReturnValue({
+      records: testRecords,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
     mockGraphql.mockResolvedValue({ data: {} });
   });
 
@@ -103,9 +101,8 @@ describe('RecordListPage 削除統合テスト', () => {
     expect(cards).toHaveLength(2);
     expect(screen.getByText('獺祭 純米大吟醸')).toBeInTheDocument();
 
-    // 最初の記録の削除ボタンをクリック
-    const deleteButtons = screen.getAllByRole('button', { name: '削除' });
-    fireEvent.click(deleteButtons[0]);
+    // 購入記録の削除ボタンをクリック
+    clickDeleteButtonOf('獺祭 純米大吟醸');
 
     // 確認ダイアログが表示される
     await waitFor(() => {
@@ -132,8 +129,7 @@ describe('RecordListPage 削除統合テスト', () => {
     render(<RecordListPage />);
 
     // 削除ボタンをクリック
-    const deleteButtons = screen.getAllByRole('button', { name: '削除' });
-    fireEvent.click(deleteButtons[0]);
+    clickDeleteButtonOf('獺祭 純米大吟醸');
 
     // 確認ダイアログで「削除する」をクリック
     await waitFor(() => {
@@ -160,8 +156,7 @@ describe('RecordListPage 削除統合テスト', () => {
     expect(screen.getByText('獺祭 純米大吟醸')).toBeInTheDocument();
 
     // 削除ボタンをクリック
-    const deleteButtons = screen.getAllByRole('button', { name: '削除' });
-    fireEvent.click(deleteButtons[0]);
+    clickDeleteButtonOf('獺祭 純米大吟醸');
 
     // 確認ダイアログで「削除する」をクリック
     await waitFor(() => {

@@ -22,6 +22,7 @@ export interface UnifiedRecord {
   placeName?: string;
   drinkingMethod?: string;
   rating?: number; // 1〜5
+  purchaseRecordId?: string | null; // 在庫（購入記録）から登録した場合の紐づけ先
   imageKey?: string | null;
   imageKeys: string[];
   createdAt: string;

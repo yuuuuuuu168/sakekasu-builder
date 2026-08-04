@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
-import type { DrinkingFormData, DrinkingValidationErrors } from '../types';
-import { categoryRequiresDrinkingMethod } from '../types';
+import type { DrinkingFormData, DrinkingValidationErrors, StockDrinkDraft } from '../types';
+import { categoryRequiresDrinkingMethod, STOCK_DRINK_PLACE_NAME } from '../types';
 import type { SakeCategory } from '../../purchase/types';
+import { markPurchaseAsInProgress } from '@/features/purchase/lib/purchaseStatus';
 import { useDrinkingValidation } from './useDrinkingValidation';
 import { useDrinkingStorage } from './useDrinkingStorage';
 import { useImageUpload } from '@/features/image/hooks/useImageUpload';
@@ -13,6 +14,10 @@ export interface UseDrinkingFormOptions {
   recordId?: string;
   /** フォームの初期値（編集モードでのプリフィル用） */
   initialData?: DrinkingFormData;
+  /** 在庫（購入記録）から登録する場合の紐づけ情報 */
+  stockDraft?: StockDrinkDraft | null;
+  /** 在庫からの登録が完了したときの通知（紐づけ解除に使う） */
+  onStockDrinkSaved?: () => void;
 }
 
 export interface UseDrinkingFormReturn {
@@ -42,12 +47,25 @@ export function getInitialDrinkingFormData(placeName: string = ''): DrinkingForm
   };
 }
 
+/**
+ * 在庫（購入記録）から飲む場合のフォーム初期値。
+ * 銘柄名とカテゴリを引き継ぎ、飲んだ場所は自宅を既定にする。
+ */
+export function getStockDrinkFormData(draft: StockDrinkDraft): DrinkingFormData {
+  return {
+    ...getInitialDrinkingFormData(STOCK_DRINK_PLACE_NAME),
+    sakeName: draft.sakeName,
+    category: draft.category,
+    drinkingMethod: categoryRequiresDrinkingMethod(draft.category) ? '' : '-',
+  };
+}
+
 export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFormReturn {
-  const { recordId, initialData } = options ?? {};
+  const { recordId, initialData, stockDraft, onStockDrinkSaved } = options ?? {};
   const isEditMode = recordId !== undefined;
 
   const [formData, setFormData] = useState<DrinkingFormData>(
-    () => initialData ?? getInitialDrinkingFormData(),
+    () => initialData ?? (stockDraft ? getStockDrinkFormData(stockDraft) : getInitialDrinkingFormData()),
   );
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -114,18 +132,36 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
       imageKey = imageKeys[0] ?? null;
     }
 
-    const result = await saveDrinking(formData, { imageKey, imageKeys });
+    const result = await saveDrinking(formData, {
+      imageKey,
+      imageKeys,
+      purchaseRecordId: stockDraft?.purchaseRecordId ?? null,
+    });
 
-    if (result.success) {
-      // 飲んだ場所を保持してリセット
-      setFormData(getInitialDrinkingFormData(formData.placeName));
-      clearErrors();
-      imageUpload.clearImage();
-      setSuccessMessage('登録が完了しました');
-    } else {
+    if (!result.success) {
       setErrorMessage(result.error || '登録に失敗しました。もう一度お試しください');
+      return;
     }
-  }, [formData, isValid, isEditMode, recordId, saveDrinking, updateDrinking, clearErrors, imageUpload]);
+
+    // 在庫から登録した場合、未開封なら「飲み中」へ自動更新する。
+    // ここで失敗しても飲酒記録自体は登録済みなのでメッセージだけ変える
+    let message = '登録が完了しました';
+    if (stockDraft) {
+      if (stockDraft.drinkingStatus === 'NOT_STARTED') {
+        const opened = await markPurchaseAsInProgress(stockDraft.purchaseRecordId);
+        message = opened
+          ? '登録が完了しました。在庫を「飲み中」に更新しました'
+          : '登録は完了しましたが、在庫のステータス更新に失敗しました';
+      }
+      onStockDrinkSaved?.();
+    }
+
+    // 飲んだ場所を保持してリセット
+    setFormData(getInitialDrinkingFormData(formData.placeName));
+    clearErrors();
+    imageUpload.clearImage();
+    setSuccessMessage(message);
+  }, [formData, isValid, isEditMode, recordId, saveDrinking, updateDrinking, clearErrors, imageUpload, stockDraft, onStockDrinkSaved]);
 
   return {
     formData,

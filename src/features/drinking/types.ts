@@ -1,7 +1,24 @@
 import type { SakeCategory } from '../purchase/types';
+import type { DrinkingStatus } from '@/types/schema';
 
 // 飲み方の型定義
 export type DrinkingMethod = string;
+
+/**
+ * 在庫（購入記録）から飲酒登録へ引き継ぐ情報。
+ * 記録一覧の「これを飲む」から飲酒登録画面へ渡される。
+ */
+export interface StockDrinkDraft {
+  /** 紐づけ先の購入記録 ID */
+  purchaseRecordId: string;
+  sakeName: string;
+  category: SakeCategory;
+  /** 引き継いだ時点の飲みきりステータス（未開封なら登録時に飲み中へ更新する） */
+  drinkingStatus: DrinkingStatus;
+}
+
+/** 在庫から飲む場合の「飲んだ場所」の初期値 */
+export const STOCK_DRINK_PLACE_NAME = '自宅';
 
 // 飲み方が不要なカテゴリ（ビール・ワインは飲み方選択不要）
 export const CATEGORIES_WITHOUT_DRINKING_METHOD: SakeCategory[] = ['BEER', 'WINE'];
