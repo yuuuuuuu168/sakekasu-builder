@@ -6,6 +6,7 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 const { runtimeSend, resetSommelierSession } = await import('../lib/runtimeSend');
+const { isAbortError } = await import('../lib/errors');
 
 /** SSE 形式のレスポンスを組み立てる（実際の Runtime と同じ形） */
 function sseResponse(lines: string[], init: ResponseInit = {}) {
@@ -169,29 +170,51 @@ describe('runtimeSend', () => {
     expect(third).not.toBe(first);
   });
 
-  it('認証エラー（401/403）はログインし直す案内にする', async () => {
+  it('認証エラー（401/403）は auth として区別する', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(new Response('', { status: 403 })),
     );
 
-    await expect(collect(runtimeSend('相談', noHistory))).rejects.toThrow(
-      /ログインし直/,
-    );
+    await expect(collect(runtimeSend('相談', noHistory))).rejects.toMatchObject({
+      kind: 'auth',
+      status: 403,
+    });
   });
 
-  it('その他の HTTP エラーはステータス付きで失敗する', async () => {
+  it('その他の HTTP エラーは server としてステータス付きで失敗する', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(new Response('', { status: 500 })),
     );
 
-    await expect(collect(runtimeSend('相談', noHistory))).rejects.toThrow(
-      /HTTP 500/,
+    await expect(collect(runtimeSend('相談', noHistory))).rejects.toMatchObject({
+      kind: 'server',
+      status: 500,
+    });
+  });
+
+  it('通信自体に失敗した場合は network として区別する', async () => {
+    // fetch は接続できないと TypeError を投げる
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    await expect(collect(runtimeSend('相談', noHistory))).rejects.toMatchObject({
+      kind: 'network',
+    });
+  });
+
+  it('中断はそのまま伝える（失敗として扱わない）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new DOMException('中断されました', 'AbortError')),
+    );
+
+    await expect(collect(runtimeSend('相談', noHistory))).rejects.toSatisfy(
+      (err: unknown) => isAbortError(err),
     );
   });
 
-  it('エージェントがエラーを返した場合は例外にする', async () => {
+  it('エージェントがエラーを返した場合は server として例外にする', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -201,19 +224,30 @@ describe('runtimeSend', () => {
       ),
     );
 
-    await expect(collect(runtimeSend('相談', noHistory))).rejects.toThrow(
-      /error occurred/,
-    );
+    await expect(collect(runtimeSend('相談', noHistory))).rejects.toMatchObject({
+      kind: 'server',
+    });
   });
 
-  it('トークンが取得できない場合は呼び出さない', async () => {
+  it('トークンが取得できない場合は呼び出さず auth にする', async () => {
     fetchAuthSessionMock.mockResolvedValue({ tokens: undefined });
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(collect(runtimeSend('相談', noHistory))).rejects.toThrow(
-      /認証トークン/,
-    );
+    await expect(collect(runtimeSend('相談', noHistory))).rejects.toMatchObject({
+      kind: 'auth',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('トークンの更新に失敗した場合も auth にする', async () => {
+    fetchAuthSessionMock.mockRejectedValue(new Error('NotAuthorizedException'));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(collect(runtimeSend('相談', noHistory))).rejects.toMatchObject({
+      kind: 'auth',
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

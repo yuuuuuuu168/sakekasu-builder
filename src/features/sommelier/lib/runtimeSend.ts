@@ -5,6 +5,7 @@ import {
   SOMMELIER_RUNTIME_REGION,
 } from '../config';
 import type { SendToSommelier } from '../types';
+import { SommelierError, isAbortError, toSommelierError } from './errors';
 
 /** AgentCore がセッション識別に使うヘッダー。33文字以上が必要 */
 const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
@@ -36,10 +37,17 @@ function invocationUrl(): string {
 }
 
 async function getAccessToken(): Promise<string> {
-  const session = await fetchAuthSession();
+  let session: Awaited<ReturnType<typeof fetchAuthSession>>;
+  try {
+    session = await fetchAuthSession();
+  } catch (err) {
+    // 期限切れトークンの更新に失敗した場合もここに来る
+    throw new SommelierError('auth', '認証情報を取得できませんでした', { cause: err });
+  }
+
   const token = session.tokens?.accessToken?.toString();
   if (!token) {
-    throw new Error('認証トークンを取得できませんでした');
+    throw new SommelierError('auth', '認証トークンを取得できませんでした');
   }
   return token;
 }
@@ -59,7 +67,10 @@ function parseDataLine(line: string): string | null {
     const parsed: unknown = JSON.parse(payload);
     if (typeof parsed === 'string') return parsed;
     if (parsed && typeof parsed === 'object' && 'error' in parsed) {
-      throw new Error(String((parsed as { message?: string }).message ?? 'agent error'));
+      throw new SommelierError(
+        'server',
+        String((parsed as { message?: string }).message ?? 'agent error'),
+      );
     }
     // 想定外の形は表示しない（内部情報を出さないため）
     return null;
@@ -93,25 +104,34 @@ export const runtimeSend: SendToSommelier = async function* (
     .slice(-MAX_HISTORY_MESSAGES)
     .map((m) => ({ role: m.role, content: m.content }));
 
-  const response = await fetch(invocationUrl(), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      [SESSION_HEADER]: getSessionId(),
-    },
-    body: JSON.stringify({ prompt, history: recentHistory }),
-    signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(invocationUrl(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        [SESSION_HEADER]: getSessionId(),
+      },
+      body: JSON.stringify({ prompt, history: recentHistory }),
+      signal,
+    });
+  } catch (err) {
+    // 中断はそのまま伝える。呼び出し側が失敗と区別できるようにする
+    if (isAbortError(err)) throw err;
+    throw toSommelierError(err);
+  }
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
-      throw new Error('認証に失敗しました。ログインし直してください');
+      throw new SommelierError('auth', '認証に失敗しました', { status: response.status });
     }
-    throw new Error(`ソムリエの呼び出しに失敗しました (HTTP ${response.status})`);
+    throw new SommelierError('server', 'ソムリエの呼び出しに失敗しました', {
+      status: response.status,
+    });
   }
   if (!response.body) {
-    throw new Error('応答を受信できませんでした');
+    throw new SommelierError('server', '応答を受信できませんでした');
   }
 
   const reader = response.body.getReader();
@@ -120,7 +140,15 @@ export const runtimeSend: SendToSommelier = async function* (
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (err) {
+        // 受信途中で切れた場合。中断はそのまま伝える
+        if (isAbortError(err)) throw err;
+        throw new SommelierError('network', '応答の受信が中断されました', { cause: err });
+      }
+      const { done, value } = chunk;
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
