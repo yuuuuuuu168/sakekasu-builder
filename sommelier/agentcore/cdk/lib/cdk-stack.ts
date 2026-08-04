@@ -7,11 +7,11 @@ import {
 import { CfnOutput, Stack, aws_iam as iam, type StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
-/**
- * エージェントが参照する購入記録テーブル。
- * agentcore.json の envVars（PURCHASE_TABLE_NAME）と揃える必要がある。
- */
-const PURCHASE_TABLE_NAME = 'dev-sakekasu-purchase-records';
+/** エージェントに渡すテーブル名の環境変数名 */
+const PURCHASE_TABLE_ENV = 'PURCHASE_TABLE_NAME';
+
+/** エージェントが参照する購入記録テーブルの GSI 名（main.py と一致させる） */
+const OWNER_INDEX_NAME = 'owner-index';
 
 export interface AgentCoreStackProps extends StackProps {
   /**
@@ -62,18 +62,36 @@ export class AgentCoreStack extends Stack {
     // エージェントの購入記録取得 Tool 用に DynamoDB の読み取り権限を付与する。
     // Bedrock の呼び出し権限は L3 コンストラクトが自動で付けるが、
     // アプリ固有のデータソースへの権限はここで明示的に与える必要がある。
-    const tableArn = Stack.of(this).formatArn({
-      service: 'dynamodb',
-      resource: 'table',
-      resourceName: PURCHASE_TABLE_NAME,
-    });
-    const readPurchaseRecords = new iam.PolicyStatement({
-      actions: ['dynamodb:Query', 'dynamodb:GetItem'],
-      // GSI（owner-index）を使うためインデックスの ARN も対象に含める
-      resources: [tableArn, `${tableArn}/index/*`],
-    });
-    for (const environment of this.application.environments.values()) {
-      environment.runtime.role.addToPrincipalPolicy(readPurchaseRecords);
+    //
+    // テーブル名は agentcore.json の envVars を唯一の定義元とし、ここでは
+    // それを読み取る。CDK 側に別途ハードコードすると、環境ごとに値を変えた
+    // ときに権限とエージェントの参照先がずれる（設定ドリフト）ため。
+    for (const agent of spec.runtimes ?? []) {
+      const tableName = agent.envVars?.find(
+        (v) => v.name === PURCHASE_TABLE_ENV,
+      )?.value;
+      if (!tableName) {
+        throw new Error(
+          `エージェント "${agent.name}" に ${PURCHASE_TABLE_ENV} が設定されていません`,
+        );
+      }
+
+      const environment = this.application.environments.get(agent.name);
+      if (!environment) continue;
+
+      const tableArn = Stack.of(this).formatArn({
+        service: 'dynamodb',
+        resource: 'table',
+        resourceName: tableName,
+      });
+      environment.runtime.role.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          actions: ['dynamodb:Query', 'dynamodb:GetItem'],
+          // GSI 経由で読むためインデックスも対象にするが、実際に使う
+          // owner-index だけに限定する（今後 GSI が増えても自動で広がらない）
+          resources: [tableArn, `${tableArn}/index/${OWNER_INDEX_NAME}`],
+        }),
+      );
     }
 
     // Stack-level output
