@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import type { RecordType, UnifiedRecord } from '../types';
 import { CATEGORY_FILTER_OPTIONS, DRINKING_STATUS_DISPLAY } from '../types';
@@ -6,6 +6,7 @@ import { DeleteButton } from './DeleteButton';
 import { EditButton } from './EditButton';
 import { ConfirmDialog } from './ConfirmDialog';
 import { useImageUrl } from '@/features/image/hooks/useImageUrl';
+import { toThumbnailKey } from '@/features/image/lib/thumbnailKey';
 import type { DrinkingStatus } from '@/types/schema';
 
 interface RecordCardProps {
@@ -130,9 +131,27 @@ function RecordThumbnail({
   onClickImage: (index: number) => void;
 }) {
   const firstKey = imageKeys[0] ?? null;
-  const { imageUrl, isLoading, hasError } = useImageUrl(firstKey);
+  // 一覧では軽いサムネイルを優先する。サムネイルが未生成の既存記録では
+  // 読み込みに失敗するため、その場合だけ原画にフォールバックする
+  const [useOriginal, setUseOriginal] = useState(false);
+  const activeKey = firstKey && !useOriginal ? toThumbnailKey(firstKey) : firstKey;
+  const { imageUrl, isLoading, hasError } = useImageUrl(activeKey);
   const [imgError, setImgError] = useState(false);
   const count = imageKeys.length;
+
+  // 表示対象の画像が変わったらフォールバック状態を戻す
+  useEffect(() => {
+    setUseOriginal(false);
+    setImgError(false);
+  }, [firstKey]);
+
+  const handleImgError = () => {
+    if (!useOriginal) {
+      setUseOriginal(true);
+      return;
+    }
+    setImgError(true);
+  };
 
   if (count === 0) {
     return <ImagePlaceholder />;
@@ -158,7 +177,9 @@ function RecordThumbnail({
         src={imageUrl}
         alt={`${sakeName}の画像`}
         className="h-full w-full object-cover"
-        onError={() => setImgError(true)}
+        loading="lazy"
+        decoding="async"
+        onError={handleImgError}
       />
       {count > 1 && (
         <span

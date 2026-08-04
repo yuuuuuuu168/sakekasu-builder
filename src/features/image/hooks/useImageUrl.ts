@@ -1,8 +1,5 @@
 import { useState, useEffect } from 'react';
-import { generateClient } from 'aws-amplify/api';
-import { getDownloadUrl } from '@/graphql/queries';
-
-const client = generateClient();
+import { fetchDownloadUrl } from '../lib/downloadUrlCache';
 
 export interface UseImageUrlReturn {
   /** 画像の Presigned URL */
@@ -11,10 +8,6 @@ export interface UseImageUrlReturn {
   isLoading: boolean;
   /** エラーフラグ */
   hasError: boolean;
-}
-
-interface GetDownloadUrlResponse {
-  getDownloadUrl: string;
 }
 
 /**
@@ -46,15 +39,11 @@ export function useImageUrl(imageKey: string | null | undefined): UseImageUrlRet
       setHasError(false);
 
       try {
-        const result = await client.graphql({
-          query: getDownloadUrl,
-          variables: { key: imageKey },
-        });
+        const url = await fetchDownloadUrl(imageKey);
 
         if (cancelled) return;
 
-        const response = result as { data: GetDownloadUrlResponse };
-        setImageUrl(response.data.getDownloadUrl);
+        setImageUrl(url);
       } catch (err) {
         if (cancelled) return;
         console.error('Failed to fetch download URL:', err);
