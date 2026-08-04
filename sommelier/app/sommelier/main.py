@@ -54,8 +54,12 @@ MAX_TEXT_FIELD_LENGTH = 120
 _MAX_NORMALIZE_PASSES = 10
 # 正規化前に切り詰める倍率（保存値が巨大でも正規化コストを一定に保つ）
 _RAW_TRUNCATE_FACTOR = 4
-# 正規化が収束しない敵対的入力を置き換える文字列
+# 正規化が収束しない敵対的入力の表示用文字列（判定はこの文字列ではなく
+# _neutralize_text() が None を返すかで行う。ユーザーが同じ文字列を
+# 入力しても誤検知しないようにするため）
 _UNSAFE_TEXT_PLACEHOLDER = "(表示できない値)"
+# JWKS キャッシュの有効期間（秒）。期限切れ時の再取得で鍵ローテーションに追従する
+_JWKS_CACHE_SECONDS = 300
 
 _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 _purchase_table = _dynamodb.Table(TABLE_NAME)
@@ -102,9 +106,31 @@ def _get_jwks_client() -> PyJWKClient:
     global _jwks_client
     if _jwks_client is None:
         _jwks_client = PyJWKClient(
-            f"{_cognito_issuer()}/.well-known/jwks.json", cache_keys=True
+            f"{_cognito_issuer()}/.well-known/jwks.json",
+            cache_keys=True,
+            cache_jwk_set=True,
+            lifespan=_JWKS_CACHE_SECONDS,
         )
     return _jwks_client
+
+
+def _find_cached_signing_key(token: str):
+    """キャッシュ済み JWK セットの中からトークンの kid に一致する鍵を返す。
+
+    PyJWKClient.get_signing_key_from_jwt() は kid が見つからないと
+    refresh=True で JWKS を強制再取得するため、未知の kid を並べた
+    リクエストが Cognito への外向きフェッチ増幅に使える。
+    ここではキャッシュ内の照合だけを行い、見つからなければ再取得せず拒否する。
+    鍵ローテーションはキャッシュ期限（_JWKS_CACHE_SECONDS）切れ時の
+    通常の再取得で反映される。
+    """
+    kid = jwt.get_unverified_header(token).get("kid")
+    if not kid:
+        return None
+    for key in _get_jwks_client().get_signing_keys():
+        if key.key_id == kid:
+            return key
+    return None
 
 
 def _verify_and_get_sub(token: str) -> str:
@@ -113,7 +139,10 @@ def _verify_and_get_sub(token: str) -> str:
         log.error("COGNITO_USER_POOL_ID が未設定のため JWT を検証できません")
         return ""
     try:
-        signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
+        signing_key = _find_cached_signing_key(token)
+        if signing_key is None:
+            log.warning("既知の署名鍵に一致しない kid のトークンを拒否しました")
+            return ""
         # verify_aud=False の理由: Cognito の access token は aud クレームを持たず、
         # id token のみが持つ。audience= を渡すと access token が常に失敗し、
         # 渡さないと aud を持つ id token が PyJWT 標準検証で常に失敗する。
@@ -188,7 +217,7 @@ _VALID_STATUSES = frozenset({"NOT_STARTED", "IN_PROGRESS", "FINISHED"})
 _USER_TEXT_FIELDS = frozenset({"sakeName", "storeName", "memo"})
 
 
-def _neutralize_text(text: str) -> str:
+def _neutralize_text(text: str) -> Optional[str]:
     """LLM 文脈に入れるユーザー文字列からタグ構成能力を除去する。
 
     HTML エンティティ展開（&lt; / 多重エンコードの &amp;lt; 等）→ NFKC 正規化
@@ -211,9 +240,12 @@ def _neutralize_text(text: str) -> str:
     # 上限内に収束しない入力は多重エンコードを積んだ敵対的入力とみなして破棄する。
     # 「あと1パス足す」対処ではネストを1段増やされるだけなので、
     # 収束したかどうかで判定してイタチごっこを構造的に断ち切る。
+    # 判定結果は None で返す。表示用文字列との一致で判定すると、
+    # ユーザーが同じ文字列（全角括弧は NFKC で半角化される）を入力しただけで
+    # 敵対的とみなす誤検知が起きるため
     if not converged:
         log.warning("正規化が収束しない入力を破棄しました")
-        return _UNSAFE_TEXT_PLACEHOLDER
+        return None
 
     # 収束済み = これ以上デコードされる表現は残っていない。
     # 山括弧を潰せば境界タグは構成不能。& も保険で全角化する
@@ -246,7 +278,9 @@ def _slim_record(item: dict) -> dict:
             # 正規化前に粗く切り詰めて、巨大な保存値による CPU 増幅を防ぐ
             # （NFKC 展開分の余裕を持たせてから、正規化後に本来の上限で切る）
             raw = value[: limit * _RAW_TRUNCATE_FACTOR]
-            value = f"<user_data>{_neutralize_text(raw)[:limit]}</user_data>"
+            safe = _neutralize_text(raw)
+            body = _UNSAFE_TEXT_PLACEHOLDER if safe is None else safe[:limit]
+            value = f"<user_data>{body}</user_data>"
         slim[key] = value
     return slim
 
@@ -346,15 +380,16 @@ async def invoke(payload, context):
         return
 
     # ユーザープロンプト経由の偽 <user_data> タグ注入を遮断（ツール結果と同じ無害化）
-    prompt = _neutralize_text(prompt)
+    neutralized = _neutralize_text(prompt)
 
-    # 無害化で破棄された＝敵対的入力と判定済み。Bedrock を呼ばずに終了する
+    # 無害化で破棄された（None）＝敵対的入力と判定済み。Bedrock を呼ばずに終了する
     # （記録側は該当フィールドだけ差し替えれば足りるが、プロンプト自体が
     #   敵対的なら処理を続ける理由がない）
-    if prompt == _UNSAFE_TEXT_PLACEHOLDER:
+    if neutralized is None:
         log.warning("敵対的と判定したプロンプトを拒否しました")
         yield "入力に処理できない文字列が含まれています。内容を見直してもう一度お試しください。"
         return
+    prompt = neutralized
 
     # 2段目: NFKC 正規化やエンティティ展開は文字数を増やしうる（合字 U+FDFA が
     # 18 文字に展開される等）。Bedrock に渡すのは正規化後の文字列なので、
