@@ -72,7 +72,9 @@ _JWKS_LOCK_TIMEOUT = 15
 # 取得失敗後に再取得を試みないクールダウン（秒）。失敗の連鎖増幅を防ぐ
 _JWKS_FAILURE_COOLDOWN = 30
 # 取得失敗時に代替利用する古い鍵の最大許容経過時間（秒）
-_JWKS_STALE_MAX_AGE = 24 * 60 * 60
+# 一時的な障害を凌ぐのが目的であり、鍵ローテーション後の受け入れ窓を
+# 短く保つため 30 分に制限する
+_JWKS_STALE_MAX_AGE = 30 * 60
 
 _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 _purchase_table = _dynamodb.Table(TABLE_NAME)
@@ -111,9 +113,10 @@ NOT_STARTED（未開封）, IN_PROGRESS（飲み中）, FINISHED（飲みきり�
 _jwks_client: Optional[PyJWKClient] = None
 # JWKS クライアントの生成とキャッシュアクセスを直列化するロック
 _jwks_lock = threading.Lock()
-# 直近に取得できた署名鍵と取得時刻（取得失敗時のフォールバック用）
-_jwks_last_good_keys: Optional[list] = None
-_jwks_last_good_at = 0.0
+# 直近に取得できた署名鍵と取得時刻（取得失敗時のフォールバック用）。
+# 鍵と時刻を1つのタプルとして差し替えることで、ロック外から読んでも
+# 「鍵と時刻がちぐはぐな組み合わせ」にならないようにする
+_jwks_last_good: Optional[tuple] = None
 # サーキットブレーカー: この時刻まで再取得を試みない
 _jwks_retry_after = 0.0
 
@@ -143,13 +146,13 @@ def _get_signing_keys():
     実行してキャッシュを汚染するため、健全な鍵は本モジュール側で保持する。
     失敗直後はクールダウン中の再取得を行わず、失敗の連鎖増幅を防ぐ。
     """
-    global _jwks_client, _jwks_last_good_keys, _jwks_last_good_at, _jwks_retry_after
+    global _jwks_client, _jwks_last_good, _jwks_retry_after
 
     if not _jwks_lock.acquire(timeout=_JWKS_LOCK_TIMEOUT):
-        # ここで待ち続けるとスレッドプールを占有して全体が応答不能になるため、
-        # 待ちを打ち切る。健全な鍵が残っていれば正規利用者を巻き込まずに済む
+        # ロック競合は攻撃者が意図的に作り出せるため、この経路では stale に
+        # フォールバックせず拒否する（stale を強制させる踏み台にしない）
         log.warning("JWKS ロックの獲得がタイムアウトしました")
-        return _stale_signing_keys()
+        return []
     try:
         # クールダウン中は外向きフェッチを試みず stale で凌ぐ
         if time.monotonic() < _jwks_retry_after:
@@ -171,8 +174,7 @@ def _get_signing_keys():
             return _stale_signing_keys()
 
         if keys:
-            _jwks_last_good_keys = keys
-            _jwks_last_good_at = time.monotonic()
+            _jwks_last_good = (keys, time.monotonic())
             return keys
         return _stale_signing_keys()
     finally:
@@ -185,15 +187,20 @@ def _stale_signing_keys():
     署名鍵は公開情報でローテーション頻度も低いため、Cognito 側の一時障害中に
     古い鍵で検証を続けても署名の正当性は損なわれない。ただし無期限に使うと
     ローテーション済みの鍵を受け入れ続けるため、経過時間で打ち切る。
+
+    鍵と取得時刻はタプルで一度に読み取る。個別のグローバルを順に読むと
+    読み取り途中の更新で「新しい鍵と古い時刻」の組み合わせが観測されうる。
     """
-    if _jwks_last_good_keys is None:
+    snapshot = _jwks_last_good
+    if snapshot is None:
         return []
-    age = time.monotonic() - _jwks_last_good_at
+    keys, fetched_at = snapshot
+    age = time.monotonic() - fetched_at
     if age > _JWKS_STALE_MAX_AGE:
         log.error("保持している JWKS が古すぎるため使用しません（経過 %.0f 秒）", age)
         return []
     log.warning("JWKS の取得に失敗したため直近の鍵を使用します（経過 %.0f 秒）", age)
-    return _jwks_last_good_keys
+    return keys
 
 
 def _find_cached_signing_key(token: str):
