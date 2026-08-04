@@ -54,6 +54,8 @@ MAX_TEXT_FIELD_LENGTH = 120
 _MAX_NORMALIZE_PASSES = 10
 # 正規化前に切り詰める倍率（保存値が巨大でも正規化コストを一定に保つ）
 _RAW_TRUNCATE_FACTOR = 4
+# 正規化が収束しない敵対的入力を置き換える文字列
+_UNSAFE_TEXT_PLACEHOLDER = "(表示できない値)"
 
 _dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 _purchase_table = _dynamodb.Table(TABLE_NAME)
@@ -198,13 +200,23 @@ def _neutralize_text(text: str) -> str:
     # エンティティ展開と NFKC 正規化は互いに新しい入力を生む（NFKC が全角 ＆ を
     # & に変えてエンティティを再合成する等）ため、両者を1組にして
     # 変化がなくなるまで反復する
+    converged = False
     for _ in range(_MAX_NORMALIZE_PASSES):
         normalized = unicodedata.normalize("NFKC", html.unescape(text))
         if normalized == text:
+            converged = True
             break
         text = normalized
-    # 反復上限に達しても安全なように & 自体を無害化する。& がなければ
-    # いかなるエンティティ形式（&lt; / &#60; / &#x3c;）も再構成できない
+
+    # 上限内に収束しない入力は多重エンコードを積んだ敵対的入力とみなして破棄する。
+    # 「あと1パス足す」対処ではネストを1段増やされるだけなので、
+    # 収束したかどうかで判定してイタチごっこを構造的に断ち切る。
+    if not converged:
+        log.warning("正規化が収束しない入力を破棄しました")
+        return _UNSAFE_TEXT_PLACEHOLDER
+
+    # 収束済み = これ以上デコードされる表現は残っていない。
+    # 山括弧を潰せば境界タグは構成不能。& も保険で全角化する
     return text.replace("<", "(").replace(">", ")").replace("&", "＆")
 
 
