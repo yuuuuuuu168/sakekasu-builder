@@ -14,6 +14,14 @@ export class AuthStack extends cdk.Stack {
   /** UserPool Client を公開し、フロントエンド設定生成で使用する */
   public readonly userPoolClient: cognito.UserPoolClient;
 
+  /**
+   * 外形監視のカナリア専用クライアント。
+   * ブラウザ向けクライアントを SRP のみに保つため、管理者パスワード認証は
+   * こちらに分ける（同じクライアントに両方を持たせると、IAM の足がかりを得た
+   * 相手が任意の利用者になりすませる余地が広がる）
+   */
+  public readonly canaryUserPoolClient: cognito.UserPoolClient;
+
   constructor(scope: Construct, id: string, props: AuthStackProps) {
     super(scope, id, props);
 
@@ -42,11 +50,26 @@ export class AuthStack extends cdk.Stack {
 
     this.userPoolClient = this.userPool.addClient('UserPoolClient', {
       userPoolClientName: `${props.envName}-sakekasu-client`,
+      // ブラウザからの認証は SRP のみ（パスワードを送らせない）
       authFlows: {
         userSrp: true,
       },
       accessTokenValidity: cdk.Duration.hours(1),
       refreshTokenValidity: cdk.Duration.days(30),
+    });
+
+    // 監視カナリア専用。SRP は持たせず、IAM 認証済みの呼び出し元からしか
+    // 使えない管理者パスワード認証だけを許可する
+    this.canaryUserPoolClient = this.userPool.addClient('CanaryUserPoolClient', {
+      userPoolClientName: `${props.envName}-sakekasu-canary-client`,
+      authFlows: {
+        adminUserPassword: true,
+      },
+      // 存在しない利用者と誤ったパスワードを同じ応答にし、
+      // 登録済みメールアドレスの割り出しに使えないようにする
+      preventUserExistenceErrors: true,
+      accessTokenValidity: cdk.Duration.hours(1),
+      refreshTokenValidity: cdk.Duration.days(1),
     });
 
     // CloudFormation 出力
@@ -58,6 +81,12 @@ export class AuthStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'UserPoolClientId', {
       value: this.userPoolClient.userPoolClientId,
       description: 'Cognito ユーザープールクライアント ID',
+    });
+
+    new cdk.CfnOutput(this, 'CanaryUserPoolClientId', {
+      value: this.canaryUserPoolClient.userPoolClientId,
+      description:
+        '監視カナリア用クライアント ID（sommelier/agentcore/agentcore.json の allowedClients に追加する）',
     });
 
     new cdk.CfnOutput(this, 'AuthRegion', {
