@@ -261,6 +261,8 @@ describe('MonitoringStack', () => {
     expect(targets).toContain('"name":"sommelier-runtime"');
     expect(targets).toContain('"expectStatus":[401,403]');
     expect(targets).toContain('"name":"appsync"');
+    // 空の本文だと GraphQL の形式エラーで認証まで届かず、401 を確認できない
+    expect(targets).toContain('__typename');
   });
 
   it('外形監視は2回続けて失敗したときだけ通知する', () => {

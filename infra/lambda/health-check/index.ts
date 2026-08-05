@@ -19,6 +19,12 @@ interface Target {
   name: string;
   url: string;
   method?: string;
+  /**
+   * POST 時に送る本文。
+   * 中身が不正だと認証より先に形式エラーで弾かれ、
+   * 「認証が働いているか」を確認できなくなるため対象ごとに指定する
+   */
+  body?: string;
   /** 正常とみなす HTTP ステータス */
   expectStatus: number[];
 }
@@ -60,8 +66,12 @@ async function check(target: Target): Promise<CheckResult> {
     const response = await fetch(target.url, {
       method: target.method ?? 'GET',
       signal: controller.signal,
-      // 認証なしで叩くため、本文は最小限にする
-      ...(target.method === 'POST' ? { body: '{}', headers: { 'Content-Type': 'application/json' } } : {}),
+      ...(target.method === 'POST'
+        ? {
+            body: target.body ?? '{}',
+            headers: { 'Content-Type': 'application/json' },
+          }
+        : {}),
     });
 
     const ok = target.expectStatus.includes(response.status);

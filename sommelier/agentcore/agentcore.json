@@ -20,14 +20,14 @@
       "authorizerConfiguration": {
         "customJwtAuthorizer": {
           "discoveryUrl": "https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_eZOfInCT4/.well-known/openid-configuration",
-          "allowedClients": ["3a4unc2dbutrkm2hjn887s1h9m"]
+          "allowedClients": ["3a4unc2dbutrkm2hjn887s1h9m", "23dvtnv4hg8lj74e0fq7r7c0nv"]
         }
       },
       "requestHeaderAllowlist": ["Authorization"],
       "envVars": [
         { "name": "PURCHASE_TABLE_NAME", "value": "dev-sakekasu-purchase-records" },
         { "name": "COGNITO_USER_POOL_ID", "value": "ap-northeast-1_eZOfInCT4" },
-        { "name": "COGNITO_APP_CLIENT_ID", "value": "3a4unc2dbutrkm2hjn887s1h9m" }
+        { "name": "COGNITO_APP_CLIENT_ID", "value": "3a4unc2dbutrkm2hjn887s1h9m,23dvtnv4hg8lj74e0fq7r7c0nv" }
       ]
     }
   ],
