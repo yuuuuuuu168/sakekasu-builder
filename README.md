@@ -228,9 +228,8 @@ AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
 cd infra
 AWS_PROFILE=sakekasu-builder npx cdk deploy --all -c env=dev
 
-# 5. 出力された CanaryUserPoolClientId を控える
-#    → sommelier/agentcore/agentcore.json の allowedClients に追加し、
-#      ソムリエを再デプロイする（これをやらないとカナリアは 403 で失敗し続ける）
+# 5. 出力された CanaryUserPoolClientId を控え、agentcore.json を2箇所直してから
+#    ソムリエを再デプロイする（下の「カナリアを通すための2箇所」を参照）
 cd ../sommelier
 AWS_PROFILE=sakekasu-builder agentcore deploy --target dev
 ```
@@ -239,11 +238,19 @@ AWS_PROFILE=sakekasu-builder agentcore deploy --target dev
 
 カナリア用クライアントは `ADMIN_USER_PASSWORD_AUTH` のみで SRP を持たない。このフローは IAM 認証済みの呼び出し元（＝カナリアの Lambda ロール）からしか使えず、ブラウザからは利用できない。
 
-`agentcore.json` の `allowedClients` には**ブラウザ向けとカナリア用の2つ**を並べる。
+#### カナリアを通すための2箇所（どちらか一方だけでは 403 になる）
+
+ソムリエの認証は**二段構え**（Runtime の JWT Authorizer + アプリ内の audience 検証）なので、`sommelier/agentcore/agentcore.json` を**2箇所**直す。
 
 ```json
+// ① Runtime の JWT Authorizer が受け付けるクライアント
 "allowedClients": ["3a4unc2dbutrkm2hjn887s1h9m", "<CanaryUserPoolClientId>"]
+
+// ② アプリ内の audience 検証が受け付けるクライアント（カンマ区切り）
+{ "name": "COGNITO_APP_CLIENT_ID", "value": "3a4unc2dbutrkm2hjn887s1h9m,<CanaryUserPoolClientId>" }
 ```
+
+①だけ直すとゲートウェイは通るがアプリ内検証で弾かれる。カナリアが `HTTP 403` を返したときは、まずこの2箇所を疑う（カナリアのログとアラーム本文にもその旨を出している）。
 
 Runtime の ARN とサイト URL は CDK コンテキストで差し替えられる。
 

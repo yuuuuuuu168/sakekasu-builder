@@ -77,8 +77,11 @@ function newSessionId(): string {
 
 interface CanaryOutcome {
   ok: boolean;
-  /** 失敗した段階。auth なら認証、invoke なら Runtime 呼び出し */
-  stage?: 'auth' | 'invoke' | 'empty';
+  /**
+   * 失敗した段階。auth は Cognito でのサインイン、forbidden は Runtime 側の拒否
+   * （クライアント登録漏れの可能性）、invoke はそれ以外の呼び出し失敗
+   */
+  stage?: 'auth' | 'forbidden' | 'invoke' | 'empty';
   status?: number;
   detail?: string;
   durationMs: number;
@@ -117,11 +120,18 @@ async function runCanary(): Promise<CanaryOutcome> {
     });
 
     if (!response.ok) {
+      // 401/403 は認証の二段（Runtime の allowedClients / アプリの audience 検証）の
+      // どちらかで弾かれた状態。監視用クライアントを両方に登録し忘れると必ずここに来る
+      const misconfigured = response.status === 401 || response.status === 403;
       return {
         ok: false,
-        stage: 'invoke',
+        stage: misconfigured ? 'forbidden' : 'invoke',
         status: response.status,
-        detail: `Runtime が HTTP ${response.status} を返しました`,
+        detail: misconfigured
+          ? `Runtime に拒否されました (HTTP ${response.status})。` +
+            `agentcore.json の allowedClients と COGNITO_APP_CLIENT_ID の両方に` +
+            `カナリア用クライアント ${USER_POOL_CLIENT_ID} を登録しているか確認してください`
+          : `Runtime が HTTP ${response.status} を返しました`,
         durationMs: Date.now() - startedAt,
         replyLength: 0,
       };

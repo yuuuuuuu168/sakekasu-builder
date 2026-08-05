@@ -182,6 +182,19 @@ describe('MonitoringStack', () => {
     });
   });
 
+  // 認証が二段構えのため、登録漏れだと必ず403になる。Slack だけで原因に辿り着けるようにする
+  it('カナリアのアラート本文にクライアント登録漏れの確認を促す案内を入れる', () => {
+    const alarms = template.findResources('AWS::CloudWatch::Alarm');
+    const canaryAlarm = Object.values(alarms).find(
+      (alarm) => alarm.Properties?.AlarmName === 'dev-sakekasu-sommelier-canary',
+    );
+    expect(canaryAlarm).toBeDefined();
+
+    const description = canaryAlarm!.Properties.AlarmDescription as string;
+    expect(description).toContain('allowedClients');
+    expect(description).toContain('COGNITO_APP_CLIENT_ID');
+  });
+
   // 監視が動かなくなると異常に気づけない
   it('外形監視とカナリアの実行失敗そのものを監視する', () => {
     for (const alarmName of [
