@@ -65,6 +65,9 @@ export class AuthStack extends cdk.Stack {
       authFlows: {
         adminUserPassword: true,
       },
+      // 存在しない利用者と誤ったパスワードを同じ応答にし、
+      // 登録済みメールアドレスの割り出しに使えないようにする
+      preventUserExistenceErrors: true,
       accessTokenValidity: cdk.Duration.hours(1),
       refreshTokenValidity: cdk.Duration.days(1),
     });

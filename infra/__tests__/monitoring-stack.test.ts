@@ -162,14 +162,40 @@ describe('MonitoringStack', () => {
     }
   });
 
-  it('データ欠損では発報しない（利用が無い時間帯に鳴らさない）', () => {
+  it('利用が無い時間帯に鳴らさない（欠損を異常扱いするのは意図したものだけ）', () => {
+    // 欠損に意味がある指標は個別に扱う。
+    // - カナリア: 間隔が長く、空白を「異常なし」と扱うと復旧を誤検知する
+    // - 実行回数: 記録が無い＝動いていないので、欠損そのものが異常
+    const exceptions = new Set([
+      'dev-sakekasu-sommelier-canary',
+      'dev-sakekasu-watcher-silent-health-check',
+      'dev-sakekasu-watcher-silent-sommelier-canary',
+    ]);
+
     const alarms = template.findResources('AWS::CloudWatch::Alarm');
     for (const [logicalId, alarm] of Object.entries(alarms)) {
-      // カナリアだけは間隔が長く、空白を「異常なし」と扱うと復旧誤検知になる
-      if (alarm.Properties.AlarmName === 'dev-sakekasu-sommelier-canary') continue;
+      if (exceptions.has(alarm.Properties.AlarmName as string)) continue;
       expect(alarm.Properties.TreatMissingData, `${logicalId} の欠損時の扱いが違う`).toBe(
         'notBreaching',
       );
+    }
+  });
+
+  // スケジュールが止まると Lambda は動かず、エラーすら記録されないまま監視が消える
+  it('外形監視とカナリアが「動いていないこと」自体を検知する', () => {
+    for (const [name, window] of [
+      ['dev-sakekasu-watcher-silent-health-check', 3600],
+      ['dev-sakekasu-watcher-silent-sommelier-canary', 43200],
+    ] as const) {
+      template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        AlarmName: name,
+        MetricName: 'Invocations',
+        ComparisonOperator: 'LessThanThreshold',
+        Threshold: 1,
+        Period: window,
+        // 記録が無い＝一度も動いていないので異常として扱う
+        TreatMissingData: 'breaching',
+      });
     }
   });
 
@@ -298,6 +324,14 @@ describe('MonitoringStack', () => {
     authTemplate.hasResourceProperties('AWS::Cognito::UserPoolClient', {
       ClientName: 'dev-sakekasu-canary-client',
       ExplicitAuthFlows: Match.arrayWith(['ALLOW_ADMIN_USER_PASSWORD_AUTH']),
+    });
+  });
+
+  // 存在しない利用者と誤ったパスワードの応答を揃え、登録済みアドレスを割り出せなくする
+  it('カナリア専用クライアントは利用者の存在を隠す', () => {
+    authTemplate.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      ClientName: 'dev-sakekasu-canary-client',
+      PreventUserExistenceErrors: 'ENABLED',
     });
   });
 

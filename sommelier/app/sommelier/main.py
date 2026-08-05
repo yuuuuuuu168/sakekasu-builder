@@ -43,9 +43,14 @@ IS_LOCAL_DEV = os.getenv("LOCAL_DEV") == "1"
 # 起動時検証（設定ミスは起動段階で落とすフェイルクローズ）
 if not TABLE_NAME:
     raise RuntimeError("PURCHASE_TABLE_NAME が未設定です（デフォルト値はありません）")
-if IS_LOCAL_DEV and (COGNITO_USER_POOL_ID or COGNITO_APP_CLIENT_IDS):
+# ここは意図的に「パース後の集合」ではなく生の文字列で判定する。
+# LOCAL_DEV は認証を素通りして固定の sub を返すため、Cognito を設定しようとした
+# 痕跡が少しでもあれば起動を止める（空白のみ・カンマのみでも設定の意思とみなす）。
+# 集合で判定すると、そうした値が「未設定」と解釈されて LOCAL_DEV のまま起動してしまう
+if IS_LOCAL_DEV and (COGNITO_USER_POOL_ID or COGNITO_APP_CLIENT_ID):
     raise RuntimeError(
-        "LOCAL_DEV=1 と COGNITO_USER_POOL_ID / COGNITO_APP_CLIENT_ID は同時に設定できません。"
+        "LOCAL_DEV=1 と COGNITO_USER_POOL_ID / COGNITO_APP_CLIENT_ID は同時に設定できません"
+        "（空白のみ・カンマのみの値も設定済みとみなします）。"
         "デプロイ環境（envVars で Cognito 設定注入）への LOCAL_DEV 混入を防ぐための相互排他です"
     )
 if not IS_LOCAL_DEV and (not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_IDS):
