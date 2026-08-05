@@ -36,7 +36,8 @@ export interface MonitoringStackProps extends cdk.StackProps {
   siteUrl: string;
   /** カナリアが使う Cognito */
   userPoolId: string;
-  userPoolClientId: string;
+  /** カナリア専用のクライアント ID（ブラウザ向けとは分ける） */
+  canaryUserPoolClientId: string;
 }
 
 /**
@@ -324,7 +325,7 @@ export class MonitoringStack extends cdk.Stack {
       environment: {
         METRIC_NAMESPACE: this.metricNamespace,
         USER_POOL_ID: props.userPoolId,
-        USER_POOL_CLIENT_ID: props.userPoolClientId,
+        USER_POOL_CLIENT_ID: props.canaryUserPoolClientId,
         CREDENTIALS_SECRET_ID: canaryCredentialsSecretName,
         SOMMELIER_RUNTIME_ARN: props.sommelierRuntimeArn,
         SOMMELIER_RUNTIME_REGION: this.region,
@@ -380,7 +381,27 @@ export class MonitoringStack extends cdk.Stack {
       }),
       threshold: 1,
       evaluationPeriods: 1,
+      // 6時間に1度しか計測しないため、次の計測までの空白を「異常なし」と
+      // みなすと、直っていないのに復旧扱いになってしまう。状態を保たせる
+      treatMissingData: cloudwatch.TreatMissingData.MISSING,
     });
+
+    // 監視そのものが動かなくなると異常に気づけないため、実行側も監視する
+    for (const watcher of [
+      { fn: healthCheck, key: 'health-check', label: '外形監視' },
+      { fn: canary, key: 'sommelier-canary', label: 'ソムリエのカナリア' },
+    ]) {
+      this.addAlarm(`WatcherFailure-${watcher.key}`, {
+        alarmName: `${prefix}-watcher-failure-${watcher.key}`,
+        description: `${watcher.label}の実行自体が失敗しています。異常を検知できない状態です`,
+        metric: watcher.fn.metricErrors({
+          period: cdk.Duration.hours(1),
+          statistic: 'Sum',
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+      });
+    }
 
     new cdk.CfnOutput(this, 'AlertTopicArn', {
       value: this.alertTopic.topicArn,
@@ -408,6 +429,13 @@ export class MonitoringStack extends cdk.Stack {
       metric: cloudwatch.IMetric;
       threshold: number;
       evaluationPeriods: number;
+      /**
+       * データが無い期間の扱い。既定は「異常なし」。
+       * ただし、たまにしか計測しない指標（カナリアなど）でこれを使うと、
+       * 異常のまま次の計測を待つ間に「復旧」と判定されてしまうため、
+       * そうした指標では MISSING を指定して状態を保たせる
+       */
+      treatMissingData?: cloudwatch.TreatMissingData;
     },
   ): cloudwatch.Alarm {
     const alarm = new cloudwatch.Alarm(this, id, {
@@ -418,7 +446,7 @@ export class MonitoringStack extends cdk.Stack {
       evaluationPeriods: options.evaluationPeriods,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       // 呼び出しが無い時間帯にデータ欠損で鳴らさない
-      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      treatMissingData: options.treatMissingData ?? cloudwatch.TreatMissingData.NOT_BREACHING,
     });
 
     alarm.addAlarmAction(new actions.SnsAction(this.alertTopic));
