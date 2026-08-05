@@ -389,10 +389,24 @@ export class MonitoringStack extends cdk.Stack {
       treatMissingData: cloudwatch.TreatMissingData.MISSING,
     });
 
-    // 監視そのものが動かなくなると異常に気づけないため、実行側も監視する
+    // 監視そのものが動かなくなると異常に気づけないため、実行側も監視する。
+    // 「エラーで失敗した」だけでなく「そもそも動いていない」も見る必要がある
+    // （スケジュールが止まるとエラーすら記録されず、静かに監視が消える）
     for (const watcher of [
-      { fn: healthCheck, key: 'health-check', label: '外形監視' },
-      { fn: canary, key: 'sommelier-canary', label: 'ソムリエのカナリア' },
+      {
+        fn: healthCheck,
+        key: 'health-check',
+        label: '外形監視',
+        // 5分ごとに動くので、1時間あれば必ず実行されている
+        silenceWindow: cdk.Duration.hours(1),
+      },
+      {
+        fn: canary,
+        key: 'sommelier-canary',
+        label: 'ソムリエのカナリア',
+        // 6時間ごとなので、12時間あれば必ず実行されている
+        silenceWindow: cdk.Duration.hours(12),
+      },
     ]) {
       this.addAlarm(`WatcherFailure-${watcher.key}`, {
         alarmName: `${prefix}-watcher-failure-${watcher.key}`,
@@ -403,6 +417,22 @@ export class MonitoringStack extends cdk.Stack {
         }),
         threshold: 1,
         evaluationPeriods: 1,
+      });
+
+      this.addAlarm(`WatcherSilent-${watcher.key}`, {
+        alarmName: `${prefix}-watcher-silent-${watcher.key}`,
+        description:
+          `${watcher.label}が動いていません。スケジュールの停止や権限の失効が疑われます`,
+        metric: watcher.fn.metricInvocations({
+          period: watcher.silenceWindow,
+          statistic: 'Sum',
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        // 「実行回数が1回未満」＝動いていない。
+        // 記録が全く無い場合も動いていないことを意味するので異常として扱う
+        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
       });
     }
 
@@ -439,6 +469,8 @@ export class MonitoringStack extends cdk.Stack {
        * そうした指標では MISSING を指定して状態を保たせる
        */
       treatMissingData?: cloudwatch.TreatMissingData;
+      /** 既定は「しきい値以上で異常」。下回ったら異常にしたい指標で使う */
+      comparisonOperator?: cloudwatch.ComparisonOperator;
     },
   ): cloudwatch.Alarm {
     const alarm = new cloudwatch.Alarm(this, id, {
@@ -447,7 +479,9 @@ export class MonitoringStack extends cdk.Stack {
       metric: options.metric,
       threshold: options.threshold,
       evaluationPeriods: options.evaluationPeriods,
-      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      comparisonOperator:
+        options.comparisonOperator ??
+        cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       // 呼び出しが無い時間帯にデータ欠損で鳴らさない
       treatMissingData: options.treatMissingData ?? cloudwatch.TreatMissingData.NOT_BREACHING,
     });
