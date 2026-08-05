@@ -34,6 +34,7 @@
 | 26 | 一覧画面の画像表示高速化 | ✅ 実装済み |
 | 27 | 一覧画面上部に在庫本数サマリー表示（ウイスキー◯本・日本酒◯本のみ） | ✅ 実装済み |
 | 28 | データ保護（DynamoDB PITR・削除保護、S3 バージョニング） | ✅ 実装済み |
+| 29 | 監視とアラート通知（AI・サービス正常性・外形監視 → Slack） | ✅ 実装済み ※デプロイ前に手動登録あり |
 
 ### 検索・フィルタ強化（#18・完了）
 
@@ -151,6 +152,121 @@ AWS_PROFILE=sakekasu-builder agentcore deploy --target dev
 ```
 
 Runtime の ARN はフロントの `src/features/sommelier/config.ts` に持つ（`VITE_SOMMELIER_RUNTIME_ARN` で上書き可）。Runtime を作り直したら更新する。
+
+## 監視とアラート通知（#29）
+
+異常を人間が気づく前に Slack へ流す。きっかけは、ソムリエが数時間おかしくなったのに気づけず、原因の切り分けにも時間がかかったこと。
+
+```
+CloudWatch アラーム ─┐
+外形監視 Lambda ─────┼→ SNS → Slack 通知 Lambda → Slack（Incoming Webhook）
+カナリア Lambda ─────┘
+```
+
+アラームは**発報だけでなく復旧も通知する**ので、鳴りっぱなしなのか直ったのかが Slack だけで分かる。
+
+### 監視項目（21アラーム）
+
+| 分類 | 監視対象 | 発報条件 |
+|------|---------|---------|
+| AI・ソムリエ | 認証拒否（`InboundAuthorizationFailure`） | 5分で3回以上。例外の種類ごとに分けて監視 |
+| AI・ソムリエ | システムエラー / スロットル | 5分で1回以上 |
+| AI・OCR | Lambda エラー | 15分で3回以上 |
+| AI・OCR | スロットル | 15分で1回以上 |
+| サービス | AppSync 5XX | 5分で5回以上 |
+| サービス | Lambda エラー（presigned-url / ocr-analyzer） | 15分で5回以上 |
+| サービス | DynamoDB スロットル（2テーブル） | 5分で1回以上 |
+| サービス | 画像削除の失敗 | 1時間で5回以上 |
+| 外形監視 | フロント配信 / ソムリエ Runtime / AppSync | 2回続けて到達不可 |
+| 外形監視 | ソムリエとの実会話（カナリア） | 失敗したら即時 |
+| 通知経路 | Slack 通知 Lambda のエラー | 1回以上 |
+| 監視自体 | 外形監視・カナリアの実行失敗 | 1回以上 |
+| 監視自体 | 外形監視・カナリアが動いていない | 実行回数が0（外形監視は1時間、カナリアは12時間） |
+
+監視そのものが動かなくなると異常に気づけないため、**Slack 通知 Lambda と外形監視・カナリアも監視対象**に含めている。「エラーで失敗した」だけでなく「**そもそも動いていない**」も見る。スケジュールが止まるとエラーすら記録されず、静かに監視が消えるため。
+
+既定では「データが無い＝異常なし」として扱うが、欠損そのものに意味がある指標は例外にしている。
+
+- **カナリア**: `MISSING`（状態を保持）。6時間に1度しか計測しないため、既定のままだと直っていないのに次の計測を待つ間に復旧扱いになる
+- **実行回数の監視**: `BREACHING`（欠損は異常）。記録が無いことが「動いていない」ことを意味するため
+
+**認証拒否の監視が今回の障害への直接の答え**。実際に障害当時のメトリクスを確認したところ、`UnauthorizedInboundTokenException` が3回記録されていた。これを監視していれば即座に気づけた。
+
+### 外形監視の考え方
+
+到達性の確認（5分ごと）は、**認証情報を持たずに**行う。ソムリエ Runtime と AppSync はあえて認証なしで叩き、**401/403 が返ることを正常**とみなす。これで「エンドポイントが生きている」ことと「認証が働いている」ことを、監視側に鍵を持たせずに確認できる。
+
+実際に会話できるかはカナリア（6時間ごと）が見る。こちらは監視用ユーザーでサインインして短い相談を投げ、応答が返るまでを確認する。毎回 LLM を呼ぶため頻度を抑えている。
+
+### デプロイ前の準備
+
+Webhook URL と監視ユーザーのパスワードはリポジトリに置けないため、**先に手動で登録**する。CDK は名前で参照するだけ。
+
+```bash
+# 1. Slack の Incoming Webhook URL を登録する
+AWS_PROFILE=sakekasu-builder aws ssm put-parameter \
+  --name /dev-sakekasu/monitoring/slack-webhook-url \
+  --type SecureString \
+  --value 'https://hooks.slack.com/services/XXX/YYY/ZZZ' \
+  --region ap-northeast-1
+
+# 2. カナリア用の Cognito ユーザーを作る（パスワードは自分で決める）
+AWS_PROFILE=sakekasu-builder aws cognito-idp admin-create-user \
+  --user-pool-id ap-northeast-1_eZOfInCT4 \
+  --username canary@example.com \
+  --message-action SUPPRESS \
+  --region ap-northeast-1
+AWS_PROFILE=sakekasu-builder aws cognito-idp admin-set-user-password \
+  --user-pool-id ap-northeast-1_eZOfInCT4 \
+  --username canary@example.com \
+  --password '<決めたパスワード>' --permanent \
+  --region ap-northeast-1
+
+# 3. その認証情報を Secrets Manager に入れる
+AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
+  --name dev-sakekasu/monitoring/canary-user \
+  --secret-string '{"username":"canary@example.com","password":"<決めたパスワード>"}' \
+  --region ap-northeast-1
+
+# 4. デプロイ
+cd infra
+AWS_PROFILE=sakekasu-builder npx cdk deploy --all -c env=dev
+
+# 5. 出力された CanaryUserPoolClientId を控え、agentcore.json を2箇所直してから
+#    ソムリエを再デプロイする（下の「カナリアを通すための2箇所」を参照）
+cd ../sommelier
+AWS_PROFILE=sakekasu-builder agentcore deploy --target dev
+```
+
+カナリアがサインインするため、**専用の UserPoolClient**（`<env>-sakekasu-canary-client`）を用意している。ブラウザ向けクライアントは SRP のみのままにし、管理者パスワード認証はカナリア専用クライアントだけに持たせる。同じクライアントに両方を持たせると、IAM の足がかりを得た相手が任意の利用者になりすませる余地が広がるため。
+
+カナリア用クライアントは `ADMIN_USER_PASSWORD_AUTH` のみで SRP を持たない。このフローは IAM 認証済みの呼び出し元（＝カナリアの Lambda ロール）からしか使えず、ブラウザからは利用できない。
+
+#### カナリアを通すための2箇所（どちらか一方だけでは 403 になる）
+
+ソムリエの認証は**二段構え**（Runtime の JWT Authorizer + アプリ内の audience 検証）なので、`sommelier/agentcore/agentcore.json` を**2箇所**直す。
+
+```json
+// ① Runtime の JWT Authorizer が受け付けるクライアント
+"allowedClients": ["3a4unc2dbutrkm2hjn887s1h9m", "<CanaryUserPoolClientId>"]
+
+// ② アプリ内の audience 検証が受け付けるクライアント（カンマ区切り）
+{ "name": "COGNITO_APP_CLIENT_ID", "value": "3a4unc2dbutrkm2hjn887s1h9m,<CanaryUserPoolClientId>" }
+```
+
+①だけ直すとゲートウェイは通るがアプリ内検証で弾かれる。カナリアが `HTTP 403` を返したときは、まずこの2箇所を疑う（カナリアのログとアラーム本文にもその旨を出している）。
+
+Runtime の ARN とサイト URL は CDK コンテキストで差し替えられる。
+
+```bash
+npx cdk deploy sakekasu-dev-monitoring -c env=dev \
+  -c sommelierRuntimeArn=arn:aws:bedrock-agentcore:... \
+  -c siteUrl=https://example.com
+```
+
+### 費用の目安
+
+概算で**月5ドル前後**。内訳は CloudWatch アラーム21件（$0.10/件）とカスタムメトリクス8種（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。カナリアの Bedrock 呼び出しは月120回・短い応答のため数円程度。
 
 ## 技術スタック
 

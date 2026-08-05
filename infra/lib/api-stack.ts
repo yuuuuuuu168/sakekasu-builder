@@ -31,6 +31,16 @@ export class ApiStack extends cdk.Stack {
   public readonly drinkingDataSource: appsync.DynamoDbDataSource;
   /** Image Storage S3 バケット */
   public readonly imageBucket: s3.Bucket;
+  /** Presigned URL 発行 Lambda（監視スタックから参照する） */
+  public readonly presignedUrlFunction: NodejsFunction;
+  /** ラベル画像 OCR Lambda（監視スタックから参照する） */
+  public readonly ocrAnalyzerFunction: NodejsFunction;
+  /**
+   * 画像削除失敗のメトリクスフィルター。
+   * アラーム自体は監視スタック側で作る（通知先の SNS を参照すると
+   * このスタックが監視スタックに依存し、循環参照になるため）
+   */
+  public readonly imageDeleteFailMetricFilter: logs.MetricFilter;
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
@@ -125,7 +135,7 @@ export class ApiStack extends cdk.Stack {
     });
 
     // Presigned URL 生成 Lambda 関数
-    const presignedUrlFunction = new NodejsFunction(
+    this.presignedUrlFunction = new NodejsFunction(
       this,
       'PresignedUrlFunction',
       {
@@ -150,34 +160,23 @@ export class ApiStack extends cdk.Stack {
     );
 
     // Lambda に S3 読み書き権限を付与
-    this.imageBucket.grantReadWrite(presignedUrlFunction);
+    this.imageBucket.grantReadWrite(this.presignedUrlFunction);
 
     // S3 画像削除失敗の CloudWatch メトリクスフィルター
-    const deleteFailMetricFilter = new logs.MetricFilter(this, 'ImageDeleteFailMetricFilter', {
-      logGroup: presignedUrlFunction.logGroup,
+    this.imageDeleteFailMetricFilter = new logs.MetricFilter(this, 'ImageDeleteFailMetricFilter', {
+      logGroup: this.presignedUrlFunction.logGroup,
       filterPattern: logs.FilterPattern.literal('{ $.level = "ERROR" && $.action = "deleteImage" }'),
       metricNamespace: `${props.envName}-sakekasu`,
       metricName: 'ImageDeleteFailCount',
       metricValue: '1',
     });
 
-    // 削除失敗アラーム（1時間に5回以上で発火）
-    new cloudwatch.Alarm(this, 'ImageDeleteFailAlarm', {
-      alarmName: `${props.envName}-sakekasu-image-delete-fail`,
-      metric: deleteFailMetricFilter.metric({
-        statistic: 'Sum',
-        period: cdk.Duration.hours(1),
-      }),
-      threshold: 5,
-      evaluationPeriods: 1,
-      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-    });
+    // 削除失敗アラームは監視スタックで作る（通知先と一緒に管理するため）
 
     // AppSync Lambda データソース
     const presignedUrlDataSource = this.graphqlApi.addLambdaDataSource(
       'PresignedUrlDataSource',
-      presignedUrlFunction,
+      this.presignedUrlFunction,
     );
 
     // generateUploadUrl ミューテーションリゾルバー
@@ -193,7 +192,7 @@ export class ApiStack extends cdk.Stack {
     });
 
     // OCR Analyzer Lambda 関数
-    const ocrAnalyzerFunction = new NodejsFunction(this, 'OcrAnalyzerFunction', {
+    this.ocrAnalyzerFunction = new NodejsFunction(this, 'OcrAnalyzerFunction', {
       functionName: `${props.envName}-sakekasu-ocr-analyzer`,
       runtime: Runtime.NODEJS_20_X,
       entry: path.join(
@@ -215,10 +214,10 @@ export class ApiStack extends cdk.Stack {
     });
 
     // S3 読み取り権限
-    this.imageBucket.grantRead(ocrAnalyzerFunction);
+    this.imageBucket.grantRead(this.ocrAnalyzerFunction);
 
     // Bedrock InvokeModel 権限
-    ocrAnalyzerFunction.addToRolePolicy(new cdk.aws_iam.PolicyStatement({
+    this.ocrAnalyzerFunction.addToRolePolicy(new cdk.aws_iam.PolicyStatement({
       actions: ['bedrock:InvokeModel'],
       resources: ['*'],
     }));
@@ -226,7 +225,7 @@ export class ApiStack extends cdk.Stack {
     // AppSync Lambda データソース + リゾルバー
     const ocrDataSource = this.graphqlApi.addLambdaDataSource(
       'OcrAnalyzerDataSource',
-      ocrAnalyzerFunction,
+      this.ocrAnalyzerFunction,
     );
 
     ocrDataSource.createResolver('AnalyzeSakeLabelResolver', {

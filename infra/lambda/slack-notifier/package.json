@@ -1,0 +1,9 @@
+{
+  "name": "slack-notifier-lambda",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-ssm": "^3.800.0"
+  }
+}
