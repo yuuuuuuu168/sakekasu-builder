@@ -36,7 +36,7 @@ function synth() {
     sommelierRuntimeArn: RUNTIME_ARN,
     siteUrl: 'https://example.com',
     userPoolId: 'ap-northeast-1_TEST',
-    userPoolClientId: 'testclientid',
+    canaryUserPoolClientId: 'canaryclientid',
     env,
   });
 
@@ -165,9 +165,30 @@ describe('MonitoringStack', () => {
   it('データ欠損では発報しない（利用が無い時間帯に鳴らさない）', () => {
     const alarms = template.findResources('AWS::CloudWatch::Alarm');
     for (const [logicalId, alarm] of Object.entries(alarms)) {
+      // カナリアだけは間隔が長く、空白を「異常なし」と扱うと復旧誤検知になる
+      if (alarm.Properties.AlarmName === 'dev-sakekasu-sommelier-canary') continue;
       expect(alarm.Properties.TreatMissingData, `${logicalId} の欠損時の扱いが違う`).toBe(
         'notBreaching',
       );
+    }
+  });
+
+  // 6時間に1度しか計測しないため、空白を異常なしと扱うと
+  // 直っていないのに復旧通知が飛んでしまう
+  it('カナリアは計測の空白で復旧扱いにしない', () => {
+    template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      AlarmName: 'dev-sakekasu-sommelier-canary',
+      TreatMissingData: 'missing',
+    });
+  });
+
+  // 監視が動かなくなると異常に気づけない
+  it('外形監視とカナリアの実行失敗そのものを監視する', () => {
+    for (const alarmName of [
+      'dev-sakekasu-watcher-failure-health-check',
+      'dev-sakekasu-watcher-failure-sommelier-canary',
+    ]) {
+      template.hasResourceProperties('AWS::CloudWatch::Alarm', { AlarmName: alarmName });
     }
   });
 
@@ -251,10 +272,28 @@ describe('MonitoringStack', () => {
     });
   });
 
-  // カナリアがサインインするために必要
-  it('UserPoolClient が管理者パスワード認証を許可している', () => {
+  // ブラウザ向けクライアントにパスワード認証を持たせない（SRP のみ）
+  it('ブラウザ向けクライアントは SRP のみを許可する', () => {
     authTemplate.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      ClientName: 'dev-sakekasu-client',
+      ExplicitAuthFlows: Match.not(Match.arrayWith(['ALLOW_ADMIN_USER_PASSWORD_AUTH'])),
+    });
+  });
+
+  // カナリアは専用クライアントでサインインする
+  it('カナリア専用クライアントだけが管理者パスワード認証を持つ', () => {
+    authTemplate.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      ClientName: 'dev-sakekasu-canary-client',
       ExplicitAuthFlows: Match.arrayWith(['ALLOW_ADMIN_USER_PASSWORD_AUTH']),
+    });
+  });
+
+  it('カナリアはブラウザ向けではなく専用クライアントを使う', () => {
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'dev-sakekasu-sommelier-canary',
+      Environment: {
+        Variables: Match.objectLike({ USER_POOL_CLIENT_ID: 'canaryclientid' }),
+      },
     });
   });
 });

@@ -62,9 +62,11 @@ async function getAccessToken(): Promise<string> {
 
 function invocationUrl(): string {
   const arn = encodeURIComponent(RUNTIME_ARN);
+  // 修飾子も環境変数由来なので、ARN と同じくエスケープしてから URL に載せる
+  const qualifier = encodeURIComponent(RUNTIME_QUALIFIER);
   return (
     `https://bedrock-agentcore.${RUNTIME_REGION}.amazonaws.com` +
-    `/runtimes/${arn}/invocations?qualifier=${RUNTIME_QUALIFIER}`
+    `/runtimes/${arn}/invocations?qualifier=${qualifier}`
   );
 }
 

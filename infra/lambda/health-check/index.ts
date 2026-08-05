@@ -31,6 +31,26 @@ interface CheckResult {
   durationMs: number;
 }
 
+/**
+ * 監視対象はハンドラではなく読み込み時に組み立てる。
+ * 設定が壊れていれば初期化で落ち、Lambda のエラーとして検知できる
+ * （ハンドラ内で落とすと、失敗が「メトリクスが出ないだけ」になり見逃す）
+ */
+function parseTargets(raw: string): Target[] {
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error('監視対象が空です');
+  }
+  for (const target of parsed as Partial<Target>[]) {
+    if (!target.name || !target.url || !Array.isArray(target.expectStatus)) {
+      throw new Error(`監視対象の定義が不正です: ${JSON.stringify(target)}`);
+    }
+  }
+  return parsed as Target[];
+}
+
+const targets = parseTargets(TARGETS);
+
 async function check(target: Target): Promise<CheckResult> {
   const startedAt = Date.now();
   const controller = new AbortController();
@@ -68,7 +88,6 @@ async function check(target: Target): Promise<CheckResult> {
 }
 
 export const handler = async (): Promise<{ results: CheckResult[] }> => {
-  const targets = JSON.parse(TARGETS) as Target[];
   const results = await Promise.all(targets.map(check));
 
   // 監視結果はメトリクスにする。アラーム側でしきい値と連続回数を決める

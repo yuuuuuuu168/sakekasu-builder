@@ -165,7 +165,7 @@ CloudWatch アラーム ─┐
 
 アラームは**発報だけでなく復旧も通知する**ので、鳴りっぱなしなのか直ったのかが Slack だけで分かる。
 
-### 監視項目（17アラーム）
+### 監視項目（19アラーム）
 
 | 分類 | 監視対象 | 発報条件 |
 |------|---------|---------|
@@ -180,6 +180,11 @@ CloudWatch アラーム ─┐
 | 外形監視 | フロント配信 / ソムリエ Runtime / AppSync | 2回続けて到達不可 |
 | 外形監視 | ソムリエとの実会話（カナリア） | 失敗したら即時 |
 | 通知経路 | Slack 通知 Lambda のエラー | 1回以上 |
+| 監視自体 | 外形監視・カナリアの実行失敗 | 1回以上 |
+
+監視そのものが動かなくなると異常に気づけないため、**Slack 通知 Lambda と外形監視・カナリアの実行失敗も監視対象**に含めている。
+
+カナリアだけは `treatMissingData` を `MISSING` にしている。6時間に1度しか計測しないため、既定の「データが無い＝異常なし」だと、直っていないのに次の計測を待つ間に復旧扱いになってしまう。
 
 **認証拒否の監視が今回の障害への直接の答え**。実際に障害当時のメトリクスを確認したところ、`UnauthorizedInboundTokenException` が3回記録されていた。これを監視していれば即座に気づけた。
 
@@ -222,9 +227,23 @@ AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
 # 4. デプロイ
 cd infra
 AWS_PROFILE=sakekasu-builder npx cdk deploy --all -c env=dev
+
+# 5. 出力された CanaryUserPoolClientId を控える
+#    → sommelier/agentcore/agentcore.json の allowedClients に追加し、
+#      ソムリエを再デプロイする（これをやらないとカナリアは 403 で失敗し続ける）
+cd ../sommelier
+AWS_PROFILE=sakekasu-builder agentcore deploy --target dev
 ```
 
-カナリアがサインインするため、UserPoolClient に `ADMIN_USER_PASSWORD_AUTH` を追加している。このフローは IAM 認証済みの呼び出し元（＝カナリアの Lambda ロール）からしか使えず、ブラウザからは利用できない。
+カナリアがサインインするため、**専用の UserPoolClient**（`<env>-sakekasu-canary-client`）を用意している。ブラウザ向けクライアントは SRP のみのままにし、管理者パスワード認証はカナリア専用クライアントだけに持たせる。同じクライアントに両方を持たせると、IAM の足がかりを得た相手が任意の利用者になりすませる余地が広がるため。
+
+カナリア用クライアントは `ADMIN_USER_PASSWORD_AUTH` のみで SRP を持たない。このフローは IAM 認証済みの呼び出し元（＝カナリアの Lambda ロール）からしか使えず、ブラウザからは利用できない。
+
+`agentcore.json` の `allowedClients` には**ブラウザ向けとカナリア用の2つ**を並べる。
+
+```json
+"allowedClients": ["3a4unc2dbutrkm2hjn887s1h9m", "<CanaryUserPoolClientId>"]
+```
 
 Runtime の ARN とサイト URL は CDK コンテキストで差し替えられる。
 

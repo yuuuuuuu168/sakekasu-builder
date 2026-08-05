@@ -60,7 +60,7 @@ const monitoringStack = new MonitoringStack(app, `${prefix}-monitoring`, {
   sommelierRuntimeArn,
   siteUrl,
   userPoolId: authStack.userPool.userPoolId,
-  userPoolClientId: authStack.userPoolClient.userPoolClientId,
+  canaryUserPoolClientId: authStack.canaryUserPoolClient.userPoolClientId,
   env: cdkEnv,
 });
 
