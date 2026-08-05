@@ -196,6 +196,9 @@ describe('MonitoringStack', () => {
         Period: window,
         // 沈黙は欠損として現れる。ここが発報の実体
         TreatMissingData: 'breaching',
+        // 発報の実体ではないが、既定値（しきい値以上で異常）に戻ると意味が反転し、
+        // 「動いているときに鳴る」アラームになってしまうため固定する
+        ComparisonOperator: 'LessThanThreshold',
       });
     }
   });
