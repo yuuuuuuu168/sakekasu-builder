@@ -130,7 +130,8 @@ async function runCanary(): Promise<CanaryOutcome> {
         detail: misconfigured
           ? `Runtime に拒否されました (HTTP ${response.status})。` +
             `agentcore.json の allowedClients と COGNITO_APP_CLIENT_ID の両方に` +
-            `カナリア用クライアント ${USER_POOL_CLIENT_ID} を登録しているか確認してください`
+            `カナリア用クライアント（CDK 出力の CanaryUserPoolClientId）を` +
+            `登録しているか確認してください`
           : `Runtime が HTTP ${response.status} を返しました`,
         durationMs: Date.now() - startedAt,
         replyLength: 0,
