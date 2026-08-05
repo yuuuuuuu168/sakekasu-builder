@@ -429,9 +429,11 @@ export class MonitoringStack extends cdk.Stack {
         }),
         threshold: 1,
         evaluationPeriods: 1,
-        // 「実行回数が1回未満」＝動いていない。
-        // 記録が全く無い場合も動いていないことを意味するので異常として扱う
+        // 発報の実体は下の BREACHING。Lambda の Invocations は呼び出しが無いと
+        // 0 ではなく「記録なし」になるため、沈黙は必ず欠損として現れる。
+        // 比較演算子は、将来 0 を明示的に出す指標に替えても意図が保たれるように残す
         comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+        // 記録が無い＝一度も動いていない、とみなして異常にする
         treatMissingData: cloudwatch.TreatMissingData.BREACHING,
       });
     }

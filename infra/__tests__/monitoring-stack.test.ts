@@ -181,7 +181,9 @@ describe('MonitoringStack', () => {
     }
   });
 
-  // スケジュールが止まると Lambda は動かず、エラーすら記録されないまま監視が消える
+  // スケジュールが止まると Lambda は動かず、エラーすら記録されないまま監視が消える。
+  // Lambda の Invocations は呼び出しが無いと 0 ではなく「記録なし」になるため、
+  // 実際に発報させているのは欠損の扱い（breaching）のほう
   it('外形監視とカナリアが「動いていないこと」自体を検知する', () => {
     for (const [name, window] of [
       ['dev-sakekasu-watcher-silent-health-check', 3600],
@@ -190,10 +192,9 @@ describe('MonitoringStack', () => {
       template.hasResourceProperties('AWS::CloudWatch::Alarm', {
         AlarmName: name,
         MetricName: 'Invocations',
-        ComparisonOperator: 'LessThanThreshold',
         Threshold: 1,
         Period: window,
-        // 記録が無い＝一度も動いていないので異常として扱う
+        // 沈黙は欠損として現れる。ここが発報の実体
         TreatMissingData: 'breaching',
       });
     }
