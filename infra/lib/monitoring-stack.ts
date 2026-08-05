@@ -260,6 +260,9 @@ export class MonitoringStack extends cdk.Stack {
         name: 'appsync',
         url: props.graphqlApi.graphqlUrl,
         method: 'POST',
+        // 空の本文だと GraphQL の形式エラー（400）で認証まで到達しないため、
+        // 最小の有効なクエリを送って「認証で拒否されること」を確かめる
+        body: JSON.stringify({ query: '{__typename}' }),
         expectStatus: [401],
       },
     ];
