@@ -372,7 +372,10 @@ export class MonitoringStack extends cdk.Stack {
 
     this.addAlarm('SommelierCanaryFailed', {
       alarmName: `${prefix}-sommelier-canary`,
-      description: 'ソムリエに実際に相談できませんでした（認証または応答に失敗）',
+      description:
+        'ソムリエに実際に相談できませんでした（認証または応答に失敗）。' +
+        '初回デプロイ直後なら、agentcore.json の allowedClients と COGNITO_APP_CLIENT_ID に' +
+        'カナリア用クライアントを登録し忘れていないか確認してください',
       metric: new cloudwatch.Metric({
         namespace: this.metricNamespace,
         metricName: 'SommelierCanaryFailed',
