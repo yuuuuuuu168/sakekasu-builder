@@ -29,6 +29,13 @@ describe('useImageUpload - uploadImages', () => {
     mockValidate.mockReset();
     mockValidate.mockReturnValue({ valid: true });
     mockCompress.mockReset();
+    // 正規化不要の画像はそのまま返る挙動を再現
+    mockCompress.mockImplementation(async (file: File) => ({
+      file,
+      originalSize: file.size,
+      compressedSize: file.size,
+      wasCompressed: false,
+    }));
     global.fetch = vi.fn();
   });
 
