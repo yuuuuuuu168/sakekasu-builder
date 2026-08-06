@@ -3,8 +3,8 @@
  *
  * Amazon Bedrock（Claude Haiku）のレスポンステキストから、お酒のラベル情報
  * （銘柄名・カテゴリ・産地・アルコール度数）を抽出する。
- * Bedrock は JSON 形式（{"sakeName": ..., "category": ..., "region": ..., "alcoholPercentage": ...}）
- * でレスポンスを返す。
+ * Bedrock はラベルの転記テキストに続けて、<answer> タグで囲んだ JSON
+ * （{"sakeName": ..., "category": ..., "region": ..., "alcoholPercentage": ...}）を返す。
  */
 
 export type SakeCategory = 'NIHONSHU' | 'BEER' | 'WINE' | 'WHISKY' | 'SHOCHU' | 'OTHER';
@@ -80,7 +80,6 @@ export function extractLabelInfo(bedrockResponseText: string): ExtractResult {
   };
 
   // 2. テキスト中の {...} ブロックを抽出してパース試行
-  // 2段階抽出プロンプトでは前半にラベルの転記テキストが入るため、
   // 最終判定である「最後の JSON ブロック」から優先して採用する
   const extractJsonBlock = (text: string): Record<string, unknown> | null => {
     const matches = text.match(/\{[^{}]*"sakeName"[^{}]*\}/g) ?? [];
@@ -93,7 +92,17 @@ export function extractLabelInfo(bedrockResponseText: string): ExtractResult {
     return null;
   };
 
-  const parsed = tryParse(bedrockResponseText) ?? extractJsonBlock(bedrockResponseText);
+  // 3. <answer> タグがある場合はその中身だけを解析対象にする。
+  // 手順1の転記テキストにはラベル由来の文字列（偽 JSON を印刷した画像による
+  // プロンプトインジェクションを含みうる）が入るため、転記部分は絶対に解析しない。
+  // 手順2の判定は転記の後に出力されるので、タグが複数あれば最後を採用する。
+  const answers = [...bedrockResponseText.matchAll(/<answer>([\s\S]*?)<\/answer>/g)];
+  const lastAnswer = answers.length > 0 ? answers[answers.length - 1][1] : null;
+
+  const parsed =
+    lastAnswer !== null
+      ? tryParse(lastAnswer.trim()) ?? extractJsonBlock(lastAnswer)
+      : tryParse(bedrockResponseText) ?? extractJsonBlock(bedrockResponseText);
 
   if (parsed !== null) {
     const sakeName = asTrimmedString(parsed.sakeName);
