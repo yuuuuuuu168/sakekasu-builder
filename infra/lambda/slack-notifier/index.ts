@@ -80,7 +80,8 @@ async function getWebhookUrl(): Promise<string> {
 }
 
 /** 状態に応じた見出し。復旧も通知して「直ったかどうか」が分かるようにする */
-function headline(state: string | undefined, alarmName: string): string {
+function headline(state: string | undefined, rawAlarmName: string): string {
+  const alarmName = safeText(rawAlarmName, 200);
   switch (state) {
     case 'ALARM':
       return `🚨 異常を検知しました: ${alarmName}`;
@@ -141,8 +142,8 @@ function buildAlarmBlocks(alarm: AlarmMessage, fallbackTime: string): unknown[] 
   const region = alarm.Region && /^[a-z0-9-]+$/.test(alarm.Region) ? alarm.Region : REGION;
 
   const fields = [
-    `*状態*\n${alarm.OldStateValue ?? '?'} → ${alarm.NewStateValue ?? '?'}`,
-    `*発生時刻*\n${formatJst(alarm.StateChangeTime ?? fallbackTime)}`,
+    `*状態*\n${safeText(`${alarm.OldStateValue ?? '?'} → ${alarm.NewStateValue ?? '?'}`, 100)}`,
+    `*発生時刻*\n${safeText(formatJst(alarm.StateChangeTime ?? fallbackTime), 100)}`,
   ];
   if (alarm.Trigger?.MetricName) {
     fields.push(
@@ -220,8 +221,9 @@ function buildHealthBlocks(event: HealthEvent): unknown[] {
     {
       type: 'header',
       text: {
+        // plain_text は記法として解釈されないが、長さだけは抑えておく
         type: 'plain_text',
-        text: `${icon} AWS からの通知: ${service}（${categoryLabel}）`,
+        text: `${icon} AWS からの通知: ${service}（${categoryLabel}）`.slice(0, 150),
         emoji: true,
       },
     },
@@ -303,7 +305,9 @@ async function postToSlack(blocks: unknown[], fallbackText: string): Promise<voi
   const response = await fetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: fallbackText, blocks }),
+    // fallbackText は通知プレビューやプッシュ通知に出る。組み立て側で
+    // 通し忘れても素通ししないよう、送信の直前でも必ず無害化する
+    body: JSON.stringify({ text: safeText(fallbackText, 200), blocks }),
   });
 
   if (!response.ok) {
@@ -325,19 +329,22 @@ export const handler = async (event: SnsEvent): Promise<void> => {
         blocks = buildHealthBlocks(parsed);
         const service = parsed.detail?.service ?? '不明';
         const category = parsed.detail?.eventTypeCategory ?? '';
-        fallbackText = `AWS からの通知: ${service}（${HEALTH_CATEGORY_LABEL[category] ?? category}）`;
+        fallbackText = safeText(
+          `AWS からの通知: ${service}（${HEALTH_CATEGORY_LABEL[category] ?? category}）`,
+          200,
+        );
       } else if (parsed && typeof parsed === 'object' && (parsed as AlarmMessage).AlarmName) {
         const alarm = parsed as AlarmMessage;
         blocks = buildAlarmBlocks(alarm, Timestamp);
         fallbackText = headline(alarm.NewStateValue, alarm.AlarmName!);
       } else {
         blocks = buildPlainBlocks(Subject, Message);
-        fallbackText = Subject ?? 'お知らせ';
+        fallbackText = safeText(Subject ?? 'お知らせ', 200);
       }
     } catch {
       // JSON でない本文はそのまま通知する
       blocks = buildPlainBlocks(Subject, Message);
-      fallbackText = Subject ?? 'お知らせ';
+      fallbackText = safeText(Subject ?? 'お知らせ', 200);
     }
 
     await postToSlack(blocks, fallbackText);
