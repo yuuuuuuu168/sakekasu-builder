@@ -26,10 +26,22 @@ export class HealthGlobalStack extends cdk.Stack {
     const prefix = `${props.envName}-sakekasu`;
     const targetBusArn = `arn:aws:events:${props.targetRegion}:${this.account}:event-bus/default`;
 
-    // 転送のために、EventBridge 自身に相手側バスへの書き込みを許可する
+    const ruleName = `${prefix}-aws-health-global`;
+    const ruleArn = `arn:aws:events:${this.region}:${this.account}:rule/${ruleName}`;
+
+    // 転送のために、EventBridge 自身に相手側バスへの書き込みを許可する。
+    //
+    // 引き受けられる相手を「このルール」に限定する。条件を付けないと、
+    // 同じアカウントで別のルールを作れる相手がこのロールを指定して、
+    // 監視用のイベントバスへ好きなイベントを流し込めてしまう
     const forwarderRole = new iam.Role(this, 'HealthForwarderRole', {
       roleName: `${prefix}-health-forwarder`,
-      assumedBy: new iam.ServicePrincipal('events.amazonaws.com'),
+      assumedBy: new iam.ServicePrincipal('events.amazonaws.com', {
+        conditions: {
+          StringEquals: { 'aws:SourceAccount': this.account },
+          ArnEquals: { 'aws:SourceArn': ruleArn },
+        },
+      }),
       // IAM の description は ASCII / Latin-1 しか受け付けないため英語で書く
       // （日本語を入れると CREATE_FAILED になる）
       description: 'Forwards global AWS Health events to the monitoring region',
@@ -42,7 +54,7 @@ export class HealthGlobalStack extends cdk.Stack {
     );
 
     new events.Rule(this, 'AwsHealthGlobalRule', {
-      ruleName: `${prefix}-aws-health-global`,
+      ruleName,
       description: 'グローバルサービスの AWS Health イベントを監視リージョンへ転送する',
       eventPattern: {
         source: ['aws.health'],
