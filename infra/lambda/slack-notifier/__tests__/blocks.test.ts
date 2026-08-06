@@ -281,3 +281,115 @@ describe('無害化のかけすぎで表示を壊さない', () => {
     expect(text).not.toContain('&amp;lt;');
   });
 });
+
+/**
+ * サロゲートペアの片割れ（壊れた文字）が残っていないか。
+ *
+ * JSON 文字列にすると壊れた文字は "\\ud83d" という ASCII 列に変わり、
+ * そのままでは見つけられない。実際の文字列に対して調べること
+ */
+function hasLoneSurrogate(text: string): boolean {
+  return [...text].some((ch) => {
+    const code = ch.charCodeAt(0);
+    return code >= 0xd800 && code <= 0xdfff && ch.length === 1;
+  });
+}
+
+/** ブロックや送信本文に含まれる文字列をすべて集める */
+function collectStrings(value: unknown, out: string[] = []): string[] {
+  if (typeof value === 'string') out.push(value);
+  else if (Array.isArray(value)) value.forEach((v) => collectStrings(v, out));
+  else if (value && typeof value === 'object') {
+    Object.values(value).forEach((v) => collectStrings(v, out));
+  }
+  return out;
+}
+
+/** 実際の文字列に戻したうえで壊れがないか調べる */
+function anyLoneSurrogate(value: unknown): boolean {
+  return collectStrings(value).some(hasLoneSurrogate);
+}
+
+// 絵文字は2つ分の長さを持つため、単純に切ると途中で分断される。
+// 壊れた片割れは JSON として不正で、Slack 側に拒否されうる
+describe('長い文字を切るときに絵文字を壊さない', () => {
+  it('アラーム名の途中に絵文字があっても壊れない', async () => {
+    const payload = await buildPayloadForMessage(
+      JSON.stringify({
+        // clip(name, 200) は 199 文字目で切る。絵文字を 198 から置くと
+        // ちょうど分断される（この値でないと壊れないことを確認済み）
+        AlarmName: 'a'.repeat(198) + '🔥' + 'b'.repeat(50),
+        NewStateValue: 'ALARM',
+      }),
+    );
+    expect(anyLoneSurrogate(JSON.parse(payload))).toBe(false);
+  });
+
+  it('Health のサービス名が絵文字だらけでも壊れない', async () => {
+    const blocks = await buildBlocksForMessage(
+      healthMessage({ service: '🔥'.repeat(200), eventTypeCategory: 'issue' }),
+    );
+    expect(anyLoneSurrogate(blocks)).toBe(false);
+  });
+
+  it('本文が絵文字だらけでも壊れない', async () => {
+    const blocks = await buildBlocksForMessage(
+      healthMessage({
+        service: 'S3',
+        eventTypeCategory: 'issue',
+        eventDescription: [{ latestDescription: '🍶'.repeat(3000) }],
+      }),
+    );
+    expect(anyLoneSurrogate(blocks)).toBe(false);
+  });
+
+  // エスケープで文字数が増え、切る位置がずれて絵文字に当たる場合
+  it('エスケープで長さが変わっても壊れない', async () => {
+    const payload = await buildPayloadForMessage(
+      JSON.stringify({
+        // '<' は escapeMrkdwn で 4 文字（&lt;）になる。
+        // 50 + 37*4 = 198 文字ぶんとなり、直後の絵文字が切り出し位置に重なる
+        AlarmName: 'a'.repeat(50) + '<'.repeat(37) + '🔥' + 'b'.repeat(50),
+        NewStateValue: 'ALARM',
+      }),
+    );
+    expect(anyLoneSurrogate(JSON.parse(payload))).toBe(false);
+  });
+
+  it('切る必要がなければそのまま出す', async () => {
+    const blocks = await buildBlocksForMessage(
+      healthMessage({ service: '🔥S3', eventTypeCategory: 'issue' }),
+    );
+    const header = blocks.find((b) => b.type === 'header');
+    expect(header!.text!.text).toContain('🔥S3');
+  });
+
+  // 本文は 1500 で切るため、そこに絵文字を重ねる
+  it('本文の切り出し位置に絵文字が来ても壊れない', async () => {
+    const blocks = await buildBlocksForMessage(
+      healthMessage({
+        service: 'S3',
+        eventTypeCategory: 'issue',
+        eventDescription: [{ latestDescription: 'a'.repeat(1498) + '🔥' + 'b'.repeat(50) }],
+      }),
+    );
+    expect(anyLoneSurrogate(blocks)).toBe(false);
+  });
+});
+
+// Slack の header は 150 文字まで。超えると送信ごと 400 で失敗し、
+// 通知が届かなくなる（実際に踏んだ）
+describe('見出しの長さ制限', () => {
+  const HEADER_LIMIT = 150;
+
+  it.each([
+    ['アラーム', JSON.stringify({ AlarmName: 'あ'.repeat(500), NewStateValue: 'ALARM' })],
+    ['Health', JSON.stringify({ source: 'aws.health', detail: { service: 'S'.repeat(500), eventTypeCategory: 'issue' } })],
+    ['JSON でない本文', 'ただの本文'],
+  ])('%s の見出しが上限を超えない', async (_label, message) => {
+    const blocks = await buildBlocksForMessage(message, 'x'.repeat(500));
+    const header = blocks.find((b) => b.type === 'header');
+    expect(header).toBeDefined();
+    expect(header!.text!.text!.length).toBeLessThanOrEqual(HEADER_LIMIT);
+  });
+});

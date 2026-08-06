@@ -121,6 +121,8 @@ function formatJst(iso: string | undefined): string {
 
 /** Slack の section text の上限。超えると送信そのものが 400 で失敗する */
 const SLACK_TEXT_LIMIT = 2900;
+/** Slack の header text の上限。こちらは section よりずっと短い */
+const SLACK_HEADER_LIMIT = 150;
 
 /**
  * Slack の mrkdwn に埋め込む値を無害化する。
@@ -133,9 +135,25 @@ function escapeMrkdwn(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** 長さだけ詰める。記法を解釈しない plain_text 向け */
+/**
+ * 長さだけ詰める。記法を解釈しない plain_text 向け。
+ *
+ * 絵文字は2つ分の長さを持つため、単純に切ると文字の途中で分断され、
+ * 壊れた片割れが残って JSON として不正になる。文字単位で数えて切る
+ */
 function clip(text: string, limit: number = SLACK_TEXT_LIMIT): string {
-  return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
+  // Slack が数えるのは UTF-16 の単位なので、判定もそれに合わせる
+  if (text.length <= limit) return text;
+
+  // ただし切る位置は文字単位で決める。単純に切ると絵文字が分断され、
+  // 壊れた片割れが残って JSON として不正になる
+  let result = '';
+  for (const character of text) {
+    // 省略記号の分を残しておく
+    if (result.length + character.length > limit - 1) break;
+    result += character;
+  }
+  return `${result}…`;
 }
 
 /**
@@ -172,7 +190,12 @@ function buildAlarmBlocks(alarm: AlarmMessage, fallbackTime: string): unknown[] 
   const blocks: unknown[] = [
     {
       type: 'header',
-      text: { type: 'plain_text', text: headline(alarm.NewStateValue, alarmName), emoji: true },
+      text: {
+        type: 'plain_text',
+        // 見出しは 150 文字を超えると送信ごと失敗する
+        text: clip(headline(alarm.NewStateValue, alarmName), SLACK_HEADER_LIMIT),
+        emoji: true,
+      },
     },
     {
       type: 'section',
@@ -238,7 +261,7 @@ function buildHealthBlocks(event: HealthEvent): unknown[] {
       text: {
         // plain_text は記法として解釈されないが、長さだけは抑えておく
         type: 'plain_text',
-        text: clip(`${icon} AWS からの通知: ${service}（${categoryLabel}）`, 150),
+        text: clip(`${icon} AWS からの通知: ${service}（${categoryLabel}）`, SLACK_HEADER_LIMIT),
         emoji: true,
       },
     },
@@ -305,7 +328,7 @@ function buildPlainBlocks(subject: string | null | undefined, message: string): 
   return [
     {
       type: 'header',
-      text: { type: 'plain_text', text: clip(subject ?? 'お知らせ', 150), emoji: true },
+      text: { type: 'plain_text', text: clip(subject ?? 'お知らせ', SLACK_HEADER_LIMIT), emoji: true },
     },
     {
       type: 'section',
