@@ -63,9 +63,15 @@ function asAlcoholPercentage(value: unknown): number | null {
  * 5. sakeName が null・空文字列・JSON パース失敗の場合: confidence 0.0
  *    （銘柄名が読み取れないときは他の項目も採用しない）
  */
-export function extractLabelInfo(bedrockResponseText: string): ExtractResult {
-  const rawTexts = [bedrockResponseText];
+const EMPTY_RESULT: Omit<ExtractResult, 'rawTexts'> = {
+  sakeName: null,
+  category: null,
+  region: null,
+  alcoholPercentage: null,
+  confidence: 0.0,
+};
 
+export function extractLabelInfo(bedrockResponseText: string): ExtractResult {
   // 1. まずテキスト全体をそのままJSONパース試行
   const tryParse = (text: string): Record<string, unknown> | null => {
     try {
@@ -93,16 +99,27 @@ export function extractLabelInfo(bedrockResponseText: string): ExtractResult {
   };
 
   // 3. <answer> タグがある場合はその中身だけを解析対象にする。
-  // 手順1の転記テキストにはラベル由来の文字列（偽 JSON を印刷した画像による
-  // プロンプトインジェクションを含みうる）が入るため、転記部分は絶対に解析しない。
-  // 手順2の判定は転記の後に出力されるので、タグが複数あれば最後を採用する。
+  // 手順1の転記テキストにはラベル由来の文字列（偽 JSON やタグ文字列を印刷した
+  // 画像によるプロンプトインジェクションを含みうる）が入るため、転記部分は
+  // 絶対に解析しない。
   const answers = [...bedrockResponseText.matchAll(/<answer>([\s\S]*?)<\/answer>/g)];
-  const lastAnswer = answers.length > 0 ? answers[answers.length - 1][1] : null;
+
+  // 正常なレスポンスのタグは必ず1つ。複数ある場合はラベルに印刷されたタグ
+  // 文字列が転記に紛れ込んだ可能性があるため、どれも採用せず失敗扱いにする
+  if (answers.length > 1) {
+    return { ...EMPTY_RESULT, rawTexts: [] };
+  }
+
+  const answerContent = answers.length === 1 ? answers[0][1].trim() : null;
 
   const parsed =
-    lastAnswer !== null
-      ? tryParse(lastAnswer.trim()) ?? extractJsonBlock(lastAnswer)
+    answerContent !== null
+      ? tryParse(answerContent) ?? extractJsonBlock(answerContent)
       : tryParse(bedrockResponseText) ?? extractJsonBlock(bedrockResponseText);
+
+  // rawTexts にはタグがある場合は判定部分のみを入れ、手順1の転記テキスト
+  // （ラベル全文）はクライアントに返さない
+  const rawTexts = answerContent !== null ? [answerContent] : [bedrockResponseText];
 
   if (parsed !== null) {
     const sakeName = asTrimmedString(parsed.sakeName);
@@ -118,12 +135,5 @@ export function extractLabelInfo(bedrockResponseText: string): ExtractResult {
     }
   }
 
-  return {
-    sakeName: null,
-    category: null,
-    region: null,
-    alcoholPercentage: null,
-    confidence: 0.0,
-    rawTexts,
-  };
+  return { ...EMPTY_RESULT, rawTexts };
 }

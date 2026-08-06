@@ -60,22 +60,43 @@ describe('Property 2: Confidence スコアの不変条件', () => {
  *
  * Property 3: rawTexts の完全性
  *
- * 任意の Bedrock レスポンステキストを extractLabelInfo に入力した場合、
- * 返される rawTexts フィールドはそのレスポンステキスト全体を含むこと。
+ * <answer> タグを含まない任意の Bedrock レスポンステキストを extractLabelInfo に
+ * 入力した場合、返される rawTexts フィールドはそのレスポンステキスト全体を含むこと。
  * 具体的には rawTexts[0] === bedrockResponseText であること。
+ * （タグがある場合は転記テキストをクライアントに返さないため、rawTexts には
+ * タグの中身のみが入る。タグが複数の場合は不審入力として rawTexts は空になる）
  */
 describe('Property 3: rawTexts の完全性', () => {
-  it('rawTexts[0] が入力した Bedrock レスポンステキスト全体と一致する', () => {
+  it('タグなしレスポンスでは rawTexts[0] が入力テキスト全体と一致する', () => {
     fc.assert(
-      fc.property(fc.string(), (bedrockResponseText) => {
-        const result = extractLabelInfo(bedrockResponseText);
+      fc.property(
+        fc.string().filter((s) => !s.includes('<answer>')),
+        (bedrockResponseText) => {
+          const result = extractLabelInfo(bedrockResponseText);
 
-        // rawTexts は少なくとも1要素を持つこと
-        expect(result.rawTexts.length).toBeGreaterThanOrEqual(1);
+          // rawTexts は少なくとも1要素を持つこと
+          expect(result.rawTexts.length).toBeGreaterThanOrEqual(1);
 
-        // rawTexts[0] が入力テキスト全体と一致すること
-        expect(result.rawTexts[0]).toBe(bedrockResponseText);
-      }),
+          // rawTexts[0] が入力テキスト全体と一致すること
+          expect(result.rawTexts[0]).toBe(bedrockResponseText);
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  it('タグありレスポンスでは rawTexts に転記テキストが含まれない', () => {
+    fc.assert(
+      fc.property(
+        fc.string().filter((s) => !s.includes('<answer>') && !s.includes('</answer>')),
+        (transcription) => {
+          const result = extractLabelInfo(
+            `${transcription}\n<answer>{"sakeName": "テスト"}</answer>`,
+          );
+
+          expect(result.rawTexts).toEqual(['{"sakeName": "テスト"}']);
+        },
+      ),
       { numRuns: 100 },
     );
   });
