@@ -79,9 +79,15 @@ async function getWebhookUrl(): Promise<string> {
   return value;
 }
 
-/** 状態に応じた見出し。復旧も通知して「直ったかどうか」が分かるようにする */
+/**
+ * 状態に応じた見出し。復旧も通知して「直ったかどうか」が分かるようにする。
+ *
+ * ここでは加工しない素の文字列を返す。見出し（plain_text）は記法を解釈しないので
+ * エスケープすると実体参照がそのまま見えてしまい、通知プレビュー（mrkdwn）には
+ * エスケープが要る、と用途で必要な処理が違うため
+ */
 function headline(state: string | undefined, rawAlarmName: string): string {
-  const alarmName = safeText(rawAlarmName, 200);
+  const alarmName = clip(rawAlarmName, 200);
   switch (state) {
     case 'ALARM':
       return `🚨 異常を検知しました: ${alarmName}`;
@@ -127,10 +133,19 @@ function escapeMrkdwn(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** 無害化したうえで長さも詰める */
+/** 長さだけ詰める。記法を解釈しない plain_text 向け */
+function clip(text: string, limit: number = SLACK_TEXT_LIMIT): string {
+  return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
+}
+
+/**
+ * mrkdwn に埋め込む値を無害化し、長さも詰める。
+ *
+ * 二重に適用すると `&lt;` が `&amp;lt;` になって表示が壊れるため、
+ * 「mrkdwn として出力する直前に一度だけ」通すこと
+ */
 function safeText(text: string, limit: number = SLACK_TEXT_LIMIT): string {
-  const escaped = escapeMrkdwn(text);
-  return escaped.length <= limit ? escaped : `${escaped.slice(0, limit - 1)}…`;
+  return clip(escapeMrkdwn(text), limit);
 }
 
 /**
@@ -223,7 +238,7 @@ function buildHealthBlocks(event: HealthEvent): unknown[] {
       text: {
         // plain_text は記法として解釈されないが、長さだけは抑えておく
         type: 'plain_text',
-        text: `${icon} AWS からの通知: ${service}（${categoryLabel}）`.slice(0, 150),
+        text: clip(`${icon} AWS からの通知: ${service}（${categoryLabel}）`, 150),
         emoji: true,
       },
     },
@@ -290,7 +305,7 @@ function buildPlainBlocks(subject: string | null | undefined, message: string): 
   return [
     {
       type: 'header',
-      text: { type: 'plain_text', text: (subject ?? 'お知らせ').slice(0, 150), emoji: true },
+      text: { type: 'plain_text', text: clip(subject ?? 'お知らせ', 150), emoji: true },
     },
     {
       type: 'section',
@@ -329,22 +344,20 @@ export const handler = async (event: SnsEvent): Promise<void> => {
         blocks = buildHealthBlocks(parsed);
         const service = parsed.detail?.service ?? '不明';
         const category = parsed.detail?.eventTypeCategory ?? '';
-        fallbackText = safeText(
-          `AWS からの通知: ${service}（${HEALTH_CATEGORY_LABEL[category] ?? category}）`,
-          200,
-        );
+        // 無害化は送信の直前で一度だけ行う（二重に通すと表示が壊れる）
+        fallbackText = `AWS からの通知: ${service}（${HEALTH_CATEGORY_LABEL[category] ?? category}）`;
       } else if (parsed && typeof parsed === 'object' && (parsed as AlarmMessage).AlarmName) {
         const alarm = parsed as AlarmMessage;
         blocks = buildAlarmBlocks(alarm, Timestamp);
         fallbackText = headline(alarm.NewStateValue, alarm.AlarmName!);
       } else {
         blocks = buildPlainBlocks(Subject, Message);
-        fallbackText = safeText(Subject ?? 'お知らせ', 200);
+        fallbackText = Subject ?? 'お知らせ';
       }
     } catch {
       // JSON でない本文はそのまま通知する
       blocks = buildPlainBlocks(Subject, Message);
-      fallbackText = safeText(Subject ?? 'お知らせ', 200);
+      fallbackText = Subject ?? 'お知らせ';
     }
 
     await postToSlack(blocks, fallbackText);
