@@ -1,12 +1,22 @@
 /**
  * 画像圧縮ユーティリティ
- * 5MB を超える画像をクライアント側で Canvas API を使って自動圧縮する
+ * クライアント側で Canvas API を使って画像を正規化・圧縮する
+ *
+ * - 長辺が MAX_LONG_EDGE を超える画像は縮小して高品質 JPEG で再エンコード
+ *   （OCR の精度・トークン効率と保存サイズの改善）
+ * - それでも 5MB を超える場合は品質・解像度を段階的に下げる
  *
  * Validates: Requirements 2.4, 2.7, 2.8, 2.9, 2.10
  */
 
 /** 最大ファイルサイズ: 5MB */
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
+/** 保存・OCR 用の長辺上限（px）。Claude vision が推奨する上限に合わせる */
+const MAX_LONG_EDGE = 1568;
+
+/** 長辺リサイズ時の JPEG 品質。OCR で文字が読める品質を保つ */
+const NORMALIZE_QUALITY = 0.85;
 
 /** 品質の開始値 */
 const QUALITY_START = 0.9;
@@ -114,24 +124,63 @@ async function tryCompressAtResolution(
   return null;
 }
 
+/** 長辺が MAX_LONG_EDGE に収まる幅・高さを計算する（元が小さい場合はそのまま） */
+function scaleToLongEdge(
+  width: number,
+  height: number,
+): { width: number; height: number } {
+  const longEdge = Math.max(width, height);
+  if (longEdge <= MAX_LONG_EDGE) {
+    return { width, height };
+  }
+  const scale = MAX_LONG_EDGE / longEdge;
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
 /**
- * 画像圧縮（5MB 超の場合のみ）
+ * 画像の正規化・圧縮
  *
- * 1. ファイルサイズが 5MB 以下ならそのまま返す
- * 2. Canvas API で品質を 0.9 → 0.1 まで段階的に下げて圧縮
- * 3. 品質最低でも 5MB 以下にならない場合は解像度を 75% → 50% → 25% に縮小
- * 4. 圧縮後は JPEG 形式で出力
- * 5. それでも 5MB 以下にならない場合はエラーをスロー
+ * 1. 長辺が 1568px を超える画像は 1568px に縮小し JPEG（品質 0.85）で再エンコード
+ *    （5MB 超の画像を品質 0.1 まで落とすより OCR の文字が読める状態を保てる）
+ * 2. 長辺 1568px 以下かつ 5MB 以下の画像は再エンコードせずそのまま返す
+ * 3. 上記でも 5MB を超える場合は品質を 0.9 → 0.1 まで段階的に下げ、
+ *    さらに解像度を 75% → 50% → 25% に縮小して 5MB 以下を探す
+ * 4. それでも 5MB 以下にならない場合はエラーをスロー
  *
- * @param file - 圧縮対象の画像ファイル
+ * @param file - 対象の画像ファイル
  * @returns 圧縮結果
  * @throws 圧縮に失敗した場合
  */
 export async function compressImage(file: File): Promise<CompressionResult> {
   const originalSize = file.size;
 
-  // 5MB 以下はそのまま返す
-  if (originalSize <= MAX_FILE_SIZE) {
+  let img: HTMLImageElement;
+  try {
+    img = await loadImage(file);
+  } catch (error) {
+    // 読み込めない画像でも 5MB 以下ならそのまま通す（従来挙動の維持）
+    if (originalSize <= MAX_FILE_SIZE) {
+      return {
+        file,
+        originalSize,
+        compressedSize: originalSize,
+        wasCompressed: false,
+      };
+    }
+    throw error instanceof Error
+      ? error
+      : new Error('画像の圧縮に失敗しました。5MB以下の画像を選択してください');
+  }
+
+  const { width, height } = scaleToLongEdge(img.naturalWidth, img.naturalHeight);
+  const needsResize =
+    width !== img.naturalWidth || height !== img.naturalHeight;
+
+  // 長辺が上限以下かつ 5MB 以下なら再エンコードしない
+  if (!needsResize && originalSize <= MAX_FILE_SIZE) {
     return {
       file,
       originalSize,
@@ -141,18 +190,36 @@ export async function compressImage(file: File): Promise<CompressionResult> {
   }
 
   try {
-    const img = await loadImage(file);
-    const originalWidth = img.naturalWidth;
-    const originalHeight = img.naturalHeight;
+    // 長辺 1568px + 高品質 JPEG で再エンコード
+    if (needsResize) {
+      const blob = await canvasToBlob(img, width, height, NORMALIZE_QUALITY);
+      if (blob.size <= MAX_FILE_SIZE) {
+        // 再エンコードで元よりサイズが増えた場合は元ファイルを使う
+        // （5MB 超だった場合は増えることはないので必ず縮小版が使われる）
+        if (blob.size >= originalSize) {
+          return {
+            file,
+            originalSize,
+            compressedSize: originalSize,
+            wasCompressed: false,
+          };
+        }
+        const compressedFile = new File([blob], file.name, {
+          type: 'image/jpeg',
+        });
+        return {
+          file: compressedFile,
+          originalSize,
+          compressedSize: compressedFile.size,
+          wasCompressed: true,
+        };
+      }
+    }
 
-    // 元の解像度で品質を段階的に下げて試行
-    const blobAtOriginal = await tryCompressAtResolution(
-      img,
-      originalWidth,
-      originalHeight,
-    );
-    if (blobAtOriginal) {
-      const compressedFile = new File([blobAtOriginal], file.name, {
+    // リサイズ後の解像度で品質を段階的に下げて試行
+    const blobAtBase = await tryCompressAtResolution(img, width, height);
+    if (blobAtBase) {
+      const compressedFile = new File([blobAtBase], file.name, {
         type: 'image/jpeg',
       });
       return {
@@ -165,8 +232,8 @@ export async function compressImage(file: File): Promise<CompressionResult> {
 
     // 解像度を段階的に縮小して試行
     for (const scale of RESOLUTION_SCALES) {
-      const scaledWidth = Math.round(originalWidth * scale);
-      const scaledHeight = Math.round(originalHeight * scale);
+      const scaledWidth = Math.max(1, Math.round(width * scale));
+      const scaledHeight = Math.max(1, Math.round(height * scale));
 
       const blob = await tryCompressAtResolution(img, scaledWidth, scaledHeight);
       if (blob) {
