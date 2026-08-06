@@ -106,4 +106,27 @@ describe('DrinkingForm OCR 統合テスト', () => {
       expect(sakeNameInput.value).toBe('獺祭');
     });
   });
+
+  it('OCR がカテゴリを返した場合、カテゴリ選択に反映される', async () => {
+    mockAnalyzeImage.mockResolvedValue({
+      sakeName: '山崎',
+      category: 'WHISKY',
+      region: '大阪府',
+      alcoholPercentage: 43,
+      confidence: 0.9,
+      rawTexts: ['{"sakeName":"山崎"}'],
+    });
+
+    render(<DrinkingForm />);
+
+    const ocrButton = screen.getByTestId('ocr-trigger-button');
+    fireEvent.click(ocrButton);
+
+    await waitFor(() => {
+      const sakeNameInput = screen.getByTestId('input-sakeName') as HTMLInputElement;
+      expect(sakeNameInput.value).toBe('山崎');
+    });
+
+    expect(screen.getByTestId('input-category').textContent).toContain('ウイスキー');
+  });
 });

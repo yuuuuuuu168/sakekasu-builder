@@ -1,6 +1,6 @@
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import { extractSakeName } from './extractSakeName.js';
+import { extractLabelInfo, type SakeCategory } from './extractLabelInfo.js';
 
 const s3Client = new S3Client({});
 const bedrockClient = new BedrockRuntimeClient({});
@@ -21,6 +21,9 @@ interface AppSyncEvent {
 
 interface OcrResult {
   sakeName: string | null;
+  category: SakeCategory | null;
+  region: string | null;
+  alcoholPercentage: number | null;
   confidence: number;
   rawTexts: string[];
 }
@@ -75,7 +78,7 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
   const modelId = process.env.BEDROCK_MODEL_ID ?? 'jp.anthropic.claude-haiku-4-5-20251001-v1:0';
   const requestBody = {
     anthropic_version: 'bedrock-2023-05-31',
-    max_tokens: 256,
+    max_tokens: 512,
     messages: [
       {
         role: 'user',
@@ -90,15 +93,16 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
           },
           {
             type: 'text',
-            text: `このお酒のラベル画像から銘柄名を抽出してください。
-銘柄名のみを以下のJSON形式で返してください。銘柄名が読み取れない場合はnullを返してください。
+            text: `このお酒のラベル画像から以下の情報を抽出してください。
+以下のJSON形式のみで返してください。読み取れない・判定できない項目はnullにしてください。
 
-{"sakeName": "銘柄名" または null}
+{"sakeName": "銘柄名" または null, "category": "カテゴリ" または null, "region": "産地" または null, "alcoholPercentage": 数値 または null}
 
-注意:
-- 製造者名（酒造、株式会社等）は含めない
-- 容量（ml）やアルコール度数（%）は含めない
-- 銘柄名のみを返す`,
+各項目のルール:
+- sakeName: 銘柄名のみ。製造者名（酒造、株式会社等）、容量（ml）、アルコール度数（%）は含めない
+- category: 必ず次のいずれかの値: "NIHONSHU"（日本酒・清酒）, "BEER"（ビール・発泡酒）, "WINE"（ワイン・スパークリング）, "WHISKY"（ウイスキー）, "SHOCHU"（焼酎・泡盛）, "OTHER"（その他の酒類）
+- region: 産地の都道府県名または国名（例: "山口県", "スコットランド"）。製造者の住所から判断してもよい
+- alcoholPercentage: アルコール度数の数値のみ（例: 15.5）。%記号や「度」は含めない`,
           },
         ],
       },
@@ -124,6 +128,6 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
     throw new Error('OCR analysis failed');
   }
 
-  // 銘柄名を抽出して返却
-  return extractSakeName(responseText);
+  // ラベル情報を抽出して返却
+  return extractLabelInfo(responseText);
 }

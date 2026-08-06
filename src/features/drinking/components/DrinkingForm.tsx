@@ -69,7 +69,12 @@ export function DrinkingForm({
   const { handleOcrTrigger, isAnalyzing, ocrMessage, resetOcr } = useOcrTrigger(
     imageUpload,
     'drinking',
-    (sakeName) => handleChange('sakeName', sakeName),
+    (info) => {
+      handleChange('sakeName', info.sakeName);
+      if (info.category) {
+        handleChange('category', info.category);
+      }
+    },
   );
 
   // 保存だけでなく在庫ステータス更新やフォームのリセットが終わるまで押せないようにする
