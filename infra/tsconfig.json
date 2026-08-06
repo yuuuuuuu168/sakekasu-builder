@@ -15,7 +15,10 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
-    "rootDir": "."
+    "rootDir": ".",
+    // テストは vitest の globals（describe / it / expect）を import せずに使うため、
+    // その型定義を読み込む。入れないと型チェックがテストファイルで一斉に落ちる
+    "types": ["node", "vitest/globals"]
   },
   "include": [
     "bin/**/*.ts",
