@@ -41,6 +41,30 @@ interface AlarmMessage {
   };
 }
 
+/** AWS Health が EventBridge に流すイベント（使う項目だけ） */
+interface HealthEvent {
+  source?: string;
+  region?: string;
+  time?: string;
+  detail?: {
+    service?: string;
+    eventTypeCode?: string;
+    eventTypeCategory?: string;
+    startTime?: string;
+    endTime?: string;
+    eventDescription?: { language?: string; latestDescription?: string }[];
+    affectedEntities?: { entityValue?: string }[];
+  };
+}
+
+function isHealthEvent(value: unknown): value is HealthEvent {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as HealthEvent).source === 'aws.health'
+  );
+}
+
 async function getWebhookUrl(): Promise<string> {
   if (cachedWebhookUrl) return cachedWebhookUrl;
 
@@ -55,8 +79,15 @@ async function getWebhookUrl(): Promise<string> {
   return value;
 }
 
-/** 状態に応じた見出し。復旧も通知して「直ったかどうか」が分かるようにする */
-function headline(state: string | undefined, alarmName: string): string {
+/**
+ * 状態に応じた見出し。復旧も通知して「直ったかどうか」が分かるようにする。
+ *
+ * ここでは加工しない素の文字列を返す。見出し（plain_text）は記法を解釈しないので
+ * エスケープすると実体参照がそのまま見えてしまい、通知プレビュー（mrkdwn）には
+ * エスケープが要る、と用途で必要な処理が違うため
+ */
+function headline(state: string | undefined, rawAlarmName: string): string {
+  const alarmName = clip(rawAlarmName, 200);
   switch (state) {
     case 'ALARM':
       return `🚨 異常を検知しました: ${alarmName}`;
@@ -88,20 +119,90 @@ function formatJst(iso: string | undefined): string {
   }).format(date);
 }
 
+/** Slack の section text の上限。超えると送信そのものが 400 で失敗する */
+const SLACK_TEXT_LIMIT = 2900;
+/** Slack の header text の上限。こちらは section よりずっと短い */
+const SLACK_HEADER_LIMIT = 150;
+
+/**
+ * 対になっていないサロゲート（壊れた文字）を落とす。
+ *
+ * 残したまま JSON にすると `\ud83d` のような不正な文字列になり、
+ * Slack に拒否されて通知そのものが失われる。
+ * URL 生成でも `encodeURIComponent` が例外を投げるため、早い段階で落とす
+ */
+function dropBrokenCharacters(text: string): string {
+  let result = '';
+  for (const character of text) {
+    const code = character.charCodeAt(0);
+    const isBroken = character.length === 1 && code >= 0xd800 && code <= 0xdfff;
+    if (!isBroken) result += character;
+  }
+  return result;
+}
+
+/**
+ * Slack の mrkdwn に埋め込む値を無害化する。
+ *
+ * mrkdwn は `<URL|文字>` をリンク、`<!channel>` を一斉呼び出しとして解釈する。
+ * 通知には外部由来の文字列が入るため、そのまま流すと偽のリンクや
+ * 不要なメンションを差し込まれる余地が残る。
+ */
+function escapeMrkdwn(text: string): string {
+  // 壊れた文字もここで落とす。この関数は mrkdwn に出す値が必ず通るため、
+  // 個別に呼ばれた場合（影響リソースの連結など）も取りこぼさない
+  return dropBrokenCharacters(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function clip(text: string, limit: number = SLACK_TEXT_LIMIT): string {
+  // 元から壊れた文字が混ざっていることがあるので、まず取り除く
+  const cleaned = dropBrokenCharacters(text);
+
+  // Slack が数えるのは UTF-16 の単位なので、判定もそれに合わせる
+  if (cleaned.length <= limit) return cleaned;
+
+  // ただし切る位置は文字単位で決める。単純に切ると絵文字が分断され、
+  // 壊れた片割れが新たに生まれてしまう
+  let result = '';
+  for (const character of cleaned) {
+    // 省略記号の分を残しておく
+    if (result.length + character.length > limit - 1) break;
+    result += character;
+  }
+  return `${result}…`;
+}
+
+/**
+ * mrkdwn に埋め込む値を無害化し、長さも詰める。
+ *
+ * 二重に適用すると `&lt;` が `&amp;lt;` になって表示が壊れるため、
+ * 「mrkdwn として出力する直前に一度だけ」通すこと
+ */
+function safeText(text: string, limit: number = SLACK_TEXT_LIMIT): string {
+  return clip(escapeMrkdwn(text), limit);
+}
+
 /**
  * アラーム本文を Slack のブロックに組み立てる。
  * 何が起きたかと、次にどこを見ればよいかが1画面で分かることを優先する。
  */
 function buildAlarmBlocks(alarm: AlarmMessage, fallbackTime: string): unknown[] {
-  const alarmName = alarm.AlarmName ?? '(名称不明)';
+  // URL 生成にも使うため、ここで壊れた文字を落としておく
+  // （encodeURIComponent は対になっていないサロゲートで例外を投げる）
+  const alarmName = dropBrokenCharacters(alarm.AlarmName ?? '(名称不明)');
   const region = alarm.Region && /^[a-z0-9-]+$/.test(alarm.Region) ? alarm.Region : REGION;
 
   const fields = [
-    `*状態*\n${alarm.OldStateValue ?? '?'} → ${alarm.NewStateValue ?? '?'}`,
-    `*発生時刻*\n${formatJst(alarm.StateChangeTime ?? fallbackTime)}`,
+    `*状態*\n${safeText(`${alarm.OldStateValue ?? '?'} → ${alarm.NewStateValue ?? '?'}`, 100)}`,
+    `*発生時刻*\n${safeText(formatJst(alarm.StateChangeTime ?? fallbackTime), 100)}`,
   ];
   if (alarm.Trigger?.MetricName) {
-    fields.push(`*メトリクス*\n${alarm.Trigger.Namespace ?? ''} / ${alarm.Trigger.MetricName}`);
+    fields.push(
+      `*メトリクス*\n${safeText(`${alarm.Trigger.Namespace ?? ''} / ${alarm.Trigger.MetricName}`, 200)}`,
+    );
   }
   if (typeof alarm.Trigger?.Threshold === 'number') {
     fields.push(`*しきい値*\n${alarm.Trigger.Threshold}`);
@@ -110,7 +211,12 @@ function buildAlarmBlocks(alarm: AlarmMessage, fallbackTime: string): unknown[] 
   const blocks: unknown[] = [
     {
       type: 'header',
-      text: { type: 'plain_text', text: headline(alarm.NewStateValue, alarmName), emoji: true },
+      text: {
+        type: 'plain_text',
+        // 見出しは 150 文字を超えると送信ごと失敗する
+        text: clip(headline(alarm.NewStateValue, alarmName), SLACK_HEADER_LIMIT),
+        emoji: true,
+      },
     },
     {
       type: 'section',
@@ -121,13 +227,13 @@ function buildAlarmBlocks(alarm: AlarmMessage, fallbackTime: string): unknown[] 
   if (alarm.AlarmDescription) {
     blocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: `*内容*\n${alarm.AlarmDescription}` },
+      text: { type: 'mrkdwn', text: `*内容*\n${safeText(alarm.AlarmDescription, 1500)}` },
     });
   }
   if (alarm.NewStateReason) {
     blocks.push({
       type: 'context',
-      elements: [{ type: 'mrkdwn', text: alarm.NewStateReason.slice(0, 500) }],
+      elements: [{ type: 'mrkdwn', text: safeText(alarm.NewStateReason, 500) }],
     });
   }
   blocks.push({
@@ -140,16 +246,114 @@ function buildAlarmBlocks(alarm: AlarmMessage, fallbackTime: string): unknown[] 
   return blocks;
 }
 
+/** Health イベントの種類。英語のコードだけでは伝わらないので日本語を添える */
+const HEALTH_CATEGORY_LABEL: Record<string, string> = {
+  issue: '障害',
+  scheduledChange: '予定された変更',
+  accountNotification: 'お知らせ',
+  investigation: '調査中',
+};
+
+/**
+ * AWS Health のイベントを組み立てる。
+ * AWS 側の都合で起きる事象なので、こちらで直せるものではない。
+ * 「何が・いつ・自分のどのリソースに影響するか」が分かることを優先する
+ */
+function buildHealthBlocks(event: HealthEvent): unknown[] {
+  const detail = event.detail ?? {};
+  const category = detail.eventTypeCategory ?? '';
+  const categoryLabel = HEALTH_CATEGORY_LABEL[category] ?? category;
+  const service = detail.service ?? '不明';
+  const icon = category === 'issue' ? '🔥' : category === 'scheduledChange' ? '🗓️' : 'ℹ️';
+
+  const fields = [
+    `*サービス*\n${safeText(service, 200)}`,
+    `*種類*\n${safeText(categoryLabel, 100)}`,
+    `*リージョン*\n${safeText(event.region ?? '不明', 100)}`,
+    `*開始*\n${safeText(formatJst(detail.startTime ?? event.time), 100)}`,
+  ];
+  if (detail.endTime) {
+    fields.push(`*終了*\n${safeText(formatJst(detail.endTime), 100)}`);
+  }
+
+  const blocks: unknown[] = [
+    {
+      type: 'header',
+      text: {
+        // plain_text は記法として解釈されないが、長さだけは抑えておく
+        type: 'plain_text',
+        text: clip(`${icon} AWS からの通知: ${service}（${categoryLabel}）`, SLACK_HEADER_LIMIT),
+        emoji: true,
+      },
+    },
+    { type: 'section', fields: fields.map((text) => ({ type: 'mrkdwn', text })) },
+  ];
+
+  if (detail.eventTypeCode) {
+    // バックティックが混ざるとコード表記が崩れるので落としておく
+    const code = safeText(detail.eventTypeCode.replace(/`/g, "'"), 200);
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `\`${code}\`` }],
+    });
+  }
+
+  // 本文は英語で長いことがあるため、頭の方だけ載せて詳細はコンソールへ誘導する
+  const description = detail.eventDescription?.[0]?.latestDescription;
+  if (description) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: safeText(description, 1500) },
+    });
+  }
+
+  // 自分のどのリソースが対象かは、真っ先に知りたい情報。
+  // ただし ARN は1件で最大2048文字あり、数件並べるだけで Slack の上限を超える。
+  // 超えると送信そのものが失敗して通知が届かなくなるため、入る分だけ載せる
+  const entities = (detail.affectedEntities ?? [])
+    .map((e) => e.entityValue)
+    .filter((v): v is string => !!v);
+  if (entities.length > 0) {
+    const budget = SLACK_TEXT_LIMIT - 100;
+    const shown: string[] = [];
+    let used = 0;
+    for (const entity of entities) {
+      const piece = escapeMrkdwn(entity);
+      if (used + piece.length + 2 > budget) break;
+      shown.push(piece);
+      used += piece.length + 2;
+    }
+    const omitted = entities.length - shown.length;
+    const rest = omitted > 0 ? ` ほか${omitted}件` : '';
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: `*影響を受けるリソース*\n${shown.join(', ')}${rest}` },
+    });
+  }
+
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: '<https://health.aws.amazon.com/health/home|AWS Health Dashboard を開く>',
+      },
+    ],
+  });
+
+  return blocks;
+}
+
 /** アラーム形式でない通知（外形監視からの任意メッセージなど）はそのまま流す */
 function buildPlainBlocks(subject: string | null | undefined, message: string): unknown[] {
   return [
     {
       type: 'header',
-      text: { type: 'plain_text', text: subject ?? 'お知らせ', emoji: true },
+      text: { type: 'plain_text', text: clip(subject ?? 'お知らせ', SLACK_HEADER_LIMIT), emoji: true },
     },
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: message.slice(0, 2900) },
+      text: { type: 'mrkdwn', text: safeText(message) },
     },
   ];
 }
@@ -160,7 +364,9 @@ async function postToSlack(blocks: unknown[], fallbackText: string): Promise<voi
   const response = await fetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: fallbackText, blocks }),
+    // fallbackText は通知プレビューやプッシュ通知に出る。組み立て側で
+    // 通し忘れても素通ししないよう、送信の直前でも必ず無害化する
+    body: JSON.stringify({ text: safeText(fallbackText, 200), blocks }),
   });
 
   if (!response.ok) {
@@ -177,10 +383,17 @@ export const handler = async (event: SnsEvent): Promise<void> => {
     let fallbackText: string;
 
     try {
-      const parsed = JSON.parse(Message) as AlarmMessage;
-      if (parsed && typeof parsed === 'object' && parsed.AlarmName) {
-        blocks = buildAlarmBlocks(parsed, Timestamp);
-        fallbackText = headline(parsed.NewStateValue, parsed.AlarmName);
+      const parsed: unknown = JSON.parse(Message);
+      if (isHealthEvent(parsed)) {
+        blocks = buildHealthBlocks(parsed);
+        const service = parsed.detail?.service ?? '不明';
+        const category = parsed.detail?.eventTypeCategory ?? '';
+        // 無害化は送信の直前で一度だけ行う（二重に通すと表示が壊れる）
+        fallbackText = `AWS からの通知: ${service}（${HEALTH_CATEGORY_LABEL[category] ?? category}）`;
+      } else if (parsed && typeof parsed === 'object' && (parsed as AlarmMessage).AlarmName) {
+        const alarm = parsed as AlarmMessage;
+        blocks = buildAlarmBlocks(alarm, Timestamp);
+        fallbackText = headline(alarm.NewStateValue, alarm.AlarmName!);
       } else {
         blocks = buildPlainBlocks(Subject, Message);
         fallbackText = Subject ?? 'お知らせ';

@@ -349,4 +349,37 @@ describe('MonitoringStack', () => {
       },
     });
   });
+
+  // AWS 側の障害は自分たちでは直せないが、気づかないと対応が遅れる
+  it('AWS Health のイベントを SNS へ流すルールがある', () => {
+    template.hasResourceProperties('AWS::Events::Rule', {
+      Name: 'dev-sakekasu-aws-health',
+      EventPattern: {
+        source: ['aws.health'],
+        detail: { eventTypeCategory: ['issue', 'scheduledChange'] },
+      },
+      State: 'ENABLED',
+    });
+  });
+
+  // お知らせや調査中まで拾うと日常的に鳴ってノイズになる
+  it('Health は障害と予定変更だけに絞る', () => {
+    const rules = template.findResources('AWS::Events::Rule');
+    const health = Object.values(rules).find(
+      (r) => r.Properties?.Name === 'dev-sakekasu-aws-health',
+    );
+    const categories = health!.Properties.EventPattern.detail.eventTypeCategory as string[];
+    expect(categories).not.toContain('accountNotification');
+    expect(categories).not.toContain('investigation');
+  });
+
+  it('Health ルールの宛先が通知用の SNS トピックである', () => {
+    const rules = template.findResources('AWS::Events::Rule');
+    const health = Object.values(rules).find(
+      (r) => r.Properties?.Name === 'dev-sakekasu-aws-health',
+    );
+    expect(health!.Properties.Targets).toHaveLength(1);
+    // トピックは同スタック内なので Ref で参照される
+    expect(JSON.stringify(health!.Properties.Targets[0])).toContain('AlertTopic');
+  });
 });
