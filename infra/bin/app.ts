@@ -3,6 +3,7 @@ import * as cdk from 'aws-cdk-lib';
 import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
+import { HealthGlobalStack } from '../lib/health-global-stack.js';
 
 const app = new cdk.App();
 
@@ -64,6 +65,16 @@ const monitoringStack = new MonitoringStack(app, `${prefix}-monitoring`, {
   env: cdkEnv,
 });
 
+// グローバルサービスの AWS Health イベントは us-east-1 にしか届かないため、
+// そこで受けて監視リージョンのイベントバスへ転送する
+const healthGlobalStack = new HealthGlobalStack(app, `${prefix}-health-global`, {
+  envName: env,
+  targetRegion: cdkEnv.region!,
+  env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
+});
+
 // スタック間の依存関係を明示
 apiStack.addDependency(authStack);
 monitoringStack.addDependency(apiStack);
+// 転送先のバスでルールが待ち構えている状態にしてから転送側を作る
+healthGlobalStack.addDependency(monitoringStack);
