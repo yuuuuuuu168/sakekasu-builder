@@ -130,6 +130,9 @@ export const analyzeSakeLabel = /* GraphQL */ `
   mutation AnalyzeSakeLabel($imageKey: String!) {
     analyzeSakeLabel(imageKey: $imageKey) {
       sakeName
+      category
+      region
+      alcoholPercentage
       confidence
       rawTexts
     }
