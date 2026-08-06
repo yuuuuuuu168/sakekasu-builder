@@ -100,4 +100,41 @@ describe('extractLabelInfo: 拡張フィールドの抽出', () => {
 
     expect(result.region).toBeNull();
   });
+
+  it('2段階抽出レスポンス（転記テキスト + 末尾JSON）から抽出できる', () => {
+    const result = extractLabelInfo(
+      `手順1: ラベルに見える文字
+- 獺祭
+- 純米大吟醸 磨き二割三分
+- 旭酒造株式会社
+- 山口県岩国市周東町獺越2167-4
+- アルコール分16度
+
+手順2: 判定結果
+{"sakeName": "獺祭", "category": "NIHONSHU", "region": "山口県", "alcoholPercentage": 16}`,
+    );
+
+    expect(result.sakeName).toBe('獺祭');
+    expect(result.category).toBe('NIHONSHU');
+    expect(result.region).toBe('山口県');
+    expect(result.alcoholPercentage).toBe(16);
+  });
+
+  it('JSON ブロックが複数あるときは最後のブロックを採用する', () => {
+    const result = extractLabelInfo(
+      '出力形式は {"sakeName": "例"} です。判定結果: {"sakeName": "山崎", "category": "WHISKY"}',
+    );
+
+    expect(result.sakeName).toBe('山崎');
+    expect(result.category).toBe('WHISKY');
+  });
+
+  it('最後の JSON ブロックが壊れているときは手前の有効なブロックを採用する', () => {
+    const result = extractLabelInfo(
+      '{"sakeName": "久保田", "category": "NIHONSHU"} 補足: {"sakeName": 壊れたJSON}',
+    );
+
+    expect(result.sakeName).toBe('久保田');
+    expect(result.category).toBe('NIHONSHU');
+  });
 });
