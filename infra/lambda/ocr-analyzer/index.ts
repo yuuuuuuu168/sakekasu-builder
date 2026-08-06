@@ -13,11 +13,15 @@ interface AppSyncEvent {
   };
   arguments: {
     imageKey: string;
+    additionalImageKeys?: string[] | null;
   };
   identity: {
     sub: string;
   };
 }
+
+/** 1リクエストで解析する画像の上限（トークン量とコストを抑える） */
+const MAX_OCR_IMAGES = 3;
 
 interface OcrResult {
   sakeName: string | null;
@@ -38,64 +42,72 @@ export function validateImageKeyAccess(sub: string, imageKey: string): void {
   }
 }
 
+type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+
 export async function handler(event: AppSyncEvent): Promise<OcrResult> {
-  const { imageKey } = event.arguments;
+  const { imageKey, additionalImageKeys } = event.arguments;
   const { sub } = event.identity;
 
-  // アクセス制御: imageKey プレフィックスと sub の照合
-  validateImageKeyAccess(sub, imageKey);
+  // 表・裏ラベルなど複数画像を上限つきで解析対象にする
+  const imageKeys = [imageKey, ...(additionalImageKeys ?? [])].slice(0, MAX_OCR_IMAGES);
 
-  // S3 から画像を取得
-  let imageBytes: Uint8Array;
-  let mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' = 'image/jpeg';
+  // アクセス制御: 全キーについて imageKey プレフィックスと sub の照合
+  for (const key of imageKeys) {
+    validateImageKeyAccess(sub, key);
+  }
+
+  // S3 から画像を取得して Base64 エンコード
+  const images: { base64: string; mediaType: ImageMediaType }[] = [];
   try {
-    const s3Response = await s3Client.send(
-      new GetObjectCommand({
-        Bucket: BUCKET_NAME,
-        Key: imageKey,
-      }),
-    );
-    imageBytes = await s3Response.Body!.transformToByteArray();
+    for (const key of imageKeys) {
+      const s3Response = await s3Client.send(
+        new GetObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+        }),
+      );
+      const imageBytes = await s3Response.Body!.transformToByteArray();
 
-    // Content-Type から画像形式を判定
-    const contentType = s3Response.ContentType ?? '';
-    if (
-      contentType === 'image/jpeg' ||
-      contentType === 'image/png' ||
-      contentType === 'image/gif' ||
-      contentType === 'image/webp'
-    ) {
-      mediaType = contentType;
+      // Content-Type から画像形式を判定
+      const contentType = s3Response.ContentType ?? '';
+      const mediaType: ImageMediaType =
+        contentType === 'image/jpeg' ||
+        contentType === 'image/png' ||
+        contentType === 'image/gif' ||
+        contentType === 'image/webp'
+          ? contentType
+          : 'image/jpeg';
+
+      images.push({ base64: Buffer.from(imageBytes).toString('base64'), mediaType });
     }
   } catch {
     throw new Error('Failed to retrieve image from storage');
   }
 
-  // 画像を Base64 エンコード
-  const base64Image = Buffer.from(imageBytes).toString('base64');
-
   // Bedrock Claude Haiku でマルチモーダル解析
   const modelId = process.env.BEDROCK_MODEL_ID ?? 'jp.anthropic.claude-haiku-4-5-20251001-v1:0';
   const requestBody = {
     anthropic_version: 'bedrock-2023-05-31',
-    max_tokens: 1024,
+    max_tokens: 1536,
     // 読み取り結果のブレを抑えるため決定的に近い出力にする
     temperature: 0,
     messages: [
       {
         role: 'user',
         content: [
-          {
+          ...images.map((img) => ({
             type: 'image',
             source: {
               type: 'base64',
-              media_type: mediaType,
-              data: base64Image,
+              media_type: img.mediaType,
+              data: img.base64,
             },
-          },
+          })),
           {
             type: 'text',
-            text: `このお酒のラベル画像を解析してください。次の2段階の手順で進めてください。
+            text: `このお酒のラベル画像を解析してください。複数の画像がある場合は、同じお酒のボトルを別の面（表ラベル・裏ラベルなど）から写したものなので、すべての画像を確認してください。産地やアルコール度数は裏ラベルに記載されていることが多いです。
+
+次の2段階の手順で進めてください。
 
 手順1: ラベルに見える文字をすべて書き出す
 - 大きな文字だけでなく、小さな文字（製造者名、住所、アルコール度数の表記、特定名称など）も漏らさず書き出してください

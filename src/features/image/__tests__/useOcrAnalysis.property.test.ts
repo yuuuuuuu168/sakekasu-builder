@@ -111,7 +111,7 @@ describe('Property 6: エラー時のフォーム値保持', () => {
           // analyzeImage を実行
           let ocrResult: { sakeName: string | null } | null = null;
           await act(async () => {
-            ocrResult = await result.current.analyzeImage(imageKey);
+            ocrResult = await result.current.analyzeImage([imageKey]);
           });
 
           // フォーム統合ロジック: result?.sakeName が truthy な場合のみ更新

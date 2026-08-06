@@ -15,8 +15,8 @@ export interface OcrResult {
 }
 
 export interface UseOcrAnalysisReturn {
-  /** OCR 解析実行 */
-  analyzeImage: (imageKey: string) => Promise<OcrResult | null>;
+  /** OCR 解析実行（複数キーは表・裏ラベルとしてまとめて解析される） */
+  analyzeImage: (imageKeys: string[]) => Promise<OcrResult | null>;
   /** 解析中フラグ */
   isAnalyzing: boolean;
   /** OCR 結果 */
@@ -43,7 +43,9 @@ export function useOcrAnalysis(): UseOcrAnalysisReturn {
   const [ocrResult, setOcrResult] = useState<OcrResult | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
 
-  const analyzeImage = useCallback(async (imageKey: string): Promise<OcrResult | null> => {
+  const analyzeImage = useCallback(async (imageKeys: string[]): Promise<OcrResult | null> => {
+    if (imageKeys.length === 0) return null;
+
     setIsAnalyzing(true);
     setOcrError(null);
     setOcrResult(null);
@@ -51,7 +53,10 @@ export function useOcrAnalysis(): UseOcrAnalysisReturn {
     try {
       const result = await client.graphql({
         query: analyzeSakeLabel,
-        variables: { imageKey },
+        variables: {
+          imageKey: imageKeys[0],
+          additionalImageKeys: imageKeys.slice(1),
+        },
       });
 
       if ('errors' in result && result.errors && result.errors.length > 0) {

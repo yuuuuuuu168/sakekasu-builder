@@ -40,7 +40,9 @@ vi.mock('@/features/image/hooks/useImageUpload', () => ({
     clearImage: mockClearImage,
     removeImage: vi.fn(),
     preUploadImage: vi.fn(async () => null),
+    preUploadImages: vi.fn(async () => []),
     imageKey: null,
+    imageKeys: [],
   }),
 }));
 

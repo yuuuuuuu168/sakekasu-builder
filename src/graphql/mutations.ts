@@ -127,8 +127,8 @@ export const generateUploadUrl = /* GraphQL */ `
 `;
 
 export const analyzeSakeLabel = /* GraphQL */ `
-  mutation AnalyzeSakeLabel($imageKey: String!) {
-    analyzeSakeLabel(imageKey: $imageKey) {
+  mutation AnalyzeSakeLabel($imageKey: String!, $additionalImageKeys: [String!]) {
+    analyzeSakeLabel(imageKey: $imageKey, additionalImageKeys: $additionalImageKeys) {
       sakeName
       category
       region
