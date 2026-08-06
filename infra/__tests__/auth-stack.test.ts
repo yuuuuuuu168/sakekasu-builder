@@ -60,6 +60,19 @@ describe('AuthStack', () => {
     });
   });
 
+  // サインイン画面から登録済みメールアドレスを割り出せないようにする
+  it('すべてのクライアントが利用者の存在を隠す', () => {
+    const clients = template.findResources('AWS::Cognito::UserPoolClient');
+    expect(Object.keys(clients).length).toBeGreaterThan(0);
+
+    for (const [logicalId, client] of Object.entries(clients)) {
+      expect(
+        client.Properties.PreventUserExistenceErrors,
+        `${logicalId} が利用者の存在を隠していない`,
+      ).toBe('ENABLED');
+    }
+  });
+
   // Requirements 2.5: トークン有効期限
   it('UserPoolClient がアクセストークン有効期限を60分に設定している', () => {
     template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
