@@ -17,8 +17,8 @@ const MB = 1024 * 1024;
 
 // --- モック設定 ---
 
-function setupBrowserMocks(opts: { blobSize?: number; toBlobFail?: boolean; imgLoadFail?: boolean; ctxFail?: boolean } = {}) {
-  const { blobSize = 1 * MB, toBlobFail = false, imgLoadFail = false, ctxFail = false } = opts;
+function setupBrowserMocks(opts: { blobSize?: number; toBlobFail?: boolean; imgLoadFail?: boolean; ctxFail?: boolean; imgWidth?: number; imgHeight?: number } = {}) {
+  const { blobSize = 1 * MB, toBlobFail = false, imgLoadFail = false, ctxFail = false, imgWidth = 1000, imgHeight = 800 } = opts;
 
   // URL.createObjectURL / revokeObjectURL
   vi.stubGlobal('URL', {
@@ -31,8 +31,8 @@ function setupBrowserMocks(opts: { blobSize?: number; toBlobFail?: boolean; imgL
   vi.stubGlobal('Image', class MockImage {
     onload: (() => void) | null = null;
     onerror: (() => void) | null = null;
-    naturalWidth = 1000;
-    naturalHeight = 800;
+    naturalWidth = imgWidth;
+    naturalHeight = imgHeight;
     private _src = '';
     get src() { return this._src; }
     set src(val: string) {
@@ -87,7 +87,8 @@ describe('compressImage', () => {
     vi.restoreAllMocks();
   });
 
-  it('5MB以下のファイルは圧縮せずそのまま返す (wasCompressed: false)', async () => {
+  it('5MB以下かつ長辺1568px以下のファイルは圧縮せずそのまま返す (wasCompressed: false)', async () => {
+    setupBrowserMocks();
     const file = createDummyFile(3 * MB);
     const result = await compressImage(file);
 
@@ -98,6 +99,7 @@ describe('compressImage', () => {
   });
 
   it('ちょうど5MBのファイルは圧縮せずそのまま返す', async () => {
+    setupBrowserMocks();
     const file = createDummyFile(5 * MB);
     const result = await compressImage(file);
 
@@ -156,6 +158,41 @@ describe('compressImage', () => {
     const file = createDummyFile(6 * MB);
 
     await expect(compressImage(file)).rejects.toThrow();
+  });
+
+  it('長辺が1568pxを超える画像は5MB以下でも縮小・再エンコードされる', async () => {
+    const { mockToBlob } = setupBrowserMocks({ blobSize: 1 * MB, imgWidth: 4000, imgHeight: 3000 });
+    const file = createDummyFile(3 * MB);
+
+    const result = await compressImage(file);
+
+    expect(result.wasCompressed).toBe(true);
+    expect(result.file.type).toBe('image/jpeg');
+    // 品質 0.85 で1回で再エンコードされる
+    expect(mockToBlob).toHaveBeenCalledTimes(1);
+    expect(mockToBlob.mock.calls[0][2]).toBe(0.85);
+  });
+
+  it('長辺1568px以下の5MB以下の画像は再エンコードされない', async () => {
+    const { mockToBlob } = setupBrowserMocks({ imgWidth: 1568, imgHeight: 1000 });
+    const file = createDummyFile(2 * MB);
+
+    const result = await compressImage(file);
+
+    expect(result.wasCompressed).toBe(false);
+    expect(result.file).toBe(file);
+    expect(mockToBlob).not.toHaveBeenCalled();
+  });
+
+  it('縮小・再エンコードで元よりサイズが増える場合は元ファイルを返す', async () => {
+    // 元 1MB に対して再エンコード結果が 2MB になるケース
+    setupBrowserMocks({ blobSize: 2 * MB, imgWidth: 4000, imgHeight: 3000 });
+    const file = createDummyFile(1 * MB);
+
+    const result = await compressImage(file);
+
+    expect(result.wasCompressed).toBe(false);
+    expect(result.file).toBe(file);
   });
 
   it('品質を下げても5MB以下にならず解像度縮小でも失敗した場合エラーをスローする', async () => {

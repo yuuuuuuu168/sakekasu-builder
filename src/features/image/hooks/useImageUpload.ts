@@ -7,9 +7,6 @@ import { toThumbnailFileName } from '../lib/thumbnailKey';
 
 const client = generateClient();
 
-/** 圧縮が必要なファイルサイズ閾値: 5MB */
-const COMPRESSION_THRESHOLD = 5 * 1024 * 1024;
-
 /** 最大画像数 */
 const MAX_IMAGES = 5;
 
@@ -81,23 +78,19 @@ export function useImageUpload(): UseImageUploadReturn {
 
     setError(null);
 
-    // 5MB 超の場合は圧縮
-    if (file.size > COMPRESSION_THRESHOLD) {
-      setIsCompressing(true);
-      try {
-        const result = await compressImage(file);
-        setImageFiles((prev) => [...prev, result.file]);
-      } catch (err) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : '画像の圧縮に失敗しました。5MB以下の画像を選択してください';
-        setError(message);
-      } finally {
-        setIsCompressing(false);
-      }
-    } else {
-      setImageFiles((prev) => [...prev, file]);
+    // 長辺の正規化と 5MB 超の圧縮（必要ない画像はそのまま返る）
+    setIsCompressing(true);
+    try {
+      const result = await compressImage(file);
+      setImageFiles((prev) => [...prev, result.file]);
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : '画像の圧縮に失敗しました。5MB以下の画像を選択してください';
+      setError(message);
+    } finally {
+      setIsCompressing(false);
     }
   }, [imageFiles.length]);
 
