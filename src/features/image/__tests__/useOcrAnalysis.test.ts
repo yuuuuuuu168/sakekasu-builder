@@ -37,15 +37,54 @@ describe('useOcrAnalysis', () => {
     const { result } = renderHook(() => useOcrAnalysis());
 
     await act(async () => {
-      await result.current.analyzeImage('user-sub/test-image.jpg');
+      await result.current.analyzeImage(['user-sub/test-image.jpg']);
     });
 
     expect(mockGraphql).toHaveBeenCalledTimes(1);
     expect(mockGraphql).toHaveBeenCalledWith(
       expect.objectContaining({
-        variables: { imageKey: 'user-sub/test-image.jpg' },
+        variables: { imageKey: 'user-sub/test-image.jpg', additionalImageKeys: [] },
       }),
     );
+  });
+
+  it('複数キー指定時に2枚目以降が additionalImageKeys に渡されること', async () => {
+    mockGraphql.mockResolvedValueOnce({
+      data: {
+        analyzeSakeLabel: {
+          sakeName: '獺祭',
+          confidence: 0.9,
+          rawTexts: ['{"sakeName":"獺祭"}'],
+        },
+      },
+    });
+
+    const { result } = renderHook(() => useOcrAnalysis());
+
+    await act(async () => {
+      await result.current.analyzeImage(['sub/front.jpg', 'sub/back.jpg']);
+    });
+
+    expect(mockGraphql).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variables: {
+          imageKey: 'sub/front.jpg',
+          additionalImageKeys: ['sub/back.jpg'],
+        },
+      }),
+    );
+  });
+
+  it('キーが空配列のときは GraphQL を呼ばず null を返すこと', async () => {
+    const { result } = renderHook(() => useOcrAnalysis());
+
+    let ret: unknown = 'sentinel';
+    await act(async () => {
+      ret = await result.current.analyzeImage([]);
+    });
+
+    expect(ret).toBeNull();
+    expect(mockGraphql).not.toHaveBeenCalled();
   });
 
   it('成功時（sakeName あり）に ocrResult が設定され、ocrError が null であること', async () => {
@@ -63,7 +102,7 @@ describe('useOcrAnalysis', () => {
 
     let returnValue: unknown;
     await act(async () => {
-      returnValue = await result.current.analyzeImage('sub123/image.jpg');
+      returnValue = await result.current.analyzeImage(['sub123/image.jpg']);
     });
 
     expect(result.current.ocrResult).toEqual(expectedResult);
@@ -85,7 +124,7 @@ describe('useOcrAnalysis', () => {
     const { result } = renderHook(() => useOcrAnalysis());
 
     await act(async () => {
-      await result.current.analyzeImage('sub/img.jpg');
+      await result.current.analyzeImage(['sub/img.jpg']);
     });
 
     expect(result.current.ocrError).toBe(
@@ -104,7 +143,7 @@ describe('useOcrAnalysis', () => {
     const { result } = renderHook(() => useOcrAnalysis());
 
     await act(async () => {
-      const ret = await result.current.analyzeImage('sub/img.jpg');
+      const ret = await result.current.analyzeImage(['sub/img.jpg']);
       expect(ret).toBeNull();
     });
 
@@ -122,7 +161,7 @@ describe('useOcrAnalysis', () => {
     const { result } = renderHook(() => useOcrAnalysis());
 
     await act(async () => {
-      const ret = await result.current.analyzeImage('sub/img.jpg');
+      const ret = await result.current.analyzeImage(['sub/img.jpg']);
       expect(ret).toBeNull();
     });
 
@@ -146,7 +185,7 @@ describe('useOcrAnalysis', () => {
     const { result } = renderHook(() => useOcrAnalysis());
 
     await act(async () => {
-      await result.current.analyzeImage('sub/img.jpg');
+      await result.current.analyzeImage(['sub/img.jpg']);
     });
 
     expect(result.current.ocrResult).not.toBeNull();
@@ -173,7 +212,7 @@ describe('useOcrAnalysis', () => {
     // analyzeImage を開始するが await しない
     let analyzePromise: Promise<unknown>;
     act(() => {
-      analyzePromise = result.current.analyzeImage('sub/img.jpg');
+      analyzePromise = result.current.analyzeImage(['sub/img.jpg']);
     });
 
     // 解析中は isAnalyzing が true

@@ -24,9 +24,10 @@ export function useOcrTrigger(
   const { analyzeImage, isAnalyzing, ocrResult, ocrError, resetOcr } = useOcrAnalysis();
 
   const handleOcrTrigger = async () => {
-    const key = imageUpload.imageKey ?? await imageUpload.preUploadImage(recordType);
-    if (!key) return;
-    const result = await analyzeImage(key);
+    // 選択中の全画像（表・裏ラベルなど）をアップロードしてまとめて解析する
+    const keys = await imageUpload.preUploadImages(recordType);
+    if (keys.length === 0) return;
+    const result = await analyzeImage(keys);
     if (result?.sakeName) {
       onOcrDetected({
         sakeName: result.sakeName,

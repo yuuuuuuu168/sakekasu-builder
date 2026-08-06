@@ -38,8 +38,10 @@ export interface UseImageUploadReturn {
   uploadImage: (recordType: string, recordId: string) => Promise<string | null>;
   /** 複数画像アップロード実行 */
   uploadImages: (recordType: string, recordId: string) => Promise<string[]>;
-  /** OCR 用の事前アップロード（最初の1枚のみ） */
+  /** OCR 用の事前アップロード（最初の1枚のみ）。後方互換用 */
   preUploadImage: (recordType: string) => Promise<string | null>;
+  /** OCR 用の事前アップロード（選択中の全画像）。アップロード済みのキーは再利用する */
+  preUploadImages: (recordType: string) => Promise<string[]>;
   /** 画像クリア */
   clearImage: () => void;
 }
@@ -227,36 +229,53 @@ export function useImageUpload(): UseImageUploadReturn {
     [uploadImages],
   );
 
-  const preUploadImage = useCallback(
-    async (recordType: string): Promise<string | null> => {
-      const firstFile = imageFiles[0];
-      if (!firstFile) return null;
+  const preUploadImages = useCallback(
+    async (recordType: string): Promise<string[]> => {
+      if (imageFiles.length === 0) return [];
 
-      if (imageKeys[0]) return imageKeys[0];
+      // 全ファイル分のキーが揃っている場合はそれを返す
+      if (imageKeys.length === imageFiles.length && imageKeys.every((k) => k)) {
+        return imageKeys;
+      }
 
       setIsUploading(true);
       try {
         const tempRecordId = crypto.randomUUID();
-        const key = await uploadSingleFile(firstFile, recordType, tempRecordId);
-        if (key === null) {
-          setError('画像のアップロードに失敗しました。もう一度お試しください');
-          return null;
+        const keys: string[] = [];
+        for (let i = 0; i < imageFiles.length; i++) {
+          // 既にアップロード済みのキーは再利用
+          const existing = imageKeys[i];
+          if (existing) {
+            keys.push(existing);
+            continue;
+          }
+          const key = await uploadSingleFile(imageFiles[i], recordType, tempRecordId);
+          if (key === null) {
+            setError('画像のアップロードに失敗しました。もう一度お試しください');
+            return [];
+          }
+          keys.push(key);
         }
-        setImageKeys((prev) => {
-          const next = [...prev];
-          next[0] = key;
-          return next;
-        });
-        return key;
+        setImageKeys(keys);
+        return keys;
       } catch (err) {
         console.error('Image pre-upload failed:', err);
         setError('画像のアップロードに失敗しました。もう一度お試しください');
-        return null;
+        return [];
       } finally {
         setIsUploading(false);
       }
     },
     [imageFiles, imageKeys],
+  );
+
+  // 後方互換: 最初の1枚のキーを返す
+  const preUploadImage = useCallback(
+    async (recordType: string): Promise<string | null> => {
+      const keys = await preUploadImages(recordType);
+      return keys[0] ?? null;
+    },
+    [preUploadImages],
   );
 
   const clearImage = useCallback(() => {
@@ -279,6 +298,7 @@ export function useImageUpload(): UseImageUploadReturn {
     uploadImage,
     uploadImages,
     preUploadImage,
+    preUploadImages,
     clearImage,
   };
 }
