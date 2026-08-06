@@ -91,3 +91,51 @@ describe('キーワード検索の横断', () => {
     expect(result).toEqual([whisky]);
   });
 });
+
+describe('表記ゆれを越えた検索', () => {
+  const arran: UnifiedRecord = {
+    ...purchase,
+    id: 'p-arran',
+    sakeName: 'アラン 10年',
+    storeName: 'リカーショップ',
+    memo: undefined,
+  };
+
+  // 人間様から挙がった実例
+  it.each(['アラン', 'あらん', 'ｱﾗﾝ', 'Allan', 'Arran', 'ARRAN', 'ＡＲＲＡＮ'])(
+    '「%s」で「アラン 10年」を引ける',
+    (query) => {
+      expect(filterRecords([arran], search(query))).toEqual([arran]);
+    },
+  );
+
+  it('英字表記の記録をカタカナで引ける（逆方向）', () => {
+    const bowmore: UnifiedRecord = { ...purchase, id: 'p-bw', sakeName: 'Yamazaki 12' };
+    expect(filterRecords([bowmore], search('ヤマザキ'))).toEqual([bowmore]);
+  });
+
+  it('店名やメモの表記ゆれも吸収する', () => {
+    const rec: UnifiedRecord = {
+      ...purchase,
+      id: 'p-store',
+      sakeName: '獺祭',
+      storeName: 'カクヤス',
+      memo: 'ぼうもあ と一緒に購入',
+    };
+    expect(filterRecords([rec], search('かくやす'))).toEqual([rec]);
+    expect(filterRecords([rec], search('ボウモア'))).toEqual([rec]);
+  });
+
+  // 表記ゆれ対応で網を広げた結果、無関係な記録まで拾わないこと
+  it('別の銘柄は引っかからない', () => {
+    const kirin: UnifiedRecord = { ...purchase, id: 'p-kirin', sakeName: 'キリン', memo: undefined };
+    expect(filterRecords([kirin], search('アラン'))).toEqual([]);
+
+    const kaku: UnifiedRecord = { ...purchase, id: 'p-kaku', sakeName: 'カク', memo: undefined };
+    expect(filterRecords([kaku], search('コク'))).toEqual([]);
+  });
+
+  it('従来の曖昧検索は引き続き効く', () => {
+    expect(filterRecords(records, search('獺大吟'))).toEqual([purchase]);
+  });
+});
