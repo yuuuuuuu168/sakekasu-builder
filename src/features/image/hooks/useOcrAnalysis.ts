@@ -1,11 +1,15 @@
 import { useState, useCallback } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { analyzeSakeLabel } from '@/graphql/mutations';
+import type { SakeCategory } from '@/features/purchase/types';
 
 const client = generateClient();
 
 export interface OcrResult {
   sakeName: string | null;
+  category: SakeCategory | null;
+  region: string | null;
+  alcoholPercentage: number | null;
   confidence: number;
   rawTexts: string[];
 }

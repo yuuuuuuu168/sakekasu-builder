@@ -18,6 +18,7 @@ import { PastRatingHint } from '@/features/purchase/components/PastRatingHint';
 import type { PurchaseFormData } from '@/features/purchase/types';
 import { ImageUploadArea } from '@/features/image/components/ImageUploadArea';
 import { useOcrTrigger } from '@/features/image/hooks/useOcrTrigger';
+import { appendLabelInfoToMemo } from '@/features/image/lib/ocrLabelInfo';
 
 const MotionButton = motion.create(Button);
 
@@ -45,7 +46,13 @@ export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: Purchas
   const { handleOcrTrigger, isAnalyzing, ocrMessage, resetOcr } = useOcrTrigger(
     imageUpload,
     'purchase',
-    (sakeName) => handleChange('sakeName', sakeName),
+    (info) => {
+      handleChange('sakeName', info.sakeName);
+      if (info.category) {
+        handleChange('category', info.category);
+      }
+      handleChange('memo', appendLabelInfoToMemo(formData.memo, info));
+    },
   );
 
   const isSubmitting = isSaving || imageUpload.isUploading || isAnalyzing;
