@@ -393,3 +393,48 @@ describe('見出しの長さ制限', () => {
     expect(header!.text!.text!.length).toBeLessThanOrEqual(HEADER_LIMIT);
   });
 });
+
+// 切るときに壊さないだけでなく、元から壊れた文字が混ざっていても取り除く。
+// 残ると JSON が不正になり、Slack に拒否されて通知が失われる
+describe('元から壊れた文字が混ざっていても落とす', () => {
+  const BROKEN = '\ud83d'; // 対になっていないサロゲート
+
+  it('短い文字列でも取り除く（切る必要がない場合）', async () => {
+    const payload = await buildPayloadForMessage(
+      JSON.stringify({ AlarmName: `アラーム${BROKEN}名`, NewStateValue: 'ALARM' }),
+    );
+    // JSON の中に不正なエスケープ列が残らない
+    expect(/\\ud[89ab][0-9a-f]{2}/i.test(payload)).toBe(false);
+    expect(anyLoneSurrogate(JSON.parse(payload))).toBe(false);
+  });
+
+  it('Health のイベントでも取り除く', async () => {
+    const blocks = await buildBlocksForMessage(
+      healthMessage({
+        service: `S3${BROKEN}`,
+        eventTypeCategory: 'issue',
+        eventDescription: [{ latestDescription: `本文${BROKEN}です` }],
+        affectedEntities: [{ entityValue: `bucket${BROKEN}` }],
+      }),
+    );
+    expect(anyLoneSurrogate(blocks)).toBe(false);
+  });
+
+  // encodeURIComponent は壊れた文字で例外を投げる。
+  // 送信前に落ちると通知そのものが失われる
+  it('アラーム名が壊れていてもリンク生成で落ちない', async () => {
+    const blocks = await buildBlocksForMessage(
+      JSON.stringify({ AlarmName: `alarm${BROKEN}x`, NewStateValue: 'ALARM' }),
+    );
+    const link = collectStrings(blocks).find((t) => t.includes('CloudWatch でアラームを開く'));
+    expect(link).toBeDefined();
+    expect(anyLoneSurrogate(blocks)).toBe(false);
+  });
+
+  it('正常な絵文字は残す', async () => {
+    const blocks = await buildBlocksForMessage(
+      healthMessage({ service: '🍶S3', eventTypeCategory: 'issue' }),
+    );
+    expect(collectStrings(blocks).join('')).toContain('🍶S3');
+  });
+});
