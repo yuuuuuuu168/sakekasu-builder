@@ -54,6 +54,16 @@ export class AuthStack extends cdk.Stack {
       authFlows: {
         userSrp: true,
       },
+      // 存在しない利用者への応答を、誤ったパスワードのときと揃える。
+      // サインイン画面は総当たりに晒されるため、登録済みメールアドレスの
+      // 割り出しに使えないようにする。
+      //
+      // 画面の分岐に使っている例外は変わらないことを実機で確認済み
+      // （未確認利用者は UserNotConfirmedException、サインアップ済みは
+      // UsernameExistsException、確認コード誤りは CodeMismatchException のまま）。
+      // 変わるのは存在しない利用者の UserNotFoundException → NotAuthorizedException だけで、
+      // これは「メールアドレスまたはパスワードが正しくありません」に流れて表示も適切になる
+      preventUserExistenceErrors: true,
       accessTokenValidity: cdk.Duration.hours(1),
       refreshTokenValidity: cdk.Duration.days(30),
     });
