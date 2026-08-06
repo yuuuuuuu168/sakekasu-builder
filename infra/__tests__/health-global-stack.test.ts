@@ -63,6 +63,26 @@ describe('HealthGlobalStack', () => {
     });
   });
 
+  // 条件が無いと、同アカウントで別のルールを作れる相手がこのロールを指定して
+  // 監視バスへ好きなイベントを流し込める（混乱した代理人）
+  it('このルールからしかロールを引き受けられない', () => {
+    template.hasResourceProperties('AWS::IAM::Role', {
+      AssumeRolePolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Condition: {
+              StringEquals: { 'aws:SourceAccount': '111122223333' },
+              ArnEquals: {
+                'aws:SourceArn':
+                  'arn:aws:events:us-east-1:111122223333:rule/dev-sakekasu-aws-health-global',
+              },
+            },
+          }),
+        ]),
+      },
+    });
+  });
+
   // IAM の description は ASCII / Latin-1 しか受け付けず、
   // 日本語を入れるとデプロイ時に CREATE_FAILED になる（実際に踏んだ）
   it('IAM ロールの説明に ASCII 以外を混ぜない', () => {

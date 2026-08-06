@@ -112,6 +112,26 @@ function formatJst(iso: string | undefined): string {
   }).format(date);
 }
 
+/** Slack の section text の上限。超えると送信そのものが 400 で失敗する */
+const SLACK_TEXT_LIMIT = 2900;
+
+/**
+ * Slack の mrkdwn に埋め込む値を無害化する。
+ *
+ * mrkdwn は `<URL|文字>` をリンク、`<!channel>` を一斉呼び出しとして解釈する。
+ * 通知には外部由来の文字列が入るため、そのまま流すと偽のリンクや
+ * 不要なメンションを差し込まれる余地が残る。
+ */
+function escapeMrkdwn(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** 無害化したうえで長さも詰める */
+function safeText(text: string, limit: number = SLACK_TEXT_LIMIT): string {
+  const escaped = escapeMrkdwn(text);
+  return escaped.length <= limit ? escaped : `${escaped.slice(0, limit - 1)}…`;
+}
+
 /**
  * アラーム本文を Slack のブロックに組み立てる。
  * 何が起きたかと、次にどこを見ればよいかが1画面で分かることを優先する。
@@ -125,7 +145,9 @@ function buildAlarmBlocks(alarm: AlarmMessage, fallbackTime: string): unknown[] 
     `*発生時刻*\n${formatJst(alarm.StateChangeTime ?? fallbackTime)}`,
   ];
   if (alarm.Trigger?.MetricName) {
-    fields.push(`*メトリクス*\n${alarm.Trigger.Namespace ?? ''} / ${alarm.Trigger.MetricName}`);
+    fields.push(
+      `*メトリクス*\n${safeText(`${alarm.Trigger.Namespace ?? ''} / ${alarm.Trigger.MetricName}`, 200)}`,
+    );
   }
   if (typeof alarm.Trigger?.Threshold === 'number') {
     fields.push(`*しきい値*\n${alarm.Trigger.Threshold}`);
@@ -145,13 +167,13 @@ function buildAlarmBlocks(alarm: AlarmMessage, fallbackTime: string): unknown[] 
   if (alarm.AlarmDescription) {
     blocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: `*内容*\n${alarm.AlarmDescription}` },
+      text: { type: 'mrkdwn', text: `*内容*\n${safeText(alarm.AlarmDescription, 1500)}` },
     });
   }
   if (alarm.NewStateReason) {
     blocks.push({
       type: 'context',
-      elements: [{ type: 'mrkdwn', text: alarm.NewStateReason.slice(0, 500) }],
+      elements: [{ type: 'mrkdwn', text: safeText(alarm.NewStateReason, 500) }],
     });
   }
   blocks.push({
@@ -185,13 +207,13 @@ function buildHealthBlocks(event: HealthEvent): unknown[] {
   const icon = category === 'issue' ? '🔥' : category === 'scheduledChange' ? '🗓️' : 'ℹ️';
 
   const fields = [
-    `*サービス*\n${service}`,
-    `*種類*\n${categoryLabel}`,
-    `*リージョン*\n${event.region ?? '不明'}`,
-    `*開始*\n${formatJst(detail.startTime ?? event.time)}`,
+    `*サービス*\n${safeText(service, 200)}`,
+    `*種類*\n${safeText(categoryLabel, 100)}`,
+    `*リージョン*\n${safeText(event.region ?? '不明', 100)}`,
+    `*開始*\n${safeText(formatJst(detail.startTime ?? event.time), 100)}`,
   ];
   if (detail.endTime) {
-    fields.push(`*終了*\n${formatJst(detail.endTime)}`);
+    fields.push(`*終了*\n${safeText(formatJst(detail.endTime), 100)}`);
   }
 
   const blocks: unknown[] = [
@@ -207,9 +229,11 @@ function buildHealthBlocks(event: HealthEvent): unknown[] {
   ];
 
   if (detail.eventTypeCode) {
+    // バックティックが混ざるとコード表記が崩れるので落としておく
+    const code = safeText(detail.eventTypeCode.replace(/`/g, "'"), 200);
     blocks.push({
       type: 'context',
-      elements: [{ type: 'mrkdwn', text: `\`${detail.eventTypeCode}\`` }],
+      elements: [{ type: 'mrkdwn', text: `\`${code}\`` }],
     });
   }
 
@@ -218,20 +242,31 @@ function buildHealthBlocks(event: HealthEvent): unknown[] {
   if (description) {
     blocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: description.slice(0, 1500) },
+      text: { type: 'mrkdwn', text: safeText(description, 1500) },
     });
   }
 
-  // 自分のどのリソースが対象かは、真っ先に知りたい情報
+  // 自分のどのリソースが対象かは、真っ先に知りたい情報。
+  // ただし ARN は1件で最大2048文字あり、数件並べるだけで Slack の上限を超える。
+  // 超えると送信そのものが失敗して通知が届かなくなるため、入る分だけ載せる
   const entities = (detail.affectedEntities ?? [])
     .map((e) => e.entityValue)
     .filter((v): v is string => !!v);
   if (entities.length > 0) {
-    const shown = entities.slice(0, 10).join(', ');
-    const rest = entities.length > 10 ? ` ほか${entities.length - 10}件` : '';
+    const budget = SLACK_TEXT_LIMIT - 100;
+    const shown: string[] = [];
+    let used = 0;
+    for (const entity of entities) {
+      const piece = escapeMrkdwn(entity);
+      if (used + piece.length + 2 > budget) break;
+      shown.push(piece);
+      used += piece.length + 2;
+    }
+    const omitted = entities.length - shown.length;
+    const rest = omitted > 0 ? ` ほか${omitted}件` : '';
     blocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: `*影響を受けるリソース*\n${shown}${rest}` },
+      text: { type: 'mrkdwn', text: `*影響を受けるリソース*\n${shown.join(', ')}${rest}` },
     });
   }
 
@@ -253,11 +288,11 @@ function buildPlainBlocks(subject: string | null | undefined, message: string): 
   return [
     {
       type: 'header',
-      text: { type: 'plain_text', text: subject ?? 'お知らせ', emoji: true },
+      text: { type: 'plain_text', text: (subject ?? 'お知らせ').slice(0, 150), emoji: true },
     },
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: message.slice(0, 2900) },
+      text: { type: 'mrkdwn', text: safeText(message) },
     },
   ];
 }
