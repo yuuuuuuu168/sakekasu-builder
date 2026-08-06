@@ -235,3 +235,49 @@ describe('送信直前の砦', () => {
     expect(text.length).toBeLessThanOrEqual(210);
   });
 });
+
+// 無害化を二度通すと &lt; が &amp;lt; になり、通知の文字が壊れる。
+// 見出し（plain_text）は記法を解釈しないので、そもそも通してはいけない
+describe('無害化のかけすぎで表示を壊さない', () => {
+  it('プレビュー文に実体参照が二重に出ない', async () => {
+    const payload = await buildPayloadForMessage(
+      JSON.stringify({ AlarmName: 'cpu>90%', NewStateValue: 'ALARM' }),
+    );
+    const text = JSON.parse(payload).text as string;
+    expect(text).toContain('cpu&gt;90%');
+    expect(text).not.toContain('&amp;gt;');
+  });
+
+  it('見出しにはエスケープせず、そのままの文字を出す', async () => {
+    const blocks = await buildBlocksForMessage(
+      JSON.stringify({ AlarmName: 'prod<->staging', NewStateValue: 'ALARM' }),
+    );
+    const header = blocks.find((b) => b.type === 'header');
+    // plain_text は実体参照を戻さないので、素の文字でなければ画面が壊れる
+    expect(header!.text!.text).toContain('prod<->staging');
+    expect(header!.text!.text).not.toContain('&lt;');
+  });
+
+  it('Health の見出しもそのままの文字を出す', async () => {
+    const blocks = await buildBlocksForMessage(
+      healthMessage({ service: 'S3<>test', eventTypeCategory: 'issue' }),
+    );
+    const header = blocks.find((b) => b.type === 'header');
+    expect(header!.text!.text).toContain('S3<>test');
+    expect(header!.text!.text).not.toContain('&lt;');
+  });
+
+  it('mrkdwn 側は一度だけ無害化される', async () => {
+    const blocks = await buildBlocksForMessage(
+      healthMessage({
+        service: 'S3',
+        eventTypeCategory: 'issue',
+        eventDescription: [{ latestDescription: 'a & b <tag>' }],
+      }),
+    );
+    const text = JSON.stringify(blocks);
+    expect(text).toContain('a &amp; b &lt;tag&gt;');
+    expect(text).not.toContain('&amp;amp;');
+    expect(text).not.toContain('&amp;lt;');
+  });
+});
