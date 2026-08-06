@@ -107,6 +107,60 @@ describe('PurchaseForm OCR 統合テスト', () => {
     });
   });
 
+  it('OCR がカテゴリ・産地・度数を返した場合、カテゴリ選択とメモに反映される', async () => {
+    mockAnalyzeImage.mockResolvedValue({
+      sakeName: '獺祭',
+      category: 'NIHONSHU',
+      region: '山口県',
+      alcoholPercentage: 16,
+      confidence: 0.9,
+      rawTexts: ['{"sakeName":"獺祭"}'],
+    });
+
+    render(<PurchaseForm />);
+
+    const ocrButton = screen.getByTestId('ocr-trigger-button');
+    fireEvent.click(ocrButton);
+
+    await waitFor(() => {
+      const sakeNameInput = screen.getByTestId('input-sakeName') as HTMLInputElement;
+      expect(sakeNameInput.value).toBe('獺祭');
+    });
+
+    // カテゴリ選択に日本酒が反映される
+    expect(screen.getByTestId('input-category').textContent).toContain('日本酒');
+
+    // メモ欄に産地・度数が追記される
+    const memoInput = screen.getByTestId('input-memo') as HTMLTextAreaElement;
+    expect(memoInput.value).toBe('産地: 山口県 / アルコール度数: 16%');
+  });
+
+  it('OCR がカテゴリ・産地・度数を返さない場合、カテゴリとメモは変更されない', async () => {
+    mockAnalyzeImage.mockResolvedValue({
+      sakeName: '獺祭',
+      category: null,
+      region: null,
+      alcoholPercentage: null,
+      confidence: 0.9,
+      rawTexts: ['{"sakeName":"獺祭"}'],
+    });
+
+    render(<PurchaseForm />);
+
+    const memoInput = screen.getByTestId('input-memo') as HTMLTextAreaElement;
+    fireEvent.change(memoInput, { target: { value: '既存メモ' } });
+
+    const ocrButton = screen.getByTestId('ocr-trigger-button');
+    fireEvent.click(ocrButton);
+
+    await waitFor(() => {
+      const sakeNameInput = screen.getByTestId('input-sakeName') as HTMLInputElement;
+      expect(sakeNameInput.value).toBe('獺祭');
+    });
+
+    expect(memoInput.value).toBe('既存メモ');
+  });
+
   it('OCR 結果反映後も sakeName フィールドが編集可能である', async () => {
     mockAnalyzeImage.mockResolvedValue({
       sakeName: '獺祭',

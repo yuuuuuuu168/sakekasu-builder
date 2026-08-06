@@ -75,6 +75,9 @@ type PresignedUrlResponse {
 # OCR 解析結果型
 type OcrResult {
   sakeName: String
+  category: SakeCategory
+  region: String
+  alcoholPercentage: Float
   confidence: Float!
   rawTexts: [String!]!
 }
