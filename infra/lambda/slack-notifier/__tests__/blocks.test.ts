@@ -19,6 +19,8 @@ vi.mock('@aws-sdk/client-ssm', () => ({
 type Block = { type: string; text?: { text?: string }; fields?: { text: string }[] };
 
 let buildBlocksForMessage: (message: string, subject?: string | null) => Promise<Block[]>;
+/** Slack へ送る本文まるごと（プレビュー文 text を含む） */
+let buildPayloadForMessage: (message: string, subject?: string | null) => Promise<string>;
 
 beforeAll(async () => {
   // ハンドラは Slack へ送ってしまうため、送信部分だけ差し替えて中身を取り出す
@@ -38,6 +40,23 @@ beforeAll(async () => {
       globalThis.fetch = originalFetch;
     }
     return captured;
+  };
+
+  buildPayloadForMessage = async (message, subject = null) => {
+    let payload = '';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init: { body: string }) => {
+      payload = init.body;
+      return { ok: true, status: 200 } as Response;
+    }) as typeof fetch;
+    try {
+      await mod.handler({
+        Records: [{ Sns: { Subject: subject, Message: message, Timestamp: '2026-08-06T00:00:00Z' } }],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    return payload;
   };
 });
 
@@ -142,5 +161,77 @@ describe('Slack の文字数上限', () => {
     expect(resourceBlock).toBeDefined();
     expect(resourceBlock!.text!.text!.length).toBeLessThan(SECTION_LIMIT);
     expect(resourceBlock!.text!.text).toContain('ほか');
+  });
+});
+
+// Slack は最上位の text をプレビューやプッシュ通知で mrkdwn として扱う。
+// ブロック側だけ無害化しても、ここが素通しだと同じことが起きる
+describe('通知プレビュー文（text フィールド）', () => {
+  const evil = '<!channel> <https://evil.example|いますぐ確認>';
+
+  it.each([
+    ['アラーム名', JSON.stringify({ AlarmName: evil, NewStateValue: 'ALARM' })],
+    ['アラームの状態', JSON.stringify({ AlarmName: 'ok', NewStateValue: evil })],
+    ['Health のサービス名', JSON.stringify({ source: 'aws.health', detail: { service: evil, eventTypeCategory: 'issue' } })],
+    ['Health の種類', JSON.stringify({ source: 'aws.health', detail: { service: 'S3', eventTypeCategory: evil } })],
+    ['JSON でない本文', 'これは JSON ではない'],
+  ])('%s から記法が漏れない', async (_label, message) => {
+    const payload = await buildPayloadForMessage(message, evil);
+    const text = JSON.parse(payload).text as string;
+    expect(text).not.toContain('<!channel>');
+    expect(text).not.toContain('<https://evil.example|');
+  });
+
+  it('件名（Subject）からも漏れない', async () => {
+    const payload = await buildPayloadForMessage('ただの本文', evil);
+    const text = JSON.parse(payload).text as string;
+    expect(text).not.toContain('<!channel>');
+    expect(text).not.toContain('<https://evil.example|');
+  });
+});
+
+// 個別の組み立て箇所を1つ通し忘れても、送信の直前で必ず無害化される。
+// 「うっかり漏らしても守られる」ことをここで担保する
+describe('送信直前の砦', () => {
+  it('プレビュー文は必ず無害化されてから送られる', async () => {
+    const mod = await import('../index.ts');
+    let payload = '';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init: { body: string }) => {
+      payload = init.body;
+      return { ok: true, status: 200 } as Response;
+    }) as typeof fetch;
+    try {
+      // 組み立て側を経由せず、生の文字列を直接渡す経路を模す
+      await mod.handler({
+        Records: [
+          {
+            Sns: {
+              Subject: null,
+              Message: JSON.stringify({
+                AlarmName: 'x',
+                NewStateValue: 'ALARM',
+                // ここは組み立て時に safeText を通していない値として扱われる
+                OldStateValue: '<!here>',
+              }),
+              Timestamp: '2026-08-06T00:00:00Z',
+            },
+          },
+        ],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    const sent = JSON.parse(payload);
+    // text（プレビュー）にも blocks にも記法が残らない
+    expect(JSON.stringify(sent)).not.toContain('<!here>');
+  });
+
+  it('プレビュー文の長さも抑える', async () => {
+    const payload = await buildPayloadForMessage(
+      JSON.stringify({ AlarmName: 'あ'.repeat(5000), NewStateValue: 'ALARM' }),
+    );
+    const text = JSON.parse(payload).text as string;
+    expect(text.length).toBeLessThanOrEqual(210);
   });
 });
