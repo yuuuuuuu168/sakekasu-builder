@@ -35,9 +35,13 @@ export function SignInForm({ onSwitchToSignUp, onNeedConfirmation }: SignInFormP
         return;
       }
 
-      if (errorName === 'NotAuthorizedException') {
+      // 「登録が無い」と「パスワードが違う」を同じ文言にして、
+      // 画面から登録済みかどうかを読み取れないようにする。
+      // Cognito 側でも隠しているが、設定が外れたときに備えてここでも揃えておく
+      if (errorName === 'NotAuthorizedException' || errorName === 'UserNotFoundException') {
         setError('メールアドレスまたはパスワードが正しくありません');
       } else {
+        // 通信断など認証情報と無関係な失敗は、原因を取り違えないよう区別する
         setError('サインインに失敗しました。もう一度お試しください');
       }
     } finally {
