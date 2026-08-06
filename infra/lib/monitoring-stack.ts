@@ -107,6 +107,26 @@ export class MonitoringStack extends cdk.Stack {
       evaluationPeriods: 1,
     });
 
+    // --- AWS 側の障害・メンテナンス（AWS Health）---
+
+    // 自分たちのコードでは直せない事象を、気づく前に受け取るための経路。
+    // グローバルサービスのイベントは us-east-1 にしか来ないため、
+    // 別スタック（HealthGlobalStack）から当リージョンのイベントバスへ転送している。
+    // 転送されたものも同じ形でこのバスに入るので、ルールはここ1本で済む
+    new events.Rule(this, 'AwsHealthRule', {
+      ruleName: `${prefix}-aws-health`,
+      description: 'AWS Health の障害・予定された変更を Slack へ流す',
+      eventPattern: {
+        source: ['aws.health'],
+        detail: {
+          // お知らせや調査中まで拾うと日常的に鳴ってしまうため、
+          // 実際の障害と、対応が必要になる予定変更に絞る
+          eventTypeCategory: ['issue', 'scheduledChange'],
+        },
+      },
+      targets: [new targets.SnsTopic(this.alertTopic)],
+    });
+
     // --- AI: ソムリエ（AgentCore Runtime）---
 
     const agentCoreDimensions = { ResourceId: props.sommelierRuntimeArn };

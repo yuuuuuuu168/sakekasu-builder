@@ -41,6 +41,30 @@ interface AlarmMessage {
   };
 }
 
+/** AWS Health が EventBridge に流すイベント（使う項目だけ） */
+interface HealthEvent {
+  source?: string;
+  region?: string;
+  time?: string;
+  detail?: {
+    service?: string;
+    eventTypeCode?: string;
+    eventTypeCategory?: string;
+    startTime?: string;
+    endTime?: string;
+    eventDescription?: { language?: string; latestDescription?: string }[];
+    affectedEntities?: { entityValue?: string }[];
+  };
+}
+
+function isHealthEvent(value: unknown): value is HealthEvent {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as HealthEvent).source === 'aws.health'
+  );
+}
+
 async function getWebhookUrl(): Promise<string> {
   if (cachedWebhookUrl) return cachedWebhookUrl;
 
@@ -140,6 +164,90 @@ function buildAlarmBlocks(alarm: AlarmMessage, fallbackTime: string): unknown[] 
   return blocks;
 }
 
+/** Health イベントの種類。英語のコードだけでは伝わらないので日本語を添える */
+const HEALTH_CATEGORY_LABEL: Record<string, string> = {
+  issue: '障害',
+  scheduledChange: '予定された変更',
+  accountNotification: 'お知らせ',
+  investigation: '調査中',
+};
+
+/**
+ * AWS Health のイベントを組み立てる。
+ * AWS 側の都合で起きる事象なので、こちらで直せるものではない。
+ * 「何が・いつ・自分のどのリソースに影響するか」が分かることを優先する
+ */
+function buildHealthBlocks(event: HealthEvent): unknown[] {
+  const detail = event.detail ?? {};
+  const category = detail.eventTypeCategory ?? '';
+  const categoryLabel = HEALTH_CATEGORY_LABEL[category] ?? category;
+  const service = detail.service ?? '不明';
+  const icon = category === 'issue' ? '🔥' : category === 'scheduledChange' ? '🗓️' : 'ℹ️';
+
+  const fields = [
+    `*サービス*\n${service}`,
+    `*種類*\n${categoryLabel}`,
+    `*リージョン*\n${event.region ?? '不明'}`,
+    `*開始*\n${formatJst(detail.startTime ?? event.time)}`,
+  ];
+  if (detail.endTime) {
+    fields.push(`*終了*\n${formatJst(detail.endTime)}`);
+  }
+
+  const blocks: unknown[] = [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: `${icon} AWS からの通知: ${service}（${categoryLabel}）`,
+        emoji: true,
+      },
+    },
+    { type: 'section', fields: fields.map((text) => ({ type: 'mrkdwn', text })) },
+  ];
+
+  if (detail.eventTypeCode) {
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `\`${detail.eventTypeCode}\`` }],
+    });
+  }
+
+  // 本文は英語で長いことがあるため、頭の方だけ載せて詳細はコンソールへ誘導する
+  const description = detail.eventDescription?.[0]?.latestDescription;
+  if (description) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: description.slice(0, 1500) },
+    });
+  }
+
+  // 自分のどのリソースが対象かは、真っ先に知りたい情報
+  const entities = (detail.affectedEntities ?? [])
+    .map((e) => e.entityValue)
+    .filter((v): v is string => !!v);
+  if (entities.length > 0) {
+    const shown = entities.slice(0, 10).join(', ');
+    const rest = entities.length > 10 ? ` ほか${entities.length - 10}件` : '';
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: `*影響を受けるリソース*\n${shown}${rest}` },
+    });
+  }
+
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: '<https://health.aws.amazon.com/health/home|AWS Health Dashboard を開く>',
+      },
+    ],
+  });
+
+  return blocks;
+}
+
 /** アラーム形式でない通知（外形監視からの任意メッセージなど）はそのまま流す */
 function buildPlainBlocks(subject: string | null | undefined, message: string): unknown[] {
   return [
@@ -177,10 +285,16 @@ export const handler = async (event: SnsEvent): Promise<void> => {
     let fallbackText: string;
 
     try {
-      const parsed = JSON.parse(Message) as AlarmMessage;
-      if (parsed && typeof parsed === 'object' && parsed.AlarmName) {
-        blocks = buildAlarmBlocks(parsed, Timestamp);
-        fallbackText = headline(parsed.NewStateValue, parsed.AlarmName);
+      const parsed: unknown = JSON.parse(Message);
+      if (isHealthEvent(parsed)) {
+        blocks = buildHealthBlocks(parsed);
+        const service = parsed.detail?.service ?? '不明';
+        const category = parsed.detail?.eventTypeCategory ?? '';
+        fallbackText = `AWS からの通知: ${service}（${HEALTH_CATEGORY_LABEL[category] ?? category}）`;
+      } else if (parsed && typeof parsed === 'object' && (parsed as AlarmMessage).AlarmName) {
+        const alarm = parsed as AlarmMessage;
+        blocks = buildAlarmBlocks(alarm, Timestamp);
+        fallbackText = headline(alarm.NewStateValue, alarm.AlarmName!);
       } else {
         blocks = buildPlainBlocks(Subject, Message);
         fallbackText = Subject ?? 'お知らせ';

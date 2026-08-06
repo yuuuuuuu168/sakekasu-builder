@@ -34,7 +34,7 @@
 | 26 | 一覧画面の画像表示高速化 | ✅ 実装済み |
 | 27 | 一覧画面上部に在庫本数サマリー表示（ウイスキー◯本・日本酒◯本のみ） | ✅ 実装済み |
 | 28 | データ保護（DynamoDB PITR・削除保護、S3 バージョニング） | ✅ 実装済み |
-| 29 | 監視とアラート通知（AI・サービス正常性・外形監視 → Slack） | ✅ 実装済み ※デプロイ前に手動登録あり |
+| 29 | 監視とアラート通知（AI・サービス正常性・外形監視・AWS Health → Slack） | ✅ 実装済み ※デプロイ前に手動登録あり |
 
 ### 検索・フィルタ強化（#18・完了）
 
@@ -181,8 +181,10 @@ Runtime の ARN はフロントの `src/features/sommelier/config.ts` に持つ�
 
 ```
 CloudWatch アラーム ─┐
-外形監視 Lambda ─────┼→ SNS → Slack 通知 Lambda → Slack（Incoming Webhook）
-カナリア Lambda ─────┘
+外形監視 Lambda ─────┤
+カナリア Lambda ─────┼→ SNS → Slack 通知 Lambda → Slack（Incoming Webhook）
+AWS Health ──────────┘
+（EventBridge 経由）
 ```
 
 アラームは**発報だけでなく復旧も通知する**ので、鳴りっぱなしなのか直ったのかが Slack だけで分かる。
@@ -204,6 +206,7 @@ CloudWatch アラーム ─┐
 | 通知経路 | Slack 通知 Lambda のエラー | 1回以上 |
 | 監視自体 | 外形監視・カナリアの実行失敗 | 1回以上 |
 | 監視自体 | 外形監視・カナリアが動いていない | 実行回数が0（外形監視は1時間、カナリアは12時間） |
+| AWS 側 | AWS Health の障害・予定された変更 | イベントが届いたら即時（アラームではなく EventBridge 経由） |
 
 監視そのものが動かなくなると異常に気づけないため、**Slack 通知 Lambda と外形監視・カナリアも監視対象**に含めている。「エラーで失敗した」だけでなく「**そもそも動いていない**」も見る。スケジュールが止まるとエラーすら記録されず、静かに監視が消えるため。
 
@@ -213,6 +216,34 @@ CloudWatch アラーム ─┐
 - **実行回数の監視**: `BREACHING`（欠損は異常）。記録が無いことが「動いていない」ことを意味するため
 
 **認証拒否の監視が今回の障害への直接の答え**。実際に障害当時のメトリクスを確認したところ、`UnauthorizedInboundTokenException` が3回記録されていた。これを監視していれば即座に気づけた。
+
+### AWS 側の障害・メンテナンス（AWS Health）
+
+自分たちのコードでは直せない事象（サービス障害、EC2 の再起動予定、証明書の期限、サービス廃止の予告など）を、気づく前に受け取る。
+
+```
+[us-east-1]        Health ルール ──転送──┐
+                                          ▼
+[ap-northeast-1]   Health ルール → SNS（既存）→ Slack 通知 Lambda → Slack
+```
+
+**グローバルサービス（IAM・CloudFront・Route 53 など）のイベントは us-east-1 にしか届かない。** また EventBridge のターゲットは同一リージョンに限られるため、us-east-1 側は「東京のイベントバスへ転送する」だけを行う（`infra/lib/health-global-stack.ts`）。転送されたイベントも同じ形で東京のバスに入るので、**受け口のルールは東京側の1本で済む**。
+
+通知するのは `issue`（実際の障害）と `scheduledChange`（予定された変更）のみ。`accountNotification`（お知らせ）や `investigation`（調査中）まで拾うと日常的に鳴ってノイズになるため、あえて絞っている。
+
+Slack には日本語の見出しを付け、対象サービス・種類・リージョン・開始/終了時刻（JST）・**影響を受けるリソース**を出す。本文は英語で長くなりがちなので冒頭のみ載せ、詳細は AWS Health Dashboard へ誘導する。
+
+なお **Basic サポートプランでは AWS にテストイベントを発行してもらえない**（Business+ 以上が必要）。また `aws.` で始まるイベントソースは AWS の予約で、自前で `put-events` することもできない（`NotAuthorizedForSourceException` になる）。
+
+そのため実機での確認は、**Slack 通知 Lambda を直接呼んで見え方を確かめる**方法をとる。ルールのイベントパターン自体は CDK のテストで固定している。
+
+```bash
+# Health イベント形式の SNS メッセージを Lambda に渡す
+AWS_PROFILE=sakekasu-builder aws lambda invoke \
+  --function-name dev-sakekasu-slack-notifier \
+  --payload file://event.json --cli-binary-format raw-in-base64-out \
+  --region ap-northeast-1 /dev/stdout
+```
 
 ### 外形監視の考え方
 
@@ -250,7 +281,7 @@ AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
   --secret-string '{"username":"canary@example.com","password":"<決めたパスワード>"}' \
   --region ap-northeast-1
 
-# 4. デプロイ
+# 4. デプロイ（AWS Health 用に us-east-1 のスタックも含まれる）
 cd infra
 AWS_PROFILE=sakekasu-builder npx cdk deploy --all -c env=dev
 
