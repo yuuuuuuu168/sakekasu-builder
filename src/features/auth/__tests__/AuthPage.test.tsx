@@ -98,6 +98,56 @@ describe('AuthPage', () => {
     });
   });
 
+  // 画面から「登録があるかどうか」を読み取れないようにする（Cognito 側の設定が
+  // 外れても、ここで文言が揃っていれば存在は漏れない）
+  it('登録が無い場合もパスワード誤りと同じ文言を出す', async () => {
+    async function messageFor(errorName: string): Promise<string> {
+      mockSignIn.mockRejectedValue({ name: errorName });
+      const view = render(<AuthPage />);
+
+      fireEvent.change(screen.getByTestId('input-email'), {
+        target: { value: 'someone@example.com' },
+      });
+      fireEvent.change(screen.getByTestId('input-password'), {
+        target: { value: 'WrongPass1!' },
+      });
+      fireEvent.click(screen.getByTestId('signin-submit'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('signin-error')).toBeInTheDocument();
+      });
+      const message = screen.getByTestId('signin-error').textContent ?? '';
+      view.unmount();
+      return message;
+    }
+
+    const notFound = await messageFor('UserNotFoundException');
+    const wrongPassword = await messageFor('NotAuthorizedException');
+
+    expect(notFound).toBe(wrongPassword);
+    expect(notFound).toContain('メールアドレスまたはパスワードが正しくありません');
+  });
+
+  // 認証情報と無関係な失敗まで同じ文言にすると、原因を取り違えてしまう
+  it('通信断などはパスワード誤りとは別の文言にする', async () => {
+    mockSignIn.mockRejectedValue({ name: 'NetworkError' });
+    render(<AuthPage />);
+
+    fireEvent.change(screen.getByTestId('input-email'), {
+      target: { value: 'test@example.com' },
+    });
+    fireEvent.change(screen.getByTestId('input-password'), {
+      target: { value: 'Password1!' },
+    });
+    fireEvent.click(screen.getByTestId('signin-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('signin-error')).toHaveTextContent(
+        'サインインに失敗しました。もう一度お試しください',
+      );
+    });
+  });
+
   // Requirements 6.5: 未確認ユーザーのサインイン時に確認画面へ遷移
   it('未確認ユーザーのサインイン時にメール確認画面に遷移する', async () => {
     mockSignIn.mockRejectedValue({ name: 'UserNotConfirmedException' });
