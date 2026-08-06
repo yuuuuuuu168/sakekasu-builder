@@ -78,7 +78,9 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
   const modelId = process.env.BEDROCK_MODEL_ID ?? 'jp.anthropic.claude-haiku-4-5-20251001-v1:0';
   const requestBody = {
     anthropic_version: 'bedrock-2023-05-31',
-    max_tokens: 512,
+    max_tokens: 1024,
+    // 読み取り結果のブレを抑えるため決定的に近い出力にする
+    temperature: 0,
     messages: [
       {
         role: 'user',
@@ -93,16 +95,21 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
           },
           {
             type: 'text',
-            text: `このお酒のラベル画像から以下の情報を抽出してください。
-以下のJSON形式のみで返してください。読み取れない・判定できない項目はnullにしてください。
+            text: `このお酒のラベル画像を解析してください。次の2段階の手順で進めてください。
+
+手順1: ラベルに見える文字をすべて書き出す
+- 大きな文字だけでなく、小さな文字（製造者名、住所、アルコール度数の表記、特定名称など）も漏らさず書き出してください
+
+手順2: 手順1で書き出した文字をもとに以下の項目を判定し、回答の最後に次のJSON形式を1つだけ出力する
 
 {"sakeName": "銘柄名" または null, "category": "カテゴリ" または null, "region": "産地" または null, "alcoholPercentage": 数値 または null}
 
 各項目のルール:
-- sakeName: 銘柄名のみ。製造者名（酒造、株式会社等）、容量（ml）、アルコール度数（%）は含めない
+- sakeName: 銘柄名のみ。製造者名（酒造、株式会社等）、容量（ml）、アルコール度数（%）は含めない。「純米大吟醸」「特別本醸造」などの特定名称は銘柄名ではないので、銘柄名と並記されている場合は銘柄名の方を採用する
 - category: 必ず次のいずれかの値: "NIHONSHU"（日本酒・清酒）, "BEER"（ビール・発泡酒）, "WINE"（ワイン・スパークリング）, "WHISKY"（ウイスキー）, "SHOCHU"（焼酎・泡盛）, "OTHER"（その他の酒類）
 - region: 産地の都道府県名または国名（例: "山口県", "スコットランド"）。製造者の住所から判断してもよい
-- alcoholPercentage: アルコール度数の数値のみ（例: 15.5）。%記号や「度」は含めない`,
+- alcoholPercentage: アルコール度数の数値のみ（例: 15.5）。%記号や「度」は含めない
+- 読み取れない・判定できない項目はnull`,
           },
         ],
       },

@@ -80,10 +80,15 @@ export function extractLabelInfo(bedrockResponseText: string): ExtractResult {
   };
 
   // 2. テキスト中の {...} ブロックを抽出してパース試行
+  // 2段階抽出プロンプトでは前半にラベルの転記テキストが入るため、
+  // 最終判定である「最後の JSON ブロック」から優先して採用する
   const extractJsonBlock = (text: string): Record<string, unknown> | null => {
-    const match = text.match(/\{[^{}]*"sakeName"[^{}]*\}/);
-    if (match) {
-      return tryParse(match[0]);
+    const matches = text.match(/\{[^{}]*"sakeName"[^{}]*\}/g) ?? [];
+    for (const candidate of matches.reverse()) {
+      const parsed = tryParse(candidate);
+      if (parsed !== null) {
+        return parsed;
+      }
     }
     return null;
   };
