@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, ShieldCheck, ShieldOff, X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -139,7 +140,11 @@ export function MfaSettingsDialog({ open, onClose }: MfaSettingsDialogProps) {
     }
   };
 
-  return (
+  // このダイアログはナビバー（backdrop-blur 付き）の中にマウントされる。
+  // backdrop-filter を持つ祖先は position: fixed の基準（containing block）に
+  // なるため、そのまま描画するとオーバーレイが画面全体ではなくナビバーの
+  // 高さに閉じ込められる。Portal で body 直下に出して viewport 基準に戻す
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -362,6 +367,7 @@ export function MfaSettingsDialog({ open, onClose }: MfaSettingsDialogProps) {
           </div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }
