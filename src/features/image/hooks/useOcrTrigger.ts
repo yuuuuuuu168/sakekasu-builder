@@ -25,6 +25,16 @@ export interface OcrDetectedOptions {
 /** 複数枚を連続で追加したときに1回の解析にまとめるための待ち時間 */
 const AUTO_OCR_DEBOUNCE_MS = 1000;
 
+/** この値未満の確信度の項目は「要確認」表示にする */
+const LOW_CONFIDENCE_THRESHOLD = 0.7;
+
+/** 確信度が低い項目に「（要確認）」を付ける（fieldConfidence 未対応の旧レスポンスでは付けない） */
+function markIfLowConfidence(label: string, confidence: number | undefined): string {
+  return confidence !== undefined && confidence < LOW_CONFIDENCE_THRESHOLD
+    ? `${label}（要確認）`
+    : label;
+}
+
 /** 同一ファイルの再解析を防ぐための識別子 */
 function fileSignature(file: File): string {
   return `${file.name}:${file.size}:${file.lastModified}`;
@@ -97,23 +107,41 @@ export function useOcrTrigger(
     resetOcr();
   }, [resetOcr]);
 
-  // 銘柄名以外に読み取れた項目（カテゴリ・産地・度数）を成功メッセージに併記する
+  // 銘柄名以外に読み取れた項目（カテゴリ・産地・度数）を成功メッセージに併記する。
+  // 確信度が低い項目には「（要確認）」を付けて目視確認を促す
+  const fieldConfidence = ocrResult?.fieldConfidence;
   const details = ocrResult?.sakeName
     ? [
-        ocrResult.category ? CATEGORY_DISPLAY_NAMES[ocrResult.category] : null,
-        ocrResult.region,
-        ocrResult.alcoholPercentage != null ? `${ocrResult.alcoholPercentage}%` : null,
+        ocrResult.category
+          ? markIfLowConfidence(
+              CATEGORY_DISPLAY_NAMES[ocrResult.category],
+              fieldConfidence?.category,
+            )
+          : null,
+        ocrResult.region
+          ? markIfLowConfidence(ocrResult.region, fieldConfidence?.region)
+          : null,
+        ocrResult.alcoholPercentage != null
+          ? markIfLowConfidence(
+              `${ocrResult.alcoholPercentage}%`,
+              fieldConfidence?.alcoholPercentage,
+            )
+          : null,
       ].filter((v): v is string => v != null)
     : [];
 
+  const detectedSakeName = ocrResult?.sakeName
+    ? markIfLowConfidence(ocrResult.sakeName, fieldConfidence?.sakeName)
+    : null;
+
   const ocrMessage: OcrMessage | null = ocrError
     ? { text: ocrError, variant: 'error' }
-    : ocrResult?.sakeName
+    : detectedSakeName
       ? {
           text:
             details.length > 0
-              ? `銘柄名を読み取りました: ${ocrResult.sakeName}（${details.join(' / ')}）`
-              : `銘柄名を読み取りました: ${ocrResult.sakeName}`,
+              ? `銘柄名を読み取りました: ${detectedSakeName}（${details.join(' / ')}）`
+              : `銘柄名を読み取りました: ${detectedSakeName}`,
           variant: 'success',
         }
       : null;
