@@ -11,6 +11,8 @@ import {
   confirmSignIn as amplifyConfirmSignIn,
   signUp as amplifySignUp,
   confirmSignUp as amplifyConfirmSignUp,
+  resetPassword as amplifyResetPassword,
+  confirmResetPassword as amplifyConfirmResetPassword,
   signOut as amplifySignOut,
   getCurrentUser,
   fetchUserAttributes,
@@ -39,6 +41,8 @@ export interface AuthContextValue {
   confirmSignInWithTotp: (code: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   confirmSignUp: (email: string, code: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+  confirmResetPassword: (email: string, code: string, newPassword: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -103,6 +107,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await amplifyConfirmSignUp({ username: email, confirmationCode: code });
   }, []);
 
+  // preventUserExistenceErrors 有効時は、存在しないメールアドレスでも
+  // Cognito が成功と同じ応答を返す。ここで戻り値を握りつぶしているのは
+  // それを画面に区別させないため（存在の有無を推測させない）
+  const resetPassword = useCallback(async (email: string) => {
+    await amplifyResetPassword({ username: email });
+  }, []);
+
+  const confirmResetPassword = useCallback(
+    async (email: string, code: string, newPassword: string) => {
+      await amplifyConfirmResetPassword({
+        username: email,
+        confirmationCode: code,
+        newPassword,
+      });
+    },
+    [],
+  );
+
   const signOut = useCallback(async () => {
     // 端末に残る利用者固有のデータを消してからサインアウトする。
     // 相談履歴や検索語には購入・飲酒の内容が含まれるため、共有端末で
@@ -131,6 +153,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     confirmSignInWithTotp,
     signUp,
     confirmSignUp,
+    resetPassword,
+    confirmResetPassword,
     signOut,
   };
 
