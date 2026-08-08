@@ -80,7 +80,6 @@ describe('PurchaseForm 自動OCR（写真1枚で購入登録）', () => {
       region: '山口県',
       alcoholPercentage: 16,
       confidence: 0.9,
-      rawTexts: ['{"sakeName":"獺祭 純米大吟醸45"}'],
     });
   });
 

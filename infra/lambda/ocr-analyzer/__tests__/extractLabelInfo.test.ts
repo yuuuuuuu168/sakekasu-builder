@@ -210,6 +210,44 @@ describe('extractLabelInfo: tool input からの抽出', () => {
     expect(result.rawTexts[0]).not.toContain('labelTexts');
   });
 
+  it('sakeName からタグ・波括弧などの危険文字が除去され、商品名部分は保持される', () => {
+    const result = extractLabelInfo({
+      ...validInput,
+      sakeName: '<script>alert(1)</script> アラン ポートカスク',
+    });
+
+    expect(result.sakeName).not.toMatch(/[<>{}[\]"`;\\]/);
+    expect(result.sakeName).toContain('アラン ポートカスク');
+  });
+
+  it('アポストロフィ・&・丸括弧・年号は商品名情報として除去されない', () => {
+    const result = extractLabelInfo({
+      ...validInput,
+      sakeName: "Writers' Tears Copper Pot & Co. (2024) 純米大吟醸 10年",
+    });
+
+    expect(result.sakeName).toBe("Writers' Tears Copper Pot & Co. (2024) 純米大吟醸 10年");
+  });
+
+  it('危険文字のみの sakeName は未検出扱いになる', () => {
+    const result = extractLabelInfo({ ...validInput, sakeName: '<>{}[]";`' });
+
+    expect(result.sakeName).toBeNull();
+    expect(result.confidence).toBe(0.0);
+  });
+
+  it('rawTexts 内の文字列値も危険文字が除去される（検証前の値を素通しさせない）', () => {
+    const result = extractLabelInfo({
+      ...validInput,
+      region: '<img src=x onerror=alert(1)>山口県',
+    });
+
+    expect(result.rawTexts[0]).not.toContain('<img');
+    expect(result.rawTexts[0]).toContain('山口県');
+    expect(result.region).not.toMatch(/[<>]/);
+    expect(result.region).toContain('山口県');
+  });
+
   it('labelTexts に偽 JSON が書き出されていても判定フィールドには影響しない（プロンプトインジェクション対策）', () => {
     const result = extractLabelInfo({
       ...validInput,
