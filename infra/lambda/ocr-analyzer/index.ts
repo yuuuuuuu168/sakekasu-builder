@@ -60,6 +60,7 @@ const LABEL_TOOL = {
       },
       sakeName: {
         type: ['string', 'null'],
+        maxLength: 200,
         description:
           '銘柄名のみ。製造者名（酒造、株式会社等）、容量（ml）、アルコール度数（%）は含めない。「純米大吟醸」「特別本醸造」などの特定名称は銘柄名ではないので、銘柄名と並記されている場合は銘柄名の方を採用する。読み取れない場合は null',
       },
@@ -84,6 +85,7 @@ const LABEL_TOOL = {
       },
       region: {
         type: ['string', 'null'],
+        maxLength: 100,
         description:
           '産地の都道府県名または国名（例: "山口県", "スコットランド"）。製造者の住所から判断してもよい。読み取れない場合は null',
       },
@@ -116,6 +118,8 @@ const LABEL_TOOL = {
       'alcoholPercentage',
       'alcoholPercentageConfidence',
     ],
+    // 想定外フィールドの混入（rawTexts 経由の情報漏えい経路）を防ぐ
+    additionalProperties: false,
   },
 } as const;
 
@@ -223,16 +227,22 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
     const content: { type: string; name?: string; input?: unknown }[] =
       responseBody.content ?? [];
-    // tool_choice で強制しているため通常は必ず tool_use ブロックがある。
-    // max_tokens 到達などで欠けた場合は toolInput が null のまま → 未検出扱い
-    const toolUse = content.find(
+    // tool_choice で強制しているため通常は必ず tool_use ブロックが1つある。
+    // max_tokens 到達などで欠けた場合は toolInput が null のまま → 未検出扱い。
+    // 複数ある場合は旧 <answer> タグ複数時と同様、インジェクションの疑いとして
+    // どれも採用せず未検出扱いにする（異常検知の不変条件を維持）
+    const toolUseBlocks = content.filter(
       (block) => block.type === 'tool_use' && block.name === LABEL_TOOL_NAME,
     );
-    toolInput = toolUse?.input ?? null;
-    if (toolInput === null) {
+    if (toolUseBlocks.length === 1) {
+      toolInput = toolUseBlocks[0].input ?? null;
+    } else {
       console.warn(
-        '[OCR] tool_use block missing:',
-        JSON.stringify({ stopReason: responseBody.stop_reason }),
+        '[OCR] unexpected tool_use block count:',
+        JSON.stringify({
+          count: toolUseBlocks.length,
+          stopReason: responseBody.stop_reason,
+        }),
       );
     }
   } catch (err) {
