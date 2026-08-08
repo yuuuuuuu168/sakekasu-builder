@@ -33,6 +33,7 @@ function synth() {
     functions: [apiStack.presignedUrlFunction, apiStack.ocrAnalyzerFunction],
     ocrFunction: apiStack.ocrAnalyzerFunction,
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
+    signupNotifyFailMetricFilter: authStack.signupNotifyFailMetricFilter,
     sommelierRuntimeArn: RUNTIME_ARN,
     siteUrl: 'https://example.com',
     userPoolId: 'ap-northeast-1_TEST',
@@ -149,6 +150,14 @@ describe('MonitoringStack', () => {
     template.hasResourceProperties('AWS::CloudWatch::Alarm', {
       AlarmName: 'dev-sakekasu-image-delete-fail',
       MetricName: 'ImageDeleteFailCount',
+    });
+  });
+
+  // Issue #66: 通知 Lambda は throw しないため、失敗ログから起こしたメトリクスで見る
+  it('新規登録通知の失敗を監視する', () => {
+    template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      AlarmName: 'dev-sakekasu-signup-notify-fail',
+      MetricName: 'SignupNotifyFailCount',
     });
   });
 

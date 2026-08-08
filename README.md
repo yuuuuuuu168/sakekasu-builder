@@ -35,6 +35,7 @@
 | 27 | 一覧画面上部に在庫本数サマリー表示（ウイスキー◯本・日本酒◯本のみ） | ✅ 実装済み |
 | 28 | データ保護（DynamoDB PITR・削除保護、S3 バージョニング） | ✅ 実装済み |
 | 29 | 監視とアラート通知（AI・サービス正常性・外形監視・AWS Health → Slack） | ✅ 実装済み ※デプロイ前に手動登録あり |
+| 30 | 新規ユーザー登録の Slack 通知（Cognito Post Confirmation → SNS） | ✅ 実装済み（Issue #66） |
 
 ### 検索・フィルタ強化（#18・完了）
 
@@ -183,13 +184,15 @@ Runtime の ARN はフロントの `src/features/sommelier/config.ts` に持つ�
 CloudWatch アラーム ─┐
 外形監視 Lambda ─────┤
 カナリア Lambda ─────┼→ SNS → Slack 通知 Lambda → Slack（Incoming Webhook）
-AWS Health ──────────┘
-（EventBridge 経由）
+AWS Health ──────────┤
+（EventBridge 経由）  │
+新規登録通知 Lambda ─┘
+（Cognito トリガー）
 ```
 
 アラームは**発報だけでなく復旧も通知する**ので、鳴りっぱなしなのか直ったのかが Slack だけで分かる。
 
-### 監視項目（21アラーム）
+### 監視項目（22アラーム）
 
 | 分類 | 監視対象 | 発報条件 |
 |------|---------|---------|
@@ -204,6 +207,7 @@ AWS Health ──────────┘
 | 外形監視 | フロント配信 / ソムリエ Runtime / AppSync | 2回続けて到達不可 |
 | 外形監視 | ソムリエとの実会話（カナリア） | 失敗したら即時 |
 | 通知経路 | Slack 通知 Lambda のエラー | 1回以上 |
+| 通知経路 | 新規登録通知の送信失敗（`SignupNotifyFailCount`） | 5分で1回以上 |
 | 監視自体 | 外形監視・カナリアの実行失敗 | 1回以上 |
 | 監視自体 | 外形監視・カナリアが動いていない | 実行回数が0（外形監視は1時間、カナリアは12時間） |
 | AWS 側 | AWS Health の障害・予定された変更 | イベントが届いたら即時（アラームではなく EventBridge 経由） |
@@ -244,6 +248,15 @@ AWS_PROFILE=sakekasu-builder aws lambda invoke \
   --payload file://event.json --cli-binary-format raw-in-base64-out \
   --region ap-northeast-1 /dev/stdout
 ```
+
+### 新規ユーザー登録の通知（#30）
+
+誰かがサインアップして確認を終えると、Cognito の Post Confirmation トリガーが通知 Lambda（`infra/lambda/signup-notifier/`）を呼び、既存のアラートトピック経由で Slack に「メールアドレス・登録時刻（JST）・ユーザープール」を流す。パスワード再設定の確認でも同じトリガーが呼ばれるため、`triggerSource` でサインアップ確認だけに絞っている。
+
+設計上の注意は2点。
+
+- **通知 Lambda は決して throw しない**。Post Confirmation トリガーの失敗はサインアップの確認そのものをエラーにしてしまうため、SNS 送信の失敗は握りつぶしてログに残す。Cognito がトリガーの完了を5秒しか待たず、その5秒にはコールドスタートも含まれる点を踏まえ、送信は1.5秒で打ち切る。握りつぶした失敗は `SignupNotifyFailCount` メトリクス経由のアラームで拾う
+- **アラートトピックは名前規約で参照する**。トピックを作る監視スタックは AuthStack に依存済みのため、オブジェクト参照で受け取ると循環参照になる（画像削除アラームと同じ構図）
 
 ### 外形監視の考え方
 
