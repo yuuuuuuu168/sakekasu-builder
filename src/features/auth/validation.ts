@@ -8,6 +8,15 @@ export interface PasswordValidationResult {
   errors: string[];
 }
 
+/** パスワード条件の定義（入力中のチェックリスト表示用） */
+export const PASSWORD_CONDITIONS = [
+  { test: (p: string) => p.length >= 8, label: '8文字以上' },
+  { test: (p: string) => /[A-Z]/.test(p), label: '大文字を含む' },
+  { test: (p: string) => /[a-z]/.test(p), label: '小文字を含む' },
+  { test: (p: string) => /[0-9]/.test(p), label: '数字を含む' },
+  { test: (p: string) => /[^A-Za-z0-9]/.test(p), label: '記号を含む' },
+] as const;
+
 /**
  * パスワードが Cognito のパスワードポリシーを満たすかチェックする純粋関数
  *
