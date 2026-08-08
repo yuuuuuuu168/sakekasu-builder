@@ -5,9 +5,10 @@ import { SignInForm } from './SignInForm';
 import { SignUpForm } from './SignUpForm';
 import { ConfirmSignUpForm } from './ConfirmSignUpForm';
 import { TotpChallengeForm } from './TotpChallengeForm';
+import { ResetPasswordForm } from './ResetPasswordForm';
 
 /** 認証画面の表示状態 */
-type AuthView = 'signIn' | 'signUp' | 'confirmSignUp' | 'totpChallenge';
+type AuthView = 'signIn' | 'signUp' | 'confirmSignUp' | 'totpChallenge' | 'resetPassword';
 
 /**
  * 認証ページコンテナ
@@ -16,6 +17,8 @@ type AuthView = 'signIn' | 'signUp' | 'confirmSignUp' | 'totpChallenge';
 export function AuthPage() {
   const [view, setView] = useState<AuthView>('signIn');
   const [confirmEmail, setConfirmEmail] = useState('');
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetRequired, setResetRequired] = useState(false);
 
   /** サインアップ画面へ切り替え */
   const handleSwitchToSignUp = useCallback(() => {
@@ -44,12 +47,27 @@ export function AuthPage() {
     setView('totpChallenge');
   }, []);
 
+  /** パスワード再設定画面へ遷移（忘れた場合 or 管理者リセットで誘導された場合） */
+  const handleNeedPasswordReset = useCallback((email: string, required: boolean) => {
+    setResetEmail(email);
+    setResetRequired(required);
+    setView('resetPassword');
+  }, []);
+
+  /** パスワード再設定フローからサインイン画面へ戻す */
+  const handleBackFromReset = useCallback(() => {
+    setResetEmail('');
+    setResetRequired(false);
+    setView('signIn');
+  }, []);
+
   /** 現在のビューに応じたタイトル */
   const title = {
     signIn: 'サインイン',
     signUp: 'アカウント作成',
     confirmSignUp: 'メール確認',
     totpChallenge: '二段階認証',
+    resetPassword: 'パスワード再設定',
   }[view];
 
   return (
@@ -75,6 +93,14 @@ export function AuthPage() {
                 onSwitchToSignUp={handleSwitchToSignUp}
                 onNeedConfirmation={handleNeedConfirmation}
                 onNeedTotp={handleNeedTotp}
+                onNeedPasswordReset={handleNeedPasswordReset}
+              />
+            )}
+            {view === 'resetPassword' && (
+              <ResetPasswordForm
+                initialEmail={resetEmail}
+                resetRequired={resetRequired}
+                onBackToSignIn={handleBackFromReset}
               />
             )}
             {view === 'totpChallenge' && (

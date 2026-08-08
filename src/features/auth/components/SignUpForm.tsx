@@ -5,7 +5,7 @@ import { Loader2, Check, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/features/auth/AuthContext';
-import { validatePassword } from '@/features/auth/validation';
+import { validatePassword, PASSWORD_CONDITIONS } from '@/features/auth/validation';
 
 const MotionButton = motion.create(Button);
 
@@ -13,15 +13,6 @@ interface SignUpFormProps {
   onSwitchToSignIn: () => void;
   onNeedConfirmation: (email: string) => void;
 }
-
-/** パスワード条件の定義 */
-const PASSWORD_CONDITIONS = [
-  { test: (p: string) => p.length >= 8, label: '8文字以上' },
-  { test: (p: string) => /[A-Z]/.test(p), label: '大文字を含む' },
-  { test: (p: string) => /[a-z]/.test(p), label: '小文字を含む' },
-  { test: (p: string) => /[0-9]/.test(p), label: '数字を含む' },
-  { test: (p: string) => /[^A-Za-z0-9]/.test(p), label: '記号を含む' },
-] as const;
 
 export function SignUpForm({ onSwitchToSignIn, onNeedConfirmation }: SignUpFormProps) {
   const { signUp } = useAuth();
