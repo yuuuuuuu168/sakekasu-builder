@@ -68,7 +68,6 @@ describe('PurchaseForm OCR 統合テスト', () => {
     mockAnalyzeImage.mockResolvedValue({
       sakeName: '獺祭',
       confidence: 0.95,
-      rawTexts: ['獺祭'],
     });
 
     render(<PurchaseForm />);
@@ -90,7 +89,6 @@ describe('PurchaseForm OCR 統合テスト', () => {
     mockAnalyzeImage.mockResolvedValue({
       sakeName: '獺祭',
       confidence: 0.95,
-      rawTexts: ['獺祭'],
     });
 
     render(<PurchaseForm />);
@@ -117,7 +115,6 @@ describe('PurchaseForm OCR 統合テスト', () => {
       region: '山口県',
       alcoholPercentage: 16,
       confidence: 0.9,
-      rawTexts: ['{"sakeName":"獺祭"}'],
     });
 
     render(<PurchaseForm />);
@@ -145,7 +142,6 @@ describe('PurchaseForm OCR 統合テスト', () => {
       region: null,
       alcoholPercentage: null,
       confidence: 0.9,
-      rawTexts: ['{"sakeName":"獺祭"}'],
     });
 
     render(<PurchaseForm />);
@@ -168,7 +164,6 @@ describe('PurchaseForm OCR 統合テスト', () => {
     mockAnalyzeImage.mockResolvedValue({
       sakeName: '獺祭',
       confidence: 0.95,
-      rawTexts: ['獺祭'],
     });
 
     render(<PurchaseForm />);

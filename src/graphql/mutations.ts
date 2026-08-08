@@ -140,7 +140,6 @@ export const analyzeSakeLabel = /* GraphQL */ `
         region
         alcoholPercentage
       }
-      rawTexts
     }
   }
 `;

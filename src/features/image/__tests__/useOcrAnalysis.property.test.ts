@@ -80,7 +80,6 @@ function setupMockForErrorType(errorType: string): void {
           analyzeSakeLabel: {
             sakeName: null,
             confidence: 0.0,
-            rawTexts: [],
           },
         },
       });

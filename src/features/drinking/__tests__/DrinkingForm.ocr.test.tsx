@@ -68,7 +68,6 @@ describe('DrinkingForm OCR 統合テスト', () => {
     mockAnalyzeImage.mockResolvedValue({
       sakeName: '獺祭',
       confidence: 0.95,
-      rawTexts: ['獺祭'],
     });
 
     render(<DrinkingForm />);
@@ -90,7 +89,6 @@ describe('DrinkingForm OCR 統合テスト', () => {
     mockAnalyzeImage.mockResolvedValue({
       sakeName: '獺祭',
       confidence: 0.95,
-      rawTexts: ['獺祭'],
     });
 
     render(<DrinkingForm />);
@@ -117,7 +115,6 @@ describe('DrinkingForm OCR 統合テスト', () => {
       region: '大阪府',
       alcoholPercentage: 43,
       confidence: 0.9,
-      rawTexts: ['{"sakeName":"山崎"}'],
     });
 
     render(<DrinkingForm />);
