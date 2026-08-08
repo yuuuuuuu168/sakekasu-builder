@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { format, parse } from 'date-fns';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -66,12 +66,18 @@ export function DrinkingForm({
     onStockDrinkSaved: onStockDraftClear,
   });
 
-  const { handleOcrTrigger, isAnalyzing, ocrMessage, resetOcr } = useOcrTrigger(
+  // ユーザーが手動でカテゴリを選択したか（自動OCRで選択を上書きしないための追跡）
+  const categoryTouchedRef = useRef(false);
+
+  const { handleOcrTrigger, isAnalyzing, ocrMessage, resetOcr, hasAnalyzed } = useOcrTrigger(
     imageUpload,
     'drinking',
-    (info) => {
-      handleChange('sakeName', info.sakeName);
-      if (info.category) {
+    (info, { isAuto }) => {
+      // 自動実行では入力済みの銘柄名・選択済みのカテゴリを上書きしない（手動の再読み取りは上書きする）
+      if (!isAuto || formData.sakeName.trim() === '') {
+        handleChange('sakeName', info.sakeName);
+      }
+      if (info.category && (!isAuto || !categoryTouchedRef.current)) {
         handleChange('category', info.category);
       }
     },
@@ -83,9 +89,12 @@ export function DrinkingForm({
   useEffect(() => {
     if (successMessage) {
       toast.success(successMessage);
+      // フォームリセットに合わせてOCRの解析済み管理も初期化する（同じ画像の再登録で自動OCRが動くように）
+      categoryTouchedRef.current = false;
+      resetOcr();
       onSubmitSuccess?.();
     }
-  }, [successMessage, onSubmitSuccess]);
+  }, [successMessage, onSubmitSuccess, resetOcr]);
 
   useEffect(() => {
     if (errorMessage) {
@@ -162,6 +171,7 @@ export function DrinkingForm({
               isOcrAnalyzing={isAnalyzing}
               onOcrTrigger={handleOcrTrigger}
               ocrMessage={ocrMessage}
+              hasOcrRun={hasAnalyzed}
             />
           </FormField>
         )}
@@ -224,7 +234,12 @@ export function DrinkingForm({
         <FormField label="カテゴリ" error={errors.category} required>
           <CategorySelect
             value={formData.category}
-            onChange={(val) => { if (val !== null) handleChange('category', val); }}
+            onChange={(val) => {
+              if (val !== null) {
+                categoryTouchedRef.current = true;
+                handleChange('category', val);
+              }
+            }}
             onBlur={() => handleBlur('category')}
           />
         </FormField>
