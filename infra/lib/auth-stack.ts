@@ -1,6 +1,14 @@
 import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as logs from 'aws-cdk-lib/aws-logs';
+import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
+import { Runtime } from 'aws-cdk-lib/aws-lambda';
+import * as path from 'node:path';
+import * as url from 'node:url';
 import type { Construct } from 'constructs';
+
+const here = path.dirname(url.fileURLToPath(import.meta.url));
 
 export interface AuthStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
@@ -21,6 +29,12 @@ export class AuthStack extends cdk.Stack {
    * 相手が任意の利用者になりすませる余地が広がる）
    */
   public readonly canaryUserPoolClient: cognito.UserPoolClient;
+
+  /**
+   * 新規登録の Slack 通知に失敗したときのメトリクスフィルター。
+   * アラームは監視スタックで作る（通知先と一緒に管理するため）
+   */
+  public readonly signupNotifyFailMetricFilter: logs.MetricFilter;
 
   constructor(scope: Construct, id: string, props: AuthStackProps) {
     super(scope, id, props);
@@ -80,6 +94,54 @@ export class AuthStack extends cdk.Stack {
       preventUserExistenceErrors: true,
       accessTokenValidity: cdk.Duration.hours(1),
       refreshTokenValidity: cdk.Duration.days(1),
+    });
+
+    // --- 新規ユーザー登録の Slack 通知（Issue #66）---
+
+    // 通知先は監視スタックのアラートトピック。オブジェクト参照で受け取ると
+    // 監視スタック（当スタックに依存済み）との循環参照になるため、
+    // 名前の規約から ARN を組み立てる。監視スタックが未デプロイでも
+    // サインアップは壊れない（通知だけ失敗し、ログに残る）
+    const alertTopicArn = `arn:aws:sns:${this.region}:${this.account}:${props.envName}-sakekasu-alerts`;
+
+    const signupNotifier = new NodejsFunction(this, 'SignupNotifierFunction', {
+      functionName: `${props.envName}-sakekasu-signup-notifier`,
+      runtime: Runtime.NODEJS_20_X,
+      entry: path.join(here, '../lambda/signup-notifier/index.ts'),
+      handler: 'handler',
+      // Cognito はトリガーの完了を 5 秒しか待たない。Lambda 側だけ長くしても
+      // 先に Cognito が諦めてサインアップの確認がエラーになるため、揃えておく
+      timeout: cdk.Duration.seconds(5),
+      environment: {
+        TOPIC_ARN: alertTopicArn,
+        ENV_NAME: props.envName,
+      },
+      bundling: {
+        format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
+        mainFields: ['module', 'main'],
+        banner:
+          "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+      },
+    });
+
+    signupNotifier.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['sns:Publish'],
+        resources: [alertTopicArn],
+      }),
+    );
+
+    // サインアップの確認が済んだら呼ばれる（呼び出し許可も一緒に付く）
+    this.userPool.addTrigger(cognito.UserPoolOperation.POST_CONFIRMATION, signupNotifier);
+
+    // 通知の失敗はサインアップを守るため Lambda 内で握りつぶす。
+    // そのままでは誰も気づけないので、ログからメトリクスに起こして監視する
+    this.signupNotifyFailMetricFilter = new logs.MetricFilter(this, 'SignupNotifyFailMetricFilter', {
+      logGroup: signupNotifier.logGroup,
+      filterPattern: logs.FilterPattern.literal('{ $.level = "ERROR" && $.action = "notifySignup" }'),
+      metricNamespace: `${props.envName}-sakekasu`,
+      metricName: 'SignupNotifyFailCount',
+      metricValue: '1',
     });
 
     // CloudFormation 出力

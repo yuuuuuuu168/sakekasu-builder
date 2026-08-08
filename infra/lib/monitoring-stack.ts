@@ -30,6 +30,8 @@ export interface MonitoringStackProps extends cdk.StackProps {
   ocrFunction: NodejsFunction;
   /** 画像削除失敗のメトリクスフィルター（アラームはこちらで作る） */
   imageDeleteFailMetricFilter: logs.MetricFilter;
+  /** 新規登録の Slack 通知失敗のメトリクスフィルター（アラームはこちらで作る） */
+  signupNotifyFailMetricFilter: logs.MetricFilter;
   /** ソムリエ Runtime の ARN */
   sommelierRuntimeArn: string;
   /** フロントの公開 URL（外形監視の対象） */
@@ -255,6 +257,21 @@ export class MonitoringStack extends cdk.Stack {
         period: cdk.Duration.hours(1),
       }),
       threshold: 5,
+      evaluationPeriods: 1,
+    });
+
+    // 新規登録の通知 Lambda は失敗してもサインアップを守るため throw しない。
+    // 沈黙したままだと登録に気づけなくなるので、失敗ログから起こした
+    // メトリクスで監視する（Issue #66）
+    this.addAlarm('SignupNotifyFailAlarm', {
+      alarmName: `${prefix}-signup-notify-fail`,
+      description:
+        '新規ユーザー登録の Slack 通知に失敗しています（登録自体は成功しています）',
+      metric: props.signupNotifyFailMetricFilter.metric({
+        statistic: 'Sum',
+        period: cdk.Duration.minutes(5),
+      }),
+      threshold: 1,
       evaluationPeriods: 1,
     });
 

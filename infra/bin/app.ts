@@ -58,6 +58,7 @@ const monitoringStack = new MonitoringStack(app, `${prefix}-monitoring`, {
   functions: [apiStack.presignedUrlFunction, apiStack.ocrAnalyzerFunction],
   ocrFunction: apiStack.ocrAnalyzerFunction,
   imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
+  signupNotifyFailMetricFilter: authStack.signupNotifyFailMetricFilter,
   sommelierRuntimeArn,
   siteUrl,
   userPoolId: authStack.userPool.userPoolId,
