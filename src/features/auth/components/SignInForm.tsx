@@ -13,9 +13,19 @@ interface SignInFormProps {
   onNeedConfirmation: (email: string) => void;
   /** MFA 有効な利用者の TOTP コード入力画面へ遷移する */
   onNeedTotp: () => void;
+  /**
+   * パスワード再設定画面へ遷移する。
+   * resetRequired は管理者リセット（RESET_REQUIRED）で誘導されたとき true
+   */
+  onNeedPasswordReset: (email: string, resetRequired: boolean) => void;
 }
 
-export function SignInForm({ onSwitchToSignUp, onNeedConfirmation, onNeedTotp }: SignInFormProps) {
+export function SignInForm({
+  onSwitchToSignUp,
+  onNeedConfirmation,
+  onNeedTotp,
+  onNeedPasswordReset,
+}: SignInFormProps) {
   const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -38,6 +48,13 @@ export function SignInForm({ onSwitchToSignUp, onNeedConfirmation, onNeedTotp }:
 
       if (errorName === 'UserNotConfirmedException') {
         onNeedConfirmation(email);
+        return;
+      }
+
+      // 管理者による強制リセット（RESET_REQUIRED）。パスワードは再設定するまで
+      // 使えないため、何度試しても失敗する。再設定画面へ誘導する
+      if (errorName === 'PasswordResetRequiredException') {
+        onNeedPasswordReset(email, true);
         return;
       }
 
@@ -128,6 +145,19 @@ export function SignInForm({ onSwitchToSignUp, onNeedConfirmation, onNeedTotp }:
             '🍶 サインイン'
           )}
         </MotionButton>
+
+        {/* パスワード再設定への導線 */}
+        <p className="text-center text-sm text-muted-foreground">
+          パスワードを忘れた方は
+          <button
+            type="button"
+            data-testid="forgot-password"
+            onClick={() => onNeedPasswordReset(email, false)}
+            className="ml-1 text-gold-wa underline underline-offset-4 hover:text-gold-wa/80 transition-colors"
+          >
+            こちら
+          </button>
+        </p>
 
         {/* サインアップへの切り替え */}
         <p className="text-center text-sm text-muted-foreground">
