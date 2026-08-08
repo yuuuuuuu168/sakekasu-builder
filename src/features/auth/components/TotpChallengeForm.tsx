@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/features/auth/AuthContext';
+import { TOTP_CODE_PATTERN } from '@/features/auth/validation';
 
 const MotionButton = motion.create(Button);
 
@@ -26,6 +27,13 @@ export function TotpChallengeForm({ onBackToSignIn }: TotpChallengeFormProps) {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // 形式外の入力を Cognito に送るとチャレンジの試行回数だけを消費する
+    if (!TOTP_CODE_PATTERN.test(code)) {
+      setError('確認コードは 6 桁の数字で入力してください');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {

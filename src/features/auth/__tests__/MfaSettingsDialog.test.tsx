@@ -131,7 +131,7 @@ describe('MfaSettingsDialog', () => {
     expect(mockUpdateMFAPreference).not.toHaveBeenCalled();
   });
 
-  it('解除すると TOTP を無効にする', async () => {
+  it('解除は確認を挟んでから TOTP を無効にする', async () => {
     mockFetchMFAPreference.mockResolvedValue({ enabled: ['TOTP'], preferred: 'TOTP' });
     mockUpdateMFAPreference.mockResolvedValue(undefined);
     render(<MfaSettingsDialog open={true} onClose={vi.fn()} />);
@@ -141,9 +141,88 @@ describe('MfaSettingsDialog', () => {
     });
     fireEvent.click(screen.getByTestId('mfa-disable'));
 
+    // ワンクリックでは解除されず、確認画面が出る
+    await waitFor(() => {
+      expect(screen.getByTestId('mfa-confirm-disable-view')).toBeInTheDocument();
+    });
+    expect(mockUpdateMFAPreference).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('mfa-disable-confirm'));
     await waitFor(() => {
       expect(screen.getByTestId('mfa-disabled-view')).toBeInTheDocument();
     });
     expect(mockUpdateMFAPreference).toHaveBeenCalledWith({ totp: 'DISABLED' });
+  });
+
+  it('解除の確認で「やめる」と設定済み画面に戻る', async () => {
+    mockFetchMFAPreference.mockResolvedValue({ enabled: ['TOTP'], preferred: 'TOTP' });
+    render(<MfaSettingsDialog open={true} onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mfa-disable')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('mfa-disable'));
+    await waitFor(() => {
+      expect(screen.getByTestId('mfa-confirm-disable-view')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mfa-disable-cancel'));
+    await waitFor(() => {
+      expect(screen.getByTestId('mfa-enabled-view')).toBeInTheDocument();
+    });
+    expect(mockUpdateMFAPreference).not.toHaveBeenCalled();
+  });
+
+  // 取得失敗時に「未設定」へ倒すと、設定済みの利用者が再登録に進んで
+  // 既存の認証アプリ登録を上書きしてしまう
+  it('設定の取得に失敗したら操作ボタンを出さずエラー表示にする', async () => {
+    mockFetchMFAPreference.mockRejectedValue(new Error('network'));
+    render(<MfaSettingsDialog open={true} onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mfa-fetch-error-view')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('mfa-start-setup')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('mfa-disable')).not.toBeInTheDocument();
+  });
+
+  it('エラー表示から再試行すると設定を取り直す', async () => {
+    mockFetchMFAPreference.mockRejectedValueOnce(new Error('network'));
+    mockFetchMFAPreference.mockResolvedValueOnce({ enabled: ['TOTP'], preferred: 'TOTP' });
+    render(<MfaSettingsDialog open={true} onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mfa-retry')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('mfa-retry'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mfa-enabled-view')).toBeInTheDocument();
+    });
+  });
+
+  it('形式外のコードは Cognito に送らずエラーを出す', async () => {
+    mockFetchMFAPreference.mockResolvedValue({});
+    render(<MfaSettingsDialog open={true} onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mfa-start-setup')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('mfa-start-setup'));
+    await waitFor(() => {
+      expect(screen.getByTestId('mfa-verify-code')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('mfa-verify-code'), {
+      target: { value: '12345' },
+    });
+    fireEvent.submit(screen.getByTestId('mfa-setup-view'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mfa-error')).toHaveTextContent(
+        '確認コードは 6 桁の数字で入力してください',
+      );
+    });
+    expect(mockVerifyTOTPSetup).not.toHaveBeenCalled();
   });
 });

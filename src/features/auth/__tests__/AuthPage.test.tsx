@@ -289,6 +289,22 @@ describe('AuthPage', () => {
       });
     });
 
+    it('形式外のコードは送信せずエラーメッセージを表示する', async () => {
+      await signInUntilTotpChallenge();
+
+      fireEvent.change(screen.getByTestId('input-totp-code'), {
+        target: { value: '12345' },
+      });
+      fireEvent.submit(screen.getByTestId('totp-challenge-form'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('totp-error')).toHaveTextContent(
+          '確認コードは 6 桁の数字で入力してください',
+        );
+      });
+      expect(mockConfirmSignInWithTotp).not.toHaveBeenCalled();
+    });
+
     it('コード誤りのときにエラーメッセージが表示される', async () => {
       mockConfirmSignInWithTotp.mockRejectedValue({ name: 'CodeMismatchException' });
       await signInUntilTotpChallenge();
