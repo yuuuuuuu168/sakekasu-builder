@@ -10,10 +10,11 @@ const ENV_NAME = process.env.ENV_NAME ?? '不明';
 /**
  * SNS 送信の打ち切り時間。
  * Cognito はこのトリガーの完了を 5 秒しか待たず、超えるとサインアップの
- * 確認そのものがエラーになる。通知ごときで登録を巻き添えにしないよう、
- * コールドスタート分の余裕を残して早めに諦める
+ * 確認そのものがエラーになる。その 5 秒にはコールドスタートも含まれるが、
+ * このタイマーが動き出すのはハンドラ開始時（＝コールドスタート後）なので、
+ * 初回起動の遅れを見込んで大きめの余裕を残して諦める
  */
-const PUBLISH_TIMEOUT_MS = 3000;
+const PUBLISH_TIMEOUT_MS = 1500;
 
 /** Cognito Post Confirmation トリガーのイベント（使う項目だけ） */
 export interface PostConfirmationEvent {

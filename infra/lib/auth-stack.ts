@@ -112,6 +112,9 @@ export class AuthStack extends cdk.Stack {
       // Cognito はトリガーの完了を 5 秒しか待たない。Lambda 側だけ長くしても
       // 先に Cognito が諦めてサインアップの確認がエラーになるため、揃えておく
       timeout: cdk.Duration.seconds(5),
+      // Cognito の 5 秒にはコールドスタートも含まれるため、既定の 128MB より
+      // CPU を増やして初回起動を短くする（費用は呼び出し頻度が低いので誤差）
+      memorySize: 256,
       environment: {
         TOPIC_ARN: alertTopicArn,
         ENV_NAME: props.envName,
