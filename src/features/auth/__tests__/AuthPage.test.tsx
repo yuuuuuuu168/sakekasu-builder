@@ -4,6 +4,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // useAuth フックをモック
 const mockSignIn = vi.fn();
+const mockConfirmSignInWithTotp = vi.fn();
 const mockSignUp = vi.fn();
 const mockConfirmSignUp = vi.fn();
 const mockSignOut = vi.fn();
@@ -13,6 +14,7 @@ let mockAuthValue = {
   isAuthenticated: false,
   isLoading: false,
   signIn: mockSignIn,
+  confirmSignInWithTotp: mockConfirmSignInWithTotp,
   signUp: mockSignUp,
   confirmSignUp: mockConfirmSignUp,
   signOut: mockSignOut,
@@ -34,6 +36,7 @@ describe('AuthPage', () => {
       isAuthenticated: false,
       isLoading: false,
       signIn: mockSignIn,
+      confirmSignInWithTotp: mockConfirmSignInWithTotp,
       signUp: mockSignUp,
       confirmSignUp: mockConfirmSignUp,
       signOut: mockSignOut,
@@ -220,6 +223,108 @@ describe('AuthPage', () => {
       );
     });
   });
+
+  // Issue #70: MFA 有効ユーザーのサインイン
+  describe('二段階認証（TOTP）', () => {
+    /** サインインして TOTP 入力画面まで進める */
+    async function signInUntilTotpChallenge() {
+      mockSignIn.mockResolvedValue({ requiresTotp: true });
+      render(<AuthPage />);
+
+      fireEvent.change(screen.getByTestId('input-email'), {
+        target: { value: 'mfa@example.com' },
+      });
+      fireEvent.change(screen.getByTestId('input-password'), {
+        target: { value: 'Password1!' },
+      });
+      fireEvent.click(screen.getByTestId('signin-submit'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('totp-challenge-form')).toBeInTheDocument();
+      });
+    }
+
+    it('MFA 有効ユーザーのサインイン時に TOTP 入力画面へ遷移する', async () => {
+      await signInUntilTotpChallenge();
+
+      expect(screen.getByText('二段階認証')).toBeInTheDocument();
+      expect(screen.getByTestId('input-totp-code')).toBeInTheDocument();
+    });
+
+    it('MFA 無効ユーザーは TOTP 入力画面に遷移しない', async () => {
+      mockSignIn.mockResolvedValue({ requiresTotp: false });
+      render(<AuthPage />);
+
+      fireEvent.change(screen.getByTestId('input-email'), {
+        target: { value: 'nomfa@example.com' },
+      });
+      fireEvent.change(screen.getByTestId('input-password'), {
+        target: { value: 'Password1!' },
+      });
+      fireEvent.click(screen.getByTestId('signin-submit'));
+
+      await waitFor(() => {
+        expect(mockSignIn).toHaveBeenCalled();
+      });
+      expect(screen.queryByTestId('totp-challenge-form')).not.toBeInTheDocument();
+    });
+
+    it('入力したコードで confirmSignInWithTotp が呼ばれる', async () => {
+      mockConfirmSignInWithTotp.mockResolvedValue(undefined);
+      await signInUntilTotpChallenge();
+
+      fireEvent.change(screen.getByTestId('input-totp-code'), {
+        target: { value: '123456' },
+      });
+      fireEvent.click(screen.getByTestId('totp-submit'));
+
+      await waitFor(() => {
+        expect(mockConfirmSignInWithTotp).toHaveBeenCalledWith('123456');
+      });
+    });
+
+    it('コード誤りのときにエラーメッセージが表示される', async () => {
+      mockConfirmSignInWithTotp.mockRejectedValue({ name: 'CodeMismatchException' });
+      await signInUntilTotpChallenge();
+
+      fireEvent.change(screen.getByTestId('input-totp-code'), {
+        target: { value: '000000' },
+      });
+      fireEvent.click(screen.getByTestId('totp-submit'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('totp-error')).toHaveTextContent(
+          '確認コードが正しくありません',
+        );
+      });
+    });
+
+    it('チャレンジ失効のときはサインインし直すよう促す', async () => {
+      mockConfirmSignInWithTotp.mockRejectedValue({ name: 'SignInException' });
+      await signInUntilTotpChallenge();
+
+      fireEvent.change(screen.getByTestId('input-totp-code'), {
+        target: { value: '123456' },
+      });
+      fireEvent.click(screen.getByTestId('totp-submit'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('totp-error')).toHaveTextContent(
+          'セッションの有効期限が切れました。もう一度サインインしてください',
+        );
+      });
+    });
+
+    it('「サインインからやり直す」でサインイン画面へ戻れる', async () => {
+      await signInUntilTotpChallenge();
+
+      fireEvent.click(screen.getByTestId('totp-back-to-signin'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('signin-form')).toBeInTheDocument();
+      });
+    });
+  });
 });
 
 describe('AuthGuard', () => {
@@ -234,6 +339,7 @@ describe('AuthGuard', () => {
       isAuthenticated: false,
       isLoading: true,
       signIn: mockSignIn,
+      confirmSignInWithTotp: mockConfirmSignInWithTotp,
       signUp: mockSignUp,
       confirmSignUp: mockConfirmSignUp,
       signOut: mockSignOut,
@@ -258,6 +364,7 @@ describe('AuthGuard', () => {
       isAuthenticated: false,
       isLoading: false,
       signIn: mockSignIn,
+      confirmSignInWithTotp: mockConfirmSignInWithTotp,
       signUp: mockSignUp,
       confirmSignUp: mockConfirmSignUp,
       signOut: mockSignOut,
@@ -280,6 +387,7 @@ describe('AuthGuard', () => {
       isAuthenticated: true,
       isLoading: false,
       signIn: mockSignIn,
+      confirmSignInWithTotp: mockConfirmSignInWithTotp,
       signUp: mockSignUp,
       confirmSignUp: mockConfirmSignUp,
       signOut: mockSignOut,
