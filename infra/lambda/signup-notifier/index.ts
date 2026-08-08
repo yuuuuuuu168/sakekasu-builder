@@ -37,6 +37,20 @@ function formatJst(date: Date): string {
 }
 
 /**
+ * 利用者が自由に決められる文字列を、Slack の mrkdwn で書式として
+ * 解釈されないようコード表記（`...`）で囲む。
+ *
+ * `*偽の警告*` のようなメールアドレスでも登録自体は通ってしまうが、
+ * コード表記の中では書式文字が効かないので、そのままの字面で表示される。
+ * 囲いを壊す文字だけをここで潰す。バッククォートは引用符に替え、
+ * 改行は空白にする（改行を残すと「ユーザープール: ...」など
+ * 偽の行を通知に差し込めてしまう）
+ */
+function toCodeSpan(value: string): string {
+  return `\`${value.replace(/[\r\n]+/g, ' ').replace(/`/g, "'")}\``;
+}
+
+/**
  * 通知の件名と本文を組み立てる。通知しないイベントでは null を返す。
  *
  * Post Confirmation はパスワード再設定の確認でも呼ばれるため、
@@ -54,7 +68,7 @@ export function buildNotification(
   return {
     subject: `🎉 新しいユーザーが登録されました（${envName}）`,
     message: [
-      `メールアドレス: ${email}`,
+      `メールアドレス: ${toCodeSpan(email)}`,
       `登録時刻: ${formatJst(now)}（JST）`,
       `ユーザープール: ${event.userPoolId ?? '不明'}`,
     ].join('\n'),
