@@ -8,6 +8,7 @@ import { PurchaseRegistrationPage } from '@/features/purchase/components/Purchas
 import { DrinkingRegistrationPage } from '@/features/drinking/components/DrinkingRegistrationPage';
 import { RecordListPage } from '@/features/records/components/RecordListPage';
 import { StatsPage } from '@/features/stats/components/StatsPage';
+import { CalendarPage } from '@/features/calendar/components/CalendarPage';
 import { SommelierChat } from '@/features/sommelier/components/SommelierChat';
 import { AuthProvider, useAuth } from '@/features/auth/AuthContext';
 import { AuthGuard } from '@/features/auth/components/AuthGuard';
@@ -17,7 +18,7 @@ import type { UnifiedRecord } from '@/features/records/types';
 
 Amplify.configure(outputs);
 
-type Page = 'purchase' | 'drinking' | 'records' | 'stats';
+type Page = 'purchase' | 'drinking' | 'records' | 'calendar' | 'stats';
 
 /** ナビゲーションバー（認証情報 + ページ切り替え） */
 function NavigationBar({
@@ -59,13 +60,14 @@ function NavigationBar({
 
       <MfaSettingsDialog open={isMfaDialogOpen} onClose={() => setIsMfaDialogOpen(false)} />
 
-      {/* ページ切り替えタブ */}
-      <div className="mx-auto flex max-w-md">
+      {/* ページ切り替えタブ（5タブは狭い画面で収まらないため横スクロール可能にする） */}
+      <div className="mx-auto flex max-w-md overflow-x-auto">
         {(
           [
             { page: 'purchase', label: '🛒 購入登録' },
             { page: 'drinking', label: '🍶 飲酒登録' },
             { page: 'records', label: '📋 記録一覧' },
+            { page: 'calendar', label: '📅 カレンダー' },
             { page: 'stats', label: '📊 統計' },
           ] as const
         ).map(({ page, label }) => (
@@ -126,6 +128,8 @@ function AppContent() {
         />
       ) : currentPage === 'records' ? (
         <RecordListPage onDrinkFromStock={handleDrinkFromStock} />
+      ) : currentPage === 'calendar' ? (
+        <CalendarPage />
       ) : (
         <StatsPage />
       )}
