@@ -142,6 +142,26 @@ describe('PurchaseForm 自動OCR（写真1枚で購入登録）', () => {
     expect(mockAnalyzeImage).toHaveBeenCalledTimes(1);
   });
 
+  it('画像アップロードに失敗した場合、解析は実行されずボタンは「銘柄名を読み取る」のまま', async () => {
+    mockPreUploadImages.mockResolvedValueOnce([]);
+
+    render(<PurchaseForm />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(mockPreUploadImages).toHaveBeenCalledTimes(1);
+    expect(mockAnalyzeImage).not.toHaveBeenCalled();
+    // 読み取り未実施なのでボタンは「再読み取り」表記にならない
+    expect(screen.getByTestId('ocr-trigger-button')).toHaveTextContent('銘柄名を読み取る');
+    // 失敗した画像への自動リトライはしない（手動ボタンに委ねる）
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(mockPreUploadImages).toHaveBeenCalledTimes(1);
+  });
+
   it('自動実行後もボタン（再読み取り）から手動でOCRを実行でき、銘柄名を上書きする', async () => {
     render(<PurchaseForm />);
 
