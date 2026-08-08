@@ -40,15 +40,32 @@ export interface ExtractResult {
 }
 
 /**
- * 有効な非空文字列なら trim して返す。それ以外は null。
+ * ラベル由来の文字列に含まれうる、インジェクションに使われがちな記号と制御文字。
+ * 正当な銘柄名・産地表記にはまず現れない文字だけを対象にし、
+ * アポストロフィ・&・丸括弧・年号などの商品名情報は削らない（Issue #65 の方針）
+ */
+// eslint-disable-next-line no-control-regex
+const DANGEROUS_CHARS = /[<>{}[\]"`;\\\u0000-\u001f\u007f]/g;
+
+/** タグ・偽 JSON などに使われる危険文字を除去する（下流の非 React 消費者への深層防御） */
+function stripDangerousChars(value: string): string {
+  return value.replace(DANGEROUS_CHARS, '');
+}
+
+/**
+ * 有効な非空文字列なら危険文字を除去して trim し返す。それ以外は null。
  * tool スキーマの maxLength はモデルへの指示にすぎないため、
  * 異常に長い出力はここで切り詰めて下流（GraphQL・フォーム・DynamoDB）に流さない
  */
 function asTrimmedString(value: unknown, maxLength: number): string | null {
-  if (typeof value === 'string' && value.trim().length > 0) {
-    return value.trim().slice(0, maxLength);
+  if (typeof value !== 'string') {
+    return null;
   }
-  return null;
+  const sanitized = stripDangerousChars(value).trim();
+  if (sanitized.length === 0) {
+    return null;
+  }
+  return sanitized.slice(0, maxLength);
 }
 
 /** 銘柄名の最大長（tool スキーマの maxLength と揃える） */
@@ -60,9 +77,15 @@ const REGION_MAX_LENGTH = 100;
 /** rawTexts（デバッグ用）に入れる文字列値の上限 */
 const RAW_TEXT_FIELD_MAX_LENGTH = 300;
 
-/** rawTexts 用に文字列値を切り詰める（異常に長いモデル出力をそのまま返さない） */
+/**
+ * rawTexts 用に文字列値を危険文字除去 + 切り詰めする。
+ * 検証前のモデル出力をそのまま返すとインジェクション文字列の到達確認経路になるため、
+ * 採用値（asTrimmedString）と同じサニタイズをデバッグ値にも適用する
+ */
 function forDebug(value: unknown): unknown {
-  return typeof value === 'string' ? value.slice(0, RAW_TEXT_FIELD_MAX_LENGTH) : value;
+  return typeof value === 'string'
+    ? stripDangerousChars(value).slice(0, RAW_TEXT_FIELD_MAX_LENGTH)
+    : value;
 }
 
 /** SakeCategory 列挙値として有効なら返す。それ以外は null */
