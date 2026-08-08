@@ -93,6 +93,62 @@ describe('AuthStack', () => {
     });
   });
 
+  // Issue #66: 新規ユーザー登録の Slack 通知
+  describe('新規登録の通知', () => {
+    /** Fn::Join の静的な文字列部分だけを繋ぐ（トークンは無視する） */
+    function flattenJoin(value: unknown): string {
+      if (typeof value === 'string') return value;
+      const join = (value as { 'Fn::Join'?: [string, unknown[]] })?.['Fn::Join'];
+      if (!join) return JSON.stringify(value);
+      const [separator, parts] = join;
+      return parts.map((part) => (typeof part === 'string' ? part : '')).join(separator);
+    }
+
+    it('サインアップ確認後に通知 Lambda が呼ばれる', () => {
+      template.hasResourceProperties('AWS::Cognito::UserPool', {
+        LambdaConfig: {
+          PostConfirmation: Match.anyValue(),
+        },
+      });
+    });
+
+    it('通知 Lambda はアラートトピックの ARN を名前規約で受け取る', () => {
+      const functions = template.findResources('AWS::Lambda::Function', {
+        Properties: { FunctionName: 'dev-sakekasu-signup-notifier' },
+      });
+      expect(Object.keys(functions)).toHaveLength(1);
+
+      const variables = Object.values(functions)[0].Properties.Environment.Variables;
+      expect(variables.ENV_NAME).toBe('dev');
+      expect(flattenJoin(variables.TOPIC_ARN)).toContain(':dev-sakekasu-alerts');
+    });
+
+    it('通知 Lambda の SNS 送信先はアラートトピックだけに絞る', () => {
+      const policies = template.findResources('AWS::IAM::Policy');
+      const statements = Object.values(policies).flatMap(
+        (policy) => policy.Properties.PolicyDocument.Statement as unknown[],
+      );
+      const publish = statements.find(
+        (statement) => (statement as { Action?: string }).Action === 'sns:Publish',
+      ) as { Resource: unknown } | undefined;
+
+      expect(publish).toBeDefined();
+      expect(flattenJoin(publish!.Resource)).toContain(':dev-sakekasu-alerts');
+    });
+
+    it('通知の失敗をメトリクスに起こしている（アラームは監視スタック側）', () => {
+      template.hasResourceProperties('AWS::Logs::MetricFilter', {
+        FilterPattern: '{ $.level = "ERROR" && $.action = "notifySignup" }',
+        MetricTransformations: [
+          Match.objectLike({
+            MetricNamespace: 'dev-sakekasu',
+            MetricName: 'SignupNotifyFailCount',
+          }),
+        ],
+      });
+    });
+  });
+
   // Requirements 2.7: CloudFormation 出力
   it('UserPoolId の CfnOutput が存在する', () => {
     template.hasOutput('UserPoolId', {});

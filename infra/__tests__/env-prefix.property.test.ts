@@ -19,7 +19,13 @@ import { ApiStack } from '../lib/api-stack.js';
 describe('Property 1: 環境名がリソース名プレフィックスに反映される', () => {
   const envNameArb = fc.constantFrom('dev', 'staging', 'prod');
 
-  it('UserPool 名に環境名プレフィックスが含まれる', () => {
+  // 環境名は3種類しかないため、20回も引けば全値をほぼ確実に踏む。
+  // AuthStack が Lambda を持つようになり synth ごとに esbuild が走るので、
+  // 100回のままだと既定の5秒に収まらない
+  const numRuns = 20;
+  const timeout = 120_000;
+
+  it('UserPool 名に環境名プレフィックスが含まれる', { timeout }, () => {
     fc.assert(
       fc.property(envNameArb, (envName) => {
         const app = new cdk.App();
@@ -32,11 +38,11 @@ describe('Property 1: 環境名がリソース名プレフィックスに反映�
           UserPoolName: `${envName}-sakekasu-userpool`,
         });
       }),
-      { numRuns: 100 },
+      { numRuns },
     );
   });
 
-  it('UserPoolClient 名に環境名プレフィックスが含まれる', () => {
+  it('UserPoolClient 名に環境名プレフィックスが含まれる', { timeout }, () => {
     fc.assert(
       fc.property(envNameArb, (envName) => {
         const app = new cdk.App();
@@ -49,11 +55,11 @@ describe('Property 1: 環境名がリソース名プレフィックスに反映�
           ClientName: `${envName}-sakekasu-client`,
         });
       }),
-      { numRuns: 100 },
+      { numRuns },
     );
   });
 
-  it('DynamoDB テーブル名に環境名プレフィックスが含まれる', () => {
+  it('DynamoDB テーブル名に環境名プレフィックスが含まれる', { timeout }, () => {
     fc.assert(
       fc.property(envNameArb, (envName) => {
         const app = new cdk.App();
@@ -76,7 +82,7 @@ describe('Property 1: 環境名がリソース名プレフィックスに反映�
           TableName: `${envName}-sakekasu-drinking-records`,
         });
       }),
-      { numRuns: 100 },
+      { numRuns },
     );
   });
 });
