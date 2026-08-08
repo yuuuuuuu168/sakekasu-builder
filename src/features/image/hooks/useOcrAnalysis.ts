@@ -5,12 +5,21 @@ import type { SakeCategory } from '@/features/purchase/types';
 
 const client = generateClient();
 
+/** 項目ごとの確信度（0.0〜1.0）。低確信の項目は「要確認」表示に使う */
+export interface OcrFieldConfidence {
+  sakeName: number;
+  category: number;
+  region: number;
+  alcoholPercentage: number;
+}
+
 export interface OcrResult {
   sakeName: string | null;
   category: SakeCategory | null;
   region: string | null;
   alcoholPercentage: number | null;
   confidence: number;
+  fieldConfidence: OcrFieldConfidence;
   rawTexts: string[];
 }
 
