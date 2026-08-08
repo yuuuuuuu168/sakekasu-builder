@@ -134,6 +134,12 @@ export const analyzeSakeLabel = /* GraphQL */ `
       region
       alcoholPercentage
       confidence
+      fieldConfidence {
+        sakeName
+        category
+        region
+        alcoholPercentage
+      }
       rawTexts
     }
   }
