@@ -4,9 +4,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { SignInForm } from './SignInForm';
 import { SignUpForm } from './SignUpForm';
 import { ConfirmSignUpForm } from './ConfirmSignUpForm';
+import { TotpChallengeForm } from './TotpChallengeForm';
 
 /** 認証画面の表示状態 */
-type AuthView = 'signIn' | 'signUp' | 'confirmSignUp';
+type AuthView = 'signIn' | 'signUp' | 'confirmSignUp' | 'totpChallenge';
 
 /**
  * 認証ページコンテナ
@@ -38,11 +39,17 @@ export function AuthPage() {
     setView('signIn');
   }, []);
 
+  /** MFA 有効な利用者のサインイン時に TOTP コード入力画面へ遷移 */
+  const handleNeedTotp = useCallback(() => {
+    setView('totpChallenge');
+  }, []);
+
   /** 現在のビューに応じたタイトル */
   const title = {
     signIn: 'サインイン',
     signUp: 'アカウント作成',
     confirmSignUp: 'メール確認',
+    totpChallenge: '二段階認証',
   }[view];
 
   return (
@@ -67,7 +74,11 @@ export function AuthPage() {
               <SignInForm
                 onSwitchToSignUp={handleSwitchToSignUp}
                 onNeedConfirmation={handleNeedConfirmation}
+                onNeedTotp={handleNeedTotp}
               />
+            )}
+            {view === 'totpChallenge' && (
+              <TotpChallengeForm onBackToSignIn={handleSwitchToSignIn} />
             )}
             {view === 'signUp' && (
               <SignUpForm

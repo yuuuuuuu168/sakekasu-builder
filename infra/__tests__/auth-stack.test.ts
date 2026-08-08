@@ -51,6 +51,21 @@ describe('AuthStack', () => {
     });
   });
 
+  // Issue #70: MFA は任意加入の TOTP のみ
+  describe('MFA', () => {
+    it('UserPool が MFA を任意加入にしている（必須だと既存利用者とカナリアが締め出される）', () => {
+      template.hasResourceProperties('AWS::Cognito::UserPool', {
+        MfaConfiguration: 'OPTIONAL',
+      });
+    });
+
+    it('第二要素は TOTP のみ（SMS は電話番号未収集のため使わない）', () => {
+      template.hasResourceProperties('AWS::Cognito::UserPool', {
+        EnabledMfas: ['SOFTWARE_TOKEN_MFA'],
+      });
+    });
+  });
+
   // Requirements 2.4: UserPool Client が SRP 認証フローを有効化している
   it('UserPoolClient が SRP 認証フローを有効化している', () => {
     template.hasResourceProperties('AWS::Cognito::UserPoolClient', {

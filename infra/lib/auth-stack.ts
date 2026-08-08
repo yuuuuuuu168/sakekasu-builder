@@ -55,6 +55,14 @@ export class AuthStack extends cdk.Stack {
         requireDigits: true,
         requireSymbols: true,
       },
+      // MFA は任意加入（Issue #70）。必須にすると既存利用者と監視カナリアが
+      // 次回サインインで MFA 登録を強制されて締め出されるため、OPTIONAL に留める。
+      // SMS は電話番号を収集しておらず、SIM スワップ耐性でも TOTP に劣るので使わない
+      mfa: cognito.Mfa.OPTIONAL,
+      mfaSecondFactor: {
+        sms: false,
+        otp: true,
+      },
       userVerification: {
         emailSubject: 'sakekasu-builder 確認コード',
         emailBody: 'あなたの確認コードは {####} です。',

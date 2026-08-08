@@ -8,6 +8,7 @@ import {
 } from 'react';
 import {
   signIn as amplifySignIn,
+  confirmSignIn as amplifyConfirmSignIn,
   signUp as amplifySignUp,
   confirmSignUp as amplifyConfirmSignUp,
   signOut as amplifySignOut,
@@ -24,12 +25,18 @@ export interface AuthUser {
   email: string;
 }
 
+/** サインインの結果。MFA 有効な利用者は TOTP コードの入力が続きに必要になる */
+export interface SignInResult {
+  requiresTotp: boolean;
+}
+
 /** 認証コンテキストの値 */
 export interface AuthContextValue {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<SignInResult>;
+  confirmSignInWithTotp: (code: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   confirmSignUp: (email: string, code: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -59,8 +66,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setIsLoading(false));
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    await amplifySignIn({ username: email, password });
+  const signIn = useCallback(async (email: string, password: string): Promise<SignInResult> => {
+    const { isSignedIn, nextStep } = await amplifySignIn({ username: email, password });
+
+    // MFA を有効にしている利用者は、ここではまだサインインが完了していない。
+    // TOTP コードを confirmSignInWithTotp で送るまで user は立てない
+    if (nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_TOTP_CODE') {
+      return { requiresTotp: true };
+    }
+
+    if (!isSignedIn) {
+      // MFA 必須化など、想定していないチャレンジが来たときに
+      // 未サインインのまま画面へ進めてしまわないよう明示的に落とす
+      throw new Error(`未対応のサインインステップです: ${nextStep.signInStep}`);
+    }
+
+    const authUser = await fetchAuthUser();
+    setUser(authUser);
+    return { requiresTotp: false };
+  }, []);
+
+  const confirmSignInWithTotp = useCallback(async (code: string) => {
+    const { isSignedIn } = await amplifyConfirmSignIn({ challengeResponse: code });
+    if (!isSignedIn) {
+      throw new Error('TOTP コードの検証後もサインインが完了しませんでした');
+    }
     const authUser = await fetchAuthUser();
     setUser(authUser);
   }, []);
@@ -98,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticated: user !== null,
     isLoading,
     signIn,
+    confirmSignInWithTotp,
     signUp,
     confirmSignUp,
     signOut,

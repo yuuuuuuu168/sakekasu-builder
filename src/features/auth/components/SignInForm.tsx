@@ -11,9 +11,11 @@ const MotionButton = motion.create(Button);
 interface SignInFormProps {
   onSwitchToSignUp: () => void;
   onNeedConfirmation: (email: string) => void;
+  /** MFA 有効な利用者の TOTP コード入力画面へ遷移する */
+  onNeedTotp: () => void;
 }
 
-export function SignInForm({ onSwitchToSignUp, onNeedConfirmation }: SignInFormProps) {
+export function SignInForm({ onSwitchToSignUp, onNeedConfirmation, onNeedTotp }: SignInFormProps) {
   const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,7 +28,11 @@ export function SignInForm({ onSwitchToSignUp, onNeedConfirmation }: SignInFormP
     setIsSubmitting(true);
 
     try {
-      await signIn(email, password);
+      const { requiresTotp } = await signIn(email, password);
+      if (requiresTotp) {
+        onNeedTotp();
+        return;
+      }
     } catch (err: unknown) {
       const errorName = (err as { name?: string })?.name ?? '';
 

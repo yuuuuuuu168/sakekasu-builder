@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 const amplifySignOut = vi.fn().mockResolvedValue(undefined);
 vi.mock('aws-amplify/auth', () => ({
   signIn: vi.fn(),
+  confirmSignIn: vi.fn(),
   signUp: vi.fn(),
   confirmSignUp: vi.fn(),
   signOut: () => amplifySignOut(),
