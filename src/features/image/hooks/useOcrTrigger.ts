@@ -45,11 +45,12 @@ export function useOcrTrigger(
     for (const file of imageUpload.imageFiles ?? []) {
       analyzedFilesRef.current.add(fileSignature(file));
     }
-    setHasAnalyzed(true);
 
     // 選択中の全画像（表・裏ラベルなど）をアップロードしてまとめて解析する
     const keys = await imageUpload.preUploadImages(recordType);
     if (keys.length === 0) return;
+    // アップロードに失敗したときはボタンを「再読み取り」表記にしない（読み取りは未実施のため）
+    setHasAnalyzed(true);
     const result = await analyzeImage(keys);
     if (result?.sakeName) {
       onOcrDetected(

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { format, parse } from 'date-fns';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -43,17 +43,21 @@ export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: Purchas
     imageUpload,
   } = usePurchaseForm({ recordId, initialData });
 
+  // ユーザーが手動でカテゴリを選択したか（自動OCRで選択を上書きしないための追跡）
+  const categoryTouchedRef = useRef(false);
+
   const { handleOcrTrigger, isAnalyzing, ocrMessage, resetOcr, hasAnalyzed } = useOcrTrigger(
     imageUpload,
     'purchase',
     (info, { isAuto }) => {
-      // 自動実行では入力済みの銘柄名を上書きしない（手動の再読み取りは上書きする）
+      // 自動実行では入力済みの銘柄名・選択済みのカテゴリを上書きしない（手動の再読み取りは上書きする）
       if (!isAuto || formData.sakeName.trim() === '') {
         handleChange('sakeName', info.sakeName);
       }
-      if (info.category) {
+      if (info.category && (!isAuto || !categoryTouchedRef.current)) {
         handleChange('category', info.category);
       }
+      // メモは既存の入力を消さずに産地・度数の行を追記する（重複追記は appendLabelInfoToMemo 側で防止）
       handleChange('memo', appendLabelInfoToMemo(formData.memo, info));
     },
   );
@@ -67,6 +71,9 @@ export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: Purchas
     if (!submitResult) return;
     if (submitResult.success) {
       toast.success(isEditMode ? '更新が完了しました' : '登録が完了しました');
+      // フォームリセットに合わせてOCRの解析済み管理も初期化する（同じ画像の再登録で自動OCRが動くように）
+      categoryTouchedRef.current = false;
+      resetOcr();
       onSubmitSuccess?.();
     } else {
       toast.error(
@@ -76,7 +83,7 @@ export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: Purchas
             : '登録に失敗しました。もう一度お試しください'),
       );
     }
-  }, [submitResult, onSubmitSuccess, isEditMode]);
+  }, [submitResult, onSubmitSuccess, isEditMode, resetOcr]);
 
   const selectedDate = formData.purchaseDate
     ? parse(formData.purchaseDate, 'yyyy-MM-dd', new Date())
@@ -207,7 +214,12 @@ export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: Purchas
       <FormField label="カテゴリ" error={errors.category} required>
         <CategorySelect
           value={formData.category}
-          onChange={(val) => { if (val !== null) handleChange('category', val); }}
+          onChange={(val) => {
+            if (val !== null) {
+              categoryTouchedRef.current = true;
+              handleChange('category', val);
+            }
+          }}
           onBlur={() => handleBlur('category')}
         />
       </FormField>
