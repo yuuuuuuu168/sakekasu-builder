@@ -43,11 +43,14 @@ export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: Purchas
     imageUpload,
   } = usePurchaseForm({ recordId, initialData });
 
-  const { handleOcrTrigger, isAnalyzing, ocrMessage, resetOcr } = useOcrTrigger(
+  const { handleOcrTrigger, isAnalyzing, ocrMessage, resetOcr, hasAnalyzed } = useOcrTrigger(
     imageUpload,
     'purchase',
-    (info) => {
-      handleChange('sakeName', info.sakeName);
+    (info, { isAuto }) => {
+      // 自動実行では入力済みの銘柄名を上書きしない（手動の再読み取りは上書きする）
+      if (!isAuto || formData.sakeName.trim() === '') {
+        handleChange('sakeName', info.sakeName);
+      }
       if (info.category) {
         handleChange('category', info.category);
       }
@@ -119,6 +122,7 @@ export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: Purchas
             isOcrAnalyzing={isAnalyzing}
             onOcrTrigger={handleOcrTrigger}
             ocrMessage={ocrMessage}
+            hasOcrRun={hasAnalyzed}
           />
         </FormField>
       )}
