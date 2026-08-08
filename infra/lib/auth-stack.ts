@@ -83,8 +83,14 @@ export class AuthStack extends cdk.Stack {
       // 画面の分岐に使っている例外は変わらないことを実機で確認済み
       // （未確認利用者は UserNotConfirmedException、サインアップ済みは
       // UsernameExistsException、確認コード誤りは CodeMismatchException のまま）。
-      // 変わるのは存在しない利用者の UserNotFoundException → NotAuthorizedException だけで、
-      // これは「メールアドレスまたはパスワードが正しくありません」に流れて表示も適切になる
+      // 丸められるのは利用者の存在が漏れる応答：
+      // ・存在しない利用者: UserNotFoundException → NotAuthorizedException
+      // ・管理者リセット中（RESET_REQUIRED）: PasswordResetRequiredException → NotAuthorizedException
+      //   （SignInForm の PasswordResetRequiredException 分岐は本設定が外れたときの保険）
+      // ・ForgotPassword: 存在しない利用者にも疑似的な CodeDeliveryDetails を返す
+      // サインインはどれも「メールアドレスまたはパスワードが正しくありません」に流れ、
+      // パスワード再設定はコード送信済みと同じ表示になる。
+      // https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-managing-errors.html
       preventUserExistenceErrors: true,
       accessTokenValidity: cdk.Duration.hours(1),
       refreshTokenValidity: cdk.Duration.days(30),
