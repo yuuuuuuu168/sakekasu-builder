@@ -442,7 +442,9 @@ def _normalize_enum(value: Optional[str], valid: frozenset, label: str):
     if not normalized:
         return None, None
     if normalized not in valid:
-        return None, f"{label} が不正です: {value}。有効な値: {', '.join(sorted(valid))}"
+        # 不正値をエラー文へそのまま埋め込むと、無害化を通らない文字列が
+        # ツール結果として LLM 文脈に反射するため、値は返さず有効値だけ示す
+        return None, f"{label} が不正です。有効な値: {', '.join(sorted(valid))}"
     return normalized, None
 
 
@@ -535,12 +537,13 @@ def _build_tools(owner_sub: str) -> list:
         if cat_err:
             return {"error": cat_err}
         if min_rating is not None:
-            # bool は int のサブクラスなので明示的に弾く
+            # bool は int のサブクラスなので明示的に弾く。
+            # 受け取った値はエラー文に反射しない（_normalize_enum と同じ理由）
             if isinstance(min_rating, bool) or not isinstance(min_rating, int):
-                return {"error": f"min_rating は整数で指定してください: {min_rating}"}
+                return {"error": "min_rating は整数で指定してください"}
             if not _RATING_MIN <= min_rating <= _RATING_MAX:
                 return {
-                    "error": f"min_rating は {_RATING_MIN}〜{_RATING_MAX} で指定してください: {min_rating}"
+                    "error": f"min_rating は {_RATING_MIN}〜{_RATING_MAX} の整数で指定してください"
                 }
 
         try:
