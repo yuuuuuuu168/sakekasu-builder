@@ -32,6 +32,8 @@ export interface ImageUploadAreaProps {
   onOcrTrigger?: () => void;
   /** OCR 結果メッセージ（成功/エラー） */
   ocrMessage?: { text: string; variant: 'success' | 'error' } | null;
+  /** OCR を一度でも実行したか（自動実行後はボタンを「再読み取り」表記にする） */
+  hasOcrRun?: boolean;
   /** 最大画像数 */
   maxImages?: number;
 }
@@ -53,6 +55,7 @@ export function ImageUploadArea({
   isOcrAnalyzing = false,
   onOcrTrigger,
   ocrMessage = null,
+  hasOcrRun = false,
   maxImages = 5,
 }: ImageUploadAreaProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -184,7 +187,7 @@ export function ImageUploadArea({
               <span>読み取り中...</span>
             </>
           ) : (
-            <span>銘柄名を読み取る</span>
+            <span>{hasOcrRun ? 'ラベルを再読み取り' : '銘柄名を読み取る'}</span>
           )}
         </button>
       )}
