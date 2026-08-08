@@ -583,6 +583,10 @@ def _build_history(raw) -> list:
         text = _neutralize_text(content[:MAX_HISTORY_MESSAGE_LENGTH])
         if not text or not text.strip():
             continue
+        # NFKC 正規化・エンティティ展開は文字数を増やしうる（合字 U+FDFA が
+        # 18 文字に展開される等）ため、prompt と同様に展開後の長さでも制限する。
+        # 破棄ではなく切り詰めにするのは、会話の連続性を保つため
+        text = text[:MAX_HISTORY_MESSAGE_LENGTH]
 
         messages.append({"role": role, "content": [{"text": text}]})
 
