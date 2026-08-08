@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, ShieldCheck, ShieldOff, X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -12,15 +12,18 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/features/auth/AuthContext';
+import { TOTP_CODE_PATTERN } from '@/features/auth/validation';
 
 /**
  * ダイアログ内の表示状態
  * - loading: 現在の MFA 設定を取得中
+ * - error: 現在の設定を取得できなかった（操作ボタンを出さない）
  * - disabled: MFA 未設定（有効化ボタンを表示）
  * - setup: QR コードと確認コード入力を表示中
  * - enabled: MFA 設定済み（解除ボタンを表示）
+ * - confirmDisable: 解除前の確認を表示中
  */
-type MfaView = 'loading' | 'disabled' | 'setup' | 'enabled';
+type MfaView = 'loading' | 'error' | 'disabled' | 'setup' | 'enabled' | 'confirmDisable';
 
 interface MfaSettingsDialogProps {
   open: boolean;
@@ -40,10 +43,7 @@ export function MfaSettingsDialog({ open, onClose }: MfaSettingsDialogProps) {
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 開くたびに現在の設定を取り直す（別端末で変更されていても正しく表示する）
-  useEffect(() => {
-    if (!open) return;
-
+  const loadPreference = useCallback(() => {
     setView('loading');
     setError('');
     setCode('');
@@ -53,10 +53,25 @@ export function MfaSettingsDialog({ open, onClose }: MfaSettingsDialogProps) {
         setView(preference.enabled?.includes('TOTP') ? 'enabled' : 'disabled');
       })
       .catch(() => {
-        setView('disabled');
-        setError('現在の設定を取得できませんでした。通信環境をご確認ください');
+        // 取得に失敗したとき「未設定」に倒すと、設定済みの利用者が再登録に進んで
+        // 既存の認証アプリ登録を上書きしてしまう。判別できない間は
+        // 操作ボタンを出さないエラー表示に留める
+        setView('error');
       });
-  }, [open]);
+  }, []);
+
+  // 開くたびに現在の設定を取り直す（別端末で変更されていても正しく表示する）
+  useEffect(() => {
+    if (!open) {
+      // 共有シークレットは表示が終わったら state に残さない。
+      // ダイアログを閉じた後もセッション中ずっと保持していると、
+      // XSS が混入したときに読み出せる範囲が広がる
+      setSetupUri('');
+      setSharedSecret('');
+      return;
+    }
+    loadPreference();
+  }, [open, loadPreference]);
 
   /** TOTP の登録を開始し、QR コードを表示する */
   const handleStartSetup = async () => {
@@ -80,6 +95,13 @@ export function MfaSettingsDialog({ open, onClose }: MfaSettingsDialogProps) {
   const handleVerify = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // 形式外の入力を Cognito に送ると検証の試行回数だけを消費する
+    if (!TOTP_CODE_PATTERN.test(code)) {
+      setError('確認コードは 6 桁の数字で入力してください');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       await verifyTOTPSetup({ code });
@@ -87,6 +109,9 @@ export function MfaSettingsDialog({ open, onClose }: MfaSettingsDialogProps) {
       // サインイン時にコードを求められるようになる
       await updateMFAPreference({ totp: 'PREFERRED' });
       setCode('');
+      // 登録が済んだ共有シークレットを持ち続けない（閉じるときと同じ理由）
+      setSetupUri('');
+      setSharedSecret('');
       setView('enabled');
     } catch (err: unknown) {
       const errorName = (err as { name?: string })?.name ?? '';
@@ -155,6 +180,21 @@ export function MfaSettingsDialog({ open, onClose }: MfaSettingsDialogProps) {
             {view === 'loading' && (
               <div className="flex items-center justify-center py-8" data-testid="mfa-loading">
                 <Loader2 className="size-6 animate-spin text-muted-foreground" />
+              </div>
+            )}
+
+            {view === 'error' && (
+              <div className="space-y-4" data-testid="mfa-fetch-error-view">
+                <p className="text-sm text-muted-foreground">
+                  現在の設定を取得できませんでした。通信環境をご確認のうえ、再試行してください。
+                </p>
+                <Button
+                  onClick={loadPreference}
+                  className="w-full h-10 font-semibold bg-gold-wa text-white hover:bg-gold-wa/80"
+                  data-testid="mfa-retry"
+                >
+                  再試行
+                </Button>
               </div>
             )}
 
@@ -256,11 +296,32 @@ export function MfaSettingsDialog({ open, onClose }: MfaSettingsDialogProps) {
                   機種変更などで認証アプリを使えなくなる前に、解除してから移行してください。
                 </p>
                 <Button
+                  onClick={() => {
+                    setError('');
+                    setView('confirmDisable');
+                  }}
+                  variant="destructive"
+                  className="w-full h-10 font-semibold"
+                  data-testid="mfa-disable"
+                >
+                  二段階認証を解除する
+                </Button>
+              </div>
+            )}
+
+            {view === 'confirmDisable' && (
+              <div className="space-y-4" data-testid="mfa-confirm-disable-view">
+                <p className="text-sm font-medium text-foreground">二段階認証を解除しますか？</p>
+                <p className="text-sm text-muted-foreground">
+                  解除すると、パスワードだけでサインインできる状態に戻ります。
+                  パスワードが漏れたときの守りがなくなるため、ご注意ください。
+                </p>
+                <Button
                   onClick={() => void handleDisable()}
                   disabled={isSubmitting}
                   variant="destructive"
                   className="w-full h-10 font-semibold"
-                  data-testid="mfa-disable"
+                  data-testid="mfa-disable-confirm"
                 >
                   {isSubmitting ? (
                     <>
@@ -268,8 +329,17 @@ export function MfaSettingsDialog({ open, onClose }: MfaSettingsDialogProps) {
                       解除中...
                     </>
                   ) : (
-                    '二段階認証を解除する'
+                    '解除する'
                   )}
+                </Button>
+                <Button
+                  onClick={() => setView('enabled')}
+                  disabled={isSubmitting}
+                  variant="outline"
+                  className="w-full h-10 font-semibold"
+                  data-testid="mfa-disable-cancel"
+                >
+                  やめる
                 </Button>
               </div>
             )}

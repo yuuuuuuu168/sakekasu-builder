@@ -8,6 +8,12 @@ export interface PasswordValidationResult {
   errors: string[];
 }
 
+/**
+ * TOTP 確認コードの形式（6桁の数字）
+ * HTML5 の pattern 属性は補助でしかないため、送信前に JS でも検証する
+ */
+export const TOTP_CODE_PATTERN = /^\d{6}$/;
+
 /** パスワード条件の定義（入力中のチェックリスト表示用） */
 export const PASSWORD_CONDITIONS = [
   { test: (p: string) => p.length >= 8, label: '8文字以上' },
