@@ -39,12 +39,30 @@ export interface ExtractResult {
   rawTexts: string[];
 }
 
-/** 有効な非空文字列なら trim して返す。それ以外は null */
-function asTrimmedString(value: unknown): string | null {
+/**
+ * 有効な非空文字列なら trim して返す。それ以外は null。
+ * tool スキーマの maxLength はモデルへの指示にすぎないため、
+ * 異常に長い出力はここで切り詰めて下流（GraphQL・フォーム・DynamoDB）に流さない
+ */
+function asTrimmedString(value: unknown, maxLength: number): string | null {
   if (typeof value === 'string' && value.trim().length > 0) {
-    return value.trim();
+    return value.trim().slice(0, maxLength);
   }
   return null;
+}
+
+/** 銘柄名の最大長（tool スキーマの maxLength と揃える） */
+const SAKE_NAME_MAX_LENGTH = 200;
+
+/** 産地の最大長（tool スキーマの maxLength と揃える） */
+const REGION_MAX_LENGTH = 100;
+
+/** rawTexts（デバッグ用）に入れる文字列値の上限 */
+const RAW_TEXT_FIELD_MAX_LENGTH = 300;
+
+/** rawTexts 用に文字列値を切り詰める（異常に長いモデル出力をそのまま返さない） */
+function forDebug(value: unknown): unknown {
+  return typeof value === 'string' ? value.slice(0, RAW_TEXT_FIELD_MAX_LENGTH) : value;
 }
 
 /** SakeCategory 列挙値として有効なら返す。それ以外は null */
@@ -97,14 +115,15 @@ const EMPTY_RESULT: Omit<ExtractResult, 'rawTexts'> = {
 /**
  * tool use の input からラベル情報を抽出する
  *
- * 1. input がオブジェクトでない場合は失敗扱い（全項目 null / confidence 0.0）
- * 2. 各フィールドを検証して取得（列挙値・数値範囲・空文字は null に落とす）
+ * 1. input がオブジェクトでない場合は失敗扱い（全項目 null / confidence 0.0 / rawTexts 空）
+ * 2. 各フィールドを検証して取得（列挙値・数値範囲・空文字は null に落とし、長さは切り詰める）
  * 3. 項目ごとの確信度を検証（項目が null なら 0.0、範囲外はクランプ）
- * 4. sakeName が読み取れない場合は他の項目も採用しない（従来挙動の維持）
+ * 4. sakeName が読み取れない場合は他の項目も採用せず、rawTexts も返さない
  *
- * rawTexts にはデバッグ用に「検証前のモデル報告値」を JSON で入れるが、
- * labelTexts（ラベル転記テキスト）は含めない。転記にはラベル由来の任意文字列が
- * 入りうるため、クライアントには返さない（プロンプトインジェクション・プライバシー対策）。
+ * rawTexts にはデバッグ用に「既知フィールドのモデル報告値（検証前）」をホワイトリスト方式で
+ * JSON にして入れる。labelTexts（ラベル転記テキスト）や想定外の追加フィールドは含めない。
+ * ラベル由来の任意文字列がクライアントに渡る経路を作らないため
+ * （プロンプトインジェクション・プライバシー対策）。
  */
 export function extractLabelInfo(toolInput: unknown): ExtractResult {
   if (toolInput === null || typeof toolInput !== 'object' || Array.isArray(toolInput)) {
@@ -113,18 +132,27 @@ export function extractLabelInfo(toolInput: unknown): ExtractResult {
 
   const input = toolInput as Record<string, unknown>;
 
-  // labelTexts を除いたモデル報告値（検証前）をデバッグ用に残す
-  const reported = { ...input };
-  delete reported.labelTexts;
-  const rawTexts = [JSON.stringify(reported)];
-
-  const sakeName = asTrimmedString(input.sakeName);
+  const sakeName = asTrimmedString(input.sakeName, SAKE_NAME_MAX_LENGTH);
   if (sakeName === null) {
-    return { ...EMPTY_RESULT, rawTexts };
+    return { ...EMPTY_RESULT, rawTexts: [] };
   }
 
+  // 既知フィールドのみをホワイトリスト方式で残す（想定外フィールドは含めない）
+  const rawTexts = [
+    JSON.stringify({
+      sakeName: forDebug(input.sakeName),
+      sakeNameConfidence: forDebug(input.sakeNameConfidence),
+      category: forDebug(input.category),
+      categoryConfidence: forDebug(input.categoryConfidence),
+      region: forDebug(input.region),
+      regionConfidence: forDebug(input.regionConfidence),
+      alcoholPercentage: forDebug(input.alcoholPercentage),
+      alcoholPercentageConfidence: forDebug(input.alcoholPercentageConfidence),
+    }),
+  ];
+
   const category = asCategory(input.category);
-  const region = asTrimmedString(input.region);
+  const region = asTrimmedString(input.region, REGION_MAX_LENGTH);
   const alcoholPercentage = asAlcoholPercentage(input.alcoholPercentage);
 
   const fieldConfidence: FieldConfidence = {

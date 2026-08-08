@@ -161,6 +161,43 @@ describe('extractLabelInfo: tool input からの抽出', () => {
     }
   });
 
+  it('sakeName が null の場合は rawTexts も返さない（非オブジェクト入力時と対称）', () => {
+    const result = extractLabelInfo({ ...validInput, sakeName: null });
+
+    expect(result.rawTexts).toEqual([]);
+  });
+
+  it('長すぎる sakeName / region は上限で切り詰められる', () => {
+    const result = extractLabelInfo({
+      ...validInput,
+      sakeName: 'あ'.repeat(500),
+      region: 'い'.repeat(500),
+    });
+
+    expect(result.sakeName).toHaveLength(200);
+    expect(result.region).toHaveLength(100);
+  });
+
+  it('スキーマにない想定外フィールドは rawTexts に含まれない（ホワイトリスト方式）', () => {
+    const result = extractLabelInfo({
+      ...validInput,
+      address: '山口県岩国市周東町獺越2167-4',
+      manufacturer: '旭酒造株式会社',
+    });
+
+    expect(result.rawTexts[0]).not.toContain('岩国市');
+    expect(result.rawTexts[0]).not.toContain('旭酒造');
+    expect(result.rawTexts[0]).not.toContain('address');
+  });
+
+  it('rawTexts 内の文字列値も上限で切り詰められる', () => {
+    const longRegion = 'う'.repeat(1000);
+    const result = extractLabelInfo({ ...validInput, region: longRegion });
+
+    expect(result.rawTexts[0]).not.toContain(longRegion);
+    expect(result.rawTexts[0]).toContain('う'.repeat(300));
+  });
+
   it('rawTexts にはモデル報告値が入るが labelTexts（転記テキスト）は含まれない', () => {
     const result = extractLabelInfo({
       ...validInput,

@@ -93,6 +93,23 @@ describe('Property 2: Confidence スコアの不変条件', () => {
           expect(result.region).toBeNull();
           expect(result.alcoholPercentage).toBeNull();
           expect(result.confidence).toBe(0.0);
+          expect(result.rawTexts).toEqual([]);
+        }
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  it('sakeName / region は常に最大長以内に収まる', () => {
+    fc.assert(
+      fc.property(arbitraryToolInput, (toolInput) => {
+        const result = extractLabelInfo(toolInput);
+
+        if (result.sakeName !== null) {
+          expect(result.sakeName.length).toBeLessThanOrEqual(200);
+        }
+        if (result.region !== null) {
+          expect(result.region.length).toBeLessThanOrEqual(100);
         }
       }),
       { numRuns: 200 },
