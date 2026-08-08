@@ -20,7 +20,6 @@ export interface OcrResult {
   alcoholPercentage: number | null;
   confidence: number;
   fieldConfidence: OcrFieldConfidence;
-  rawTexts: string[];
 }
 
 export interface UseOcrAnalysisReturn {

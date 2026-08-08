@@ -39,7 +39,6 @@ function buildResult(overrides: Partial<OcrResult>): OcrResult {
       region: 0.8,
       alcoholPercentage: 0.85,
     },
-    rawTexts: [],
     ...overrides,
   };
 }

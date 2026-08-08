@@ -29,7 +29,6 @@ describe('useOcrAnalysis', () => {
         analyzeSakeLabel: {
           sakeName: '獺祭',
           confidence: 0.95,
-          rawTexts: ['獺祭', '純米大吟醸'],
         },
       },
     });
@@ -54,7 +53,6 @@ describe('useOcrAnalysis', () => {
         analyzeSakeLabel: {
           sakeName: '獺祭',
           confidence: 0.9,
-          rawTexts: ['{"sakeName":"獺祭"}'],
         },
       },
     });
@@ -91,7 +89,6 @@ describe('useOcrAnalysis', () => {
     const expectedResult = {
       sakeName: '八海山',
       confidence: 0.88,
-      rawTexts: ['八海山', '特別本醸造', '720ml'],
     };
 
     mockGraphql.mockResolvedValueOnce({
@@ -116,7 +113,6 @@ describe('useOcrAnalysis', () => {
         analyzeSakeLabel: {
           sakeName: null,
           confidence: 0.0,
-          rawTexts: [],
         },
       },
     });
@@ -133,7 +129,6 @@ describe('useOcrAnalysis', () => {
     expect(result.current.ocrResult).toEqual({
       sakeName: null,
       confidence: 0.0,
-      rawTexts: [],
     });
   });
 
@@ -177,7 +172,6 @@ describe('useOcrAnalysis', () => {
         analyzeSakeLabel: {
           sakeName: '久保田',
           confidence: 0.9,
-          rawTexts: ['久保田'],
         },
       },
     });
@@ -225,7 +219,6 @@ describe('useOcrAnalysis', () => {
           analyzeSakeLabel: {
             sakeName: '黒霧島',
             confidence: 0.85,
-            rawTexts: ['黒霧島'],
           },
         },
       });
