@@ -143,217 +143,223 @@ export function MfaSettingsDialog({ open, onClose }: MfaSettingsDialogProps) {
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4"
+          className="fixed inset-0 z-[60] overflow-y-auto bg-black/50"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
           data-testid="mfa-dialog-overlay"
         >
-          <motion.div
-            className="w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-xl bg-background p-5 shadow-xl"
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="mfa-dialog-title"
-            data-testid="mfa-dialog"
-          >
-            {/* ヘッダー */}
-            <div className="mb-4 flex items-center justify-between">
-              <h2 id="mfa-dialog-title" className="text-lg font-bold text-foreground">
-                二段階認証（MFA）
-              </h2>
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/10"
-                aria-label="閉じる"
-                data-testid="mfa-dialog-close"
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-
-            {view === 'loading' && (
-              <div className="flex items-center justify-center py-8" data-testid="mfa-loading">
-                <Loader2 className="size-6 animate-spin text-muted-foreground" />
-              </div>
-            )}
-
-            {view === 'error' && (
-              <div className="space-y-4" data-testid="mfa-fetch-error-view">
-                <p className="text-sm text-muted-foreground">
-                  現在の設定を取得できませんでした。通信環境をご確認のうえ、再試行してください。
-                </p>
-                <Button
-                  onClick={loadPreference}
-                  className="w-full h-10 font-semibold bg-gold-wa text-white hover:bg-gold-wa/80"
-                  data-testid="mfa-retry"
+          {/* ダイアログ自身に max-h を付けて中央寄せすると、ソフトキーボードで
+              表示領域が縮んだときに上側（QR コード）が画面外へ切れてスクロールでも
+              届かなくなる。スクロールはオーバーレイ側に持たせ、内容が収まるときだけ
+              min-h-full の flex で中央に寄せる */}
+          <div className="flex min-h-full items-center justify-center px-4 py-6">
+            <motion.div
+              className="w-full max-w-sm rounded-xl bg-background p-5 shadow-xl"
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="mfa-dialog-title"
+              data-testid="mfa-dialog"
+            >
+              {/* ヘッダー */}
+              <div className="mb-4 flex items-center justify-between">
+                <h2 id="mfa-dialog-title" className="text-lg font-bold text-foreground">
+                  二段階認証（MFA）
+                </h2>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/10"
+                  aria-label="閉じる"
+                  data-testid="mfa-dialog-close"
                 >
-                  再試行
-                </Button>
+                  <X className="size-5" />
+                </button>
               </div>
-            )}
 
-            {view === 'disabled' && (
-              <div className="space-y-4" data-testid="mfa-disabled-view">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <ShieldOff className="size-5 shrink-0" />
-                  <span>二段階認証は設定されていません</span>
+              {view === 'loading' && (
+                <div className="flex items-center justify-center py-8" data-testid="mfa-loading">
+                  <Loader2 className="size-6 animate-spin text-muted-foreground" />
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  認証アプリ（Google Authenticator など）を使うと、パスワードが漏れても
-                  アカウントを守れます。
-                </p>
-                <Button
-                  onClick={() => void handleStartSetup()}
-                  disabled={isSubmitting}
-                  className="w-full h-10 font-semibold bg-gold-wa text-white hover:bg-gold-wa/80"
-                  data-testid="mfa-start-setup"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="size-4 animate-spin" />
-                      準備中...
-                    </>
-                  ) : (
-                    '設定を始める'
-                  )}
-                </Button>
-              </div>
-            )}
+              )}
 
-            {view === 'setup' && (
-              <form onSubmit={handleVerify} className="space-y-4" data-testid="mfa-setup-view">
-                <p className="text-sm text-muted-foreground">
-                  認証アプリで QR コードを読み取り、表示された 6 桁のコードを入力してください。
-                </p>
-
-                <div className="flex justify-center rounded-lg bg-white p-4">
-                  <QRCodeSVG value={setupUri} size={176} data-testid="mfa-qr-code" />
-                </div>
-
-                <details className="text-xs text-muted-foreground">
-                  <summary className="cursor-pointer select-none">
-                    QR コードを読み取れない場合
-                  </summary>
-                  <p className="mt-2">
-                    次のキーを認証アプリに手動で入力してください：
+              {view === 'error' && (
+                <div className="space-y-4" data-testid="mfa-fetch-error-view">
+                  <p className="text-sm text-muted-foreground">
+                    現在の設定を取得できませんでした。通信環境をご確認のうえ、再試行してください。
                   </p>
-                  <code className="mt-1 block break-all rounded bg-foreground/5 p-2" data-testid="mfa-secret">
-                    {sharedSecret}
-                  </code>
-                </details>
-
-                <div className="space-y-1.5">
-                  <label htmlFor="mfa-verify-code" className="text-sm font-medium text-foreground">
-                    確認コード
-                  </label>
-                  <Input
-                    id="mfa-verify-code"
-                    data-testid="mfa-verify-code"
-                    type="text"
-                    inputMode="numeric"
-                    pattern="\d{6}"
-                    maxLength={6}
-                    placeholder="123456"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    required
-                    autoComplete="one-time-code"
-                  />
+                  <Button
+                    onClick={loadPreference}
+                    className="w-full h-10 font-semibold bg-gold-wa text-white hover:bg-gold-wa/80"
+                    data-testid="mfa-retry"
+                  >
+                    再試行
+                  </Button>
                 </div>
+              )}
 
-                <Button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full h-10 font-semibold bg-gold-wa text-white hover:bg-gold-wa/80"
-                  data-testid="mfa-verify-submit"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="size-4 animate-spin" />
-                      確認中...
-                    </>
-                  ) : (
-                    '有効にする'
-                  )}
-                </Button>
-              </form>
-            )}
-
-            {view === 'enabled' && (
-              <div className="space-y-4" data-testid="mfa-enabled-view">
-                <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                  <ShieldCheck className="size-5 shrink-0" />
-                  <span>二段階認証が有効です</span>
+              {view === 'disabled' && (
+                <div className="space-y-4" data-testid="mfa-disabled-view">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <ShieldOff className="size-5 shrink-0" />
+                    <span>二段階認証は設定されていません</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    認証アプリ（Google Authenticator など）を使うと、パスワードが漏れても
+                    アカウントを守れます。
+                  </p>
+                  <Button
+                    onClick={() => void handleStartSetup()}
+                    disabled={isSubmitting}
+                    className="w-full h-10 font-semibold bg-gold-wa text-white hover:bg-gold-wa/80"
+                    data-testid="mfa-start-setup"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin" />
+                        準備中...
+                      </>
+                    ) : (
+                      '設定を始める'
+                    )}
+                  </Button>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  サインイン時に認証アプリの 6 桁コードが必要になります。
-                  機種変更などで認証アプリを使えなくなる前に、解除してから移行してください。
-                </p>
-                <Button
-                  onClick={() => {
-                    setError('');
-                    setView('confirmDisable');
-                  }}
-                  variant="destructive"
-                  className="w-full h-10 font-semibold"
-                  data-testid="mfa-disable"
-                >
-                  二段階認証を解除する
-                </Button>
-              </div>
-            )}
+              )}
 
-            {view === 'confirmDisable' && (
-              <div className="space-y-4" data-testid="mfa-confirm-disable-view">
-                <p className="text-sm font-medium text-foreground">二段階認証を解除しますか？</p>
-                <p className="text-sm text-muted-foreground">
-                  解除すると、パスワードだけでサインインできる状態に戻ります。
-                  パスワードが漏れたときの守りがなくなるため、ご注意ください。
-                </p>
-                <Button
-                  onClick={() => void handleDisable()}
-                  disabled={isSubmitting}
-                  variant="destructive"
-                  className="w-full h-10 font-semibold"
-                  data-testid="mfa-disable-confirm"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="size-4 animate-spin" />
-                      解除中...
-                    </>
-                  ) : (
-                    '解除する'
-                  )}
-                </Button>
-                <Button
-                  onClick={() => setView('enabled')}
-                  disabled={isSubmitting}
-                  variant="outline"
-                  className="w-full h-10 font-semibold"
-                  data-testid="mfa-disable-cancel"
-                >
-                  やめる
-                </Button>
-              </div>
-            )}
+              {view === 'setup' && (
+                <form onSubmit={handleVerify} className="space-y-4" data-testid="mfa-setup-view">
+                  <p className="text-sm text-muted-foreground">
+                    認証アプリで QR コードを読み取り、表示された 6 桁のコードを入力してください。
+                  </p>
 
-            {error && (
-              <p
-                className="mt-3 text-sm text-destructive"
-                role="alert"
-                data-testid="mfa-error"
-              >
-                {error}
-              </p>
-            )}
-          </motion.div>
+                  <div className="flex justify-center rounded-lg bg-white p-4">
+                    <QRCodeSVG value={setupUri} size={176} data-testid="mfa-qr-code" />
+                  </div>
+
+                  <details className="text-xs text-muted-foreground">
+                    <summary className="cursor-pointer select-none">
+                      QR コードを読み取れない場合
+                    </summary>
+                    <p className="mt-2">
+                      次のキーを認証アプリに手動で入力してください：
+                    </p>
+                    <code className="mt-1 block break-all rounded bg-foreground/5 p-2" data-testid="mfa-secret">
+                      {sharedSecret}
+                    </code>
+                  </details>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="mfa-verify-code" className="text-sm font-medium text-foreground">
+                      確認コード
+                    </label>
+                    <Input
+                      id="mfa-verify-code"
+                      data-testid="mfa-verify-code"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="\d{6}"
+                      maxLength={6}
+                      placeholder="123456"
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      required
+                      autoComplete="one-time-code"
+                    />
+                  </div>
+
+                  <Button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full h-10 font-semibold bg-gold-wa text-white hover:bg-gold-wa/80"
+                    data-testid="mfa-verify-submit"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin" />
+                        確認中...
+                      </>
+                    ) : (
+                      '有効にする'
+                    )}
+                  </Button>
+                </form>
+              )}
+
+              {view === 'enabled' && (
+                <div className="space-y-4" data-testid="mfa-enabled-view">
+                  <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                    <ShieldCheck className="size-5 shrink-0" />
+                    <span>二段階認証が有効です</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    サインイン時に認証アプリの 6 桁コードが必要になります。
+                    機種変更などで認証アプリを使えなくなる前に、解除してから移行してください。
+                  </p>
+                  <Button
+                    onClick={() => {
+                      setError('');
+                      setView('confirmDisable');
+                    }}
+                    variant="destructive"
+                    className="w-full h-10 font-semibold"
+                    data-testid="mfa-disable"
+                  >
+                    二段階認証を解除する
+                  </Button>
+                </div>
+              )}
+
+              {view === 'confirmDisable' && (
+                <div className="space-y-4" data-testid="mfa-confirm-disable-view">
+                  <p className="text-sm font-medium text-foreground">二段階認証を解除しますか？</p>
+                  <p className="text-sm text-muted-foreground">
+                    解除すると、パスワードだけでサインインできる状態に戻ります。
+                    パスワードが漏れたときの守りがなくなるため、ご注意ください。
+                  </p>
+                  <Button
+                    onClick={() => void handleDisable()}
+                    disabled={isSubmitting}
+                    variant="destructive"
+                    className="w-full h-10 font-semibold"
+                    data-testid="mfa-disable-confirm"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin" />
+                        解除中...
+                      </>
+                    ) : (
+                      '解除する'
+                    )}
+                  </Button>
+                  <Button
+                    onClick={() => setView('enabled')}
+                    disabled={isSubmitting}
+                    variant="outline"
+                    className="w-full h-10 font-semibold"
+                    data-testid="mfa-disable-cancel"
+                  >
+                    やめる
+                  </Button>
+                </div>
+              )}
+
+              {error && (
+                <p
+                  className="mt-3 text-sm text-destructive"
+                  role="alert"
+                  data-testid="mfa-error"
+                >
+                  {error}
+                </p>
+              )}
+            </motion.div>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>
