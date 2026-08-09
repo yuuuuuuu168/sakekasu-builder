@@ -7,8 +7,9 @@ interface ChatMessageListProps {
 
 const SUGGESTIONS = [
   '今夜は寒いから温めて飲みたい',
-  '焼き鳥に合うお酒ある？',
-  '開けたまま残ってるお酒は？',
+  '今夜すき焼きなんだけど何が合う？',
+  '★4だったあの酒が好きなら次は何？',
+  '獺祭ってどんなお酒？',
   '📷 棚の写真からこの中でおすすめある？',
 ];
 
@@ -20,7 +21,8 @@ function EmptyState() {
         🍶
       </span>
       <p className="text-sm text-gray-600 dark:text-gray-300">
-        手持ちのお酒から、今飲むならどれがいいか相談できます
+        在庫相談・料理とのペアリング・銘柄選び・お酒の知識まで相談できます。
+        話すうちに好みも覚えます
       </p>
       <ul className="space-y-1 text-xs text-gray-500 dark:text-gray-400">
         {SUGGESTIONS.map((s) => (
