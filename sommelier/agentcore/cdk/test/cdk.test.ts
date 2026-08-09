@@ -125,7 +125,7 @@ describe('好み学習用の AgentCore Memory', () => {
           UserPreferenceMemoryStrategy: Match.objectLike({
             // main.py 側の PREFERENCE_NAMESPACE_TEMPLATE と一致させること。
             // ずれると書き込みと読み出しが別の棚を指し、好みが引けなくなる
-            Namespaces: ['sommelier/preference/{actorId}'],
+            NamespaceTemplates: ['sommelier/preference/{actorId}'],
           }),
         },
       ],
@@ -151,27 +151,34 @@ describe('好み学習用の AgentCore Memory', () => {
   // actorId からサービス側が決める）条件キーも持たないため、条件を付けると
   // 常に不一致で全拒否になる。したがって「書き込み先を本人に限る」のは
   // preference_memory.py の actor_id 検証が唯一の砦になる。
-  test('読み出しは名前空間の条件つきで与える', () => {
+  //
+  // 経路の数そのものは版で変わる（alpha.45 で条件キー namespacePath が増え、
+  // 読み出しが2文に分かれた）。数を決め打ちにすると、増えただけで落ちる一方
+  // 減っても気づけないので、「届く経路がすべて閉じているか」を見る。
+  test('読み出しはどの経路も名前空間の条件つきで、好み記憶に閉じている', () => {
     const statements = statementsAllowing('bedrock-agentcore:RetrieveMemoryRecords');
-    expect(statements).toHaveLength(1);
-    expect(statements[0].Effect).toBe('Allow');
-    expect(statements[0].Condition).toEqual({
-      StringLike: {
-        'bedrock-agentcore:namespace': ['sommelier/preference/*'],
-      },
-    });
-    expect(statements[0].Resource).toEqual(PREFERENCE_MEMORY_ARN);
+    expect(statements.length).toBeGreaterThan(0);
+    for (const statement of statements) {
+      const conditions = Object.entries(statement.Condition?.StringLike ?? {});
+      expect(conditions.length).toBeGreaterThan(0);
+      for (const [key, value] of conditions) {
+        expect(key).toMatch(/^bedrock-agentcore:namespace/);
+        expect(value).toEqual(['sommelier/preference/*']);
+      }
+      expect(statement.Resource).toEqual(PREFERENCE_MEMORY_ARN);
+    }
   });
 
-  test('書き込みは条件なしだが、この記憶リソース1つに限られる', () => {
+  test('書き込みは条件なしだが、どの経路も好み記憶に閉じている', () => {
     const statements = statementsAllowing('bedrock-agentcore:CreateEvent');
-    expect(statements).toHaveLength(1);
-    expect(statements[0].Effect).toBe('Allow');
-    expect(statements[0].Resource).toEqual(PREFERENCE_MEMORY_ARN);
+    expect(statements.length).toBeGreaterThan(0);
+    for (const statement of statements) {
+      expect(statement.Resource).toEqual(PREFERENCE_MEMORY_ARN);
+    }
   });
 
-  // 上の2つは「その action に届く Statement が1つだけ」を見ている。
-  // ワイルドカードは展開して数えているので * や ? 経由でも数に出るが、
+  // 上の2つは「その action に届く経路がすべて好み記憶に閉じている」を見ている。
+  // ワイルドカードは展開して数えているので * や ? 経由の経路も対象に入るが、
   // 数え上げの網から外れる形（NotAction、組み込み関数）を疑わずに済むよう、
   // そもそもワイルドカードを書かせない側でも止めておく。
   test('action をワイルドカードで与えない', () => {
