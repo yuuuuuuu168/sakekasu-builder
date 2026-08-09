@@ -1,0 +1,9 @@
+{
+  "name": "devops-agent-webhook-lambda",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.800.0"
+  }
+}
