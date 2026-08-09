@@ -4,7 +4,8 @@ import {
   SOMMELIER_RUNTIME_QUALIFIER,
   SOMMELIER_RUNTIME_REGION,
 } from '../config';
-import type { SendToSommelier } from '../types';
+import type { ChatImagePayload, SendToSommelier } from '../types';
+import { MAX_CHAT_IMAGES } from './chatImages';
 import { SommelierError, isAbortError, toSommelierError } from './errors';
 
 /** AgentCore がセッション識別に使うヘッダー。33文字以上が必要 */
@@ -93,7 +94,7 @@ function parseDataLine(line: string): string | null {
  */
 export const runtimeSend: SendToSommelier = async function* (
   prompt,
-  { signal, history },
+  { signal, history, images },
 ) {
   const token = await getAccessToken();
 
@@ -104,6 +105,18 @@ export const runtimeSend: SendToSommelier = async function* (
     .slice(-MAX_HISTORY_MESSAGES)
     .map((m) => ({ role: m.role, content: m.content }));
 
+  const body: {
+    prompt: string;
+    history: { role: string; content: string }[];
+    images?: ChatImagePayload[];
+  } = { prompt, history: recentHistory };
+  if (images && images.length > 0) {
+    // ペイロードに必要なキーだけ載せる（プレビュー用 dataURL 等を送らない）
+    body.images = images
+      .slice(0, MAX_CHAT_IMAGES)
+      .map(({ format, data }) => ({ format, data }));
+  }
+
   let response: Response;
   try {
     response = await fetch(invocationUrl(), {
@@ -113,7 +126,7 @@ export const runtimeSend: SendToSommelier = async function* (
         Authorization: `Bearer ${token}`,
         [SESSION_HEADER]: getSessionId(),
       },
-      body: JSON.stringify({ prompt, history: recentHistory }),
+      body: JSON.stringify(body),
       signal,
     });
   } catch (err) {

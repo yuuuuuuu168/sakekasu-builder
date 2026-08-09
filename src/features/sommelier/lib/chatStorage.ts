@@ -33,8 +33,17 @@ export function loadMessages(userId: string): ChatMessage[] {
           ((m as ChatMessage).role === 'user' ||
             (m as ChatMessage).role === 'assistant'),
       )
-      // 受信途中の状態は復元しない（開いた直後にカーソルが残らないように）
-      .map(({ id, role, content, error }) => ({ id, role, content, error }));
+      // 受信途中の状態は復元しない（開いた直後にカーソルが残らないように）。
+      // 画像の実体（dataURL）は保存していないため、枚数だけ復元する
+      .map(({ id, role, content, error, imageCount }) => ({
+        id,
+        role,
+        content,
+        error,
+        ...(typeof imageCount === 'number' && imageCount > 0
+          ? { imageCount }
+          : {}),
+      }));
   } catch (err) {
     console.error('相談履歴の読み込みに失敗しました:', err);
     return [];
@@ -44,7 +53,19 @@ export function loadMessages(userId: string): ChatMessage[] {
 export function saveMessages(userId: string, messages: ChatMessage[]): void {
   if (!userId) return;
   try {
-    const recent = messages.slice(-MAX_STORED_MESSAGES);
+    // 添付画像の dataURL は保存しない（数 MB になり localStorage の
+    // 容量上限を食い潰すため）。復元時の表示用に枚数だけ残す
+    const recent = messages
+      .slice(-MAX_STORED_MESSAGES)
+      .map(({ id, role, content, error, images, imageCount }) => ({
+        id,
+        role,
+        content,
+        error,
+        ...(imageCount ?? images?.length
+          ? { imageCount: imageCount ?? images?.length }
+          : {}),
+      }));
     localStorage.setItem(storageKey(userId), JSON.stringify(recent));
   } catch (err) {
     // 容量超過などで保存できなくても会話は継続させる

@@ -9,6 +9,7 @@ const SUGGESTIONS = [
   '今夜は寒いから温めて飲みたい',
   '焼き鳥に合うお酒ある？',
   '開けたまま残ってるお酒は？',
+  '📷 棚の写真からこの中でおすすめある？',
 ];
 
 /** 会話が空のときに出す案内 */
@@ -69,6 +70,27 @@ export function ChatMessageList({ messages }: ChatMessageListProps) {
                   : 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100'
               }`}
             >
+              {message.images && message.images.length > 0 && (
+                <div
+                  className="mb-1 flex flex-wrap gap-1"
+                  data-testid="chat-message-images"
+                >
+                  {message.images.map((src, index) => (
+                    <img
+                      key={`${message.id}-img-${index}`}
+                      src={src}
+                      alt={`添付画像${index + 1}`}
+                      className="h-24 w-24 rounded-lg object-cover"
+                    />
+                  ))}
+                </div>
+              )}
+              {/* 復元した履歴は画像の実体を持たないため、枚数だけ示す */}
+              {!message.images?.length && message.imageCount ? (
+                <p className="mb-1 text-xs opacity-80" data-testid="chat-message-image-count">
+                  📷 画像{message.imageCount}枚を添付
+                </p>
+              ) : null}
               {message.content}
               {message.isStreaming && (
                 <span
