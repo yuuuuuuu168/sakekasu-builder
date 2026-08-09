@@ -5,6 +5,7 @@ import { ChatWindow } from './ChatWindow';
 import { useSommelierChat } from '../hooks/useSommelierChat';
 import { runtimeSend, resetSommelierSession } from '../lib/runtimeSend';
 import { useAuth } from '@/features/auth/AuthContext';
+import type { PreparedChatImage } from '../lib/chatImages';
 import type { SendToSommelier } from '../types';
 
 interface SommelierChatProps {
@@ -36,8 +37,8 @@ export function SommelierChat({
   const close = useCallback(() => setIsOpen(false), []);
 
   const handleSend = useCallback(
-    (prompt: string) => {
-      void sendMessage(prompt);
+    (prompt: string, images: PreparedChatImage[]) => {
+      void sendMessage(prompt, images);
     },
     [sendMessage],
   );

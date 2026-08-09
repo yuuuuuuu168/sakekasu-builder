@@ -93,6 +93,39 @@ describe('相談履歴の保存', () => {
     ]);
   });
 
+  it('添付画像の dataURL は保存せず、枚数だけ復元する', () => {
+    saveMessages('user-a', [
+      {
+        id: 'm1',
+        role: 'user',
+        content: 'この中でおすすめある？',
+        images: ['data:image/jpeg;base64,xxxx', 'data:image/png;base64,yyyy'],
+        imageCount: 2,
+      },
+    ]);
+
+    // localStorage に画像の実体が入っていないこと（容量を食い潰さない）
+    const raw = localStorage.getItem('sakekasu:sommelier-chat:user-a') ?? '';
+    expect(raw).not.toContain('data:image');
+
+    const loaded = loadMessages('user-a');
+    expect(loaded[0].images).toBeUndefined();
+    expect(loaded[0].imageCount).toBe(2);
+  });
+
+  it('imageCount がなくても images の枚数から補完して保存する', () => {
+    saveMessages('user-a', [
+      {
+        id: 'm1',
+        role: 'user',
+        content: '',
+        images: ['data:image/jpeg;base64,xxxx'],
+      },
+    ]);
+
+    expect(loadMessages('user-a')[0].imageCount).toBe(1);
+  });
+
   it('削除すると履歴が空になる', () => {
     saveMessages('user-a', [message('m1', '相談')]);
     clearMessages('user-a');
