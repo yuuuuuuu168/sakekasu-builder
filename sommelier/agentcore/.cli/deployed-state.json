@@ -9,7 +9,14 @@
             "roleArn": "arn:aws:iam::232791540685:role/AgentCore-sommelier-dev-ApplicationAgentSommelierRu-nIJDH6PrQn9r"
           }
         },
-        "stackName": "AgentCore-sommelier-dev"
+        "memories": {
+          "preference": {
+            "memoryId": "sommelier_preference-MF60B0B2hE",
+            "memoryArn": "arn:aws:bedrock-agentcore:ap-northeast-1:232791540685:memory/sommelier_preference-MF60B0B2hE"
+          }
+        },
+        "stackName": "AgentCore-sommelier-dev",
+        "deployHash": "b6912724f68077be"
       }
     }
   }
