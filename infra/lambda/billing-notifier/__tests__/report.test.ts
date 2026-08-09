@@ -6,24 +6,27 @@ import { describe, it, expect } from 'vitest';
  */
 process.env.WEBHOOK_PARAMETER_NAME = '/test/webhook';
 process.env.TARGET_ACCOUNTS = JSON.stringify([
-  { id: '111111111111', label: '親アカウント（管理）' },
   { id: '222222222222', label: 'sakekasu-builder（アプリ本体）' },
 ]);
 
-const { resolvePeriods, aggregateByAccount, formatUsd, buildBlocks } = await import('../index.ts');
+const {
+  resolvePeriods,
+  aggregateByAccount,
+  aggregateServicesByAccount,
+  sumServicesAcrossAccounts,
+  formatUsd,
+  buildBlocks,
+} = await import('../index.ts');
 
-const TARGETS = [
-  { id: '111111111111', label: '親アカウント（管理）' },
-  { id: '222222222222', label: 'sakekasu-builder（アプリ本体）' },
-];
+const TARGETS = [{ id: '222222222222', label: 'sakekasu-builder（アプリ本体）' }];
 
-/** Cost Explorer の応答形式でグループを作る補助 */
+/** Cost Explorer の応答形式でグループを作る補助（Keys は任意の2次元） */
 function resultWith(groups: [string, string, string][]) {
   return [
     {
       TimePeriod: { Start: '2026-08-01', End: '2026-08-09' },
-      Groups: groups.map(([accountId, recordType, amount]) => ({
-        Keys: [accountId, recordType],
+      Groups: groups.map(([key1, key2, amount]) => ({
+        Keys: [key1, key2],
         Metrics: { UnblendedCost: { Amount: amount, Unit: 'USD' } },
       })),
     },
@@ -91,6 +94,34 @@ describe('aggregateByAccount', () => {
   });
 });
 
+describe('aggregateServicesByAccount', () => {
+  it('アカウントごとにサービス別の金額を集計する', () => {
+    const costs = aggregateServicesByAccount(
+      resultWith([
+        ['111111111111', 'Amazon Bedrock', '3.00'],
+        ['111111111111', 'AWS Lambda', '1.00'],
+        ['222222222222', 'Amazon Bedrock', '2.00'],
+      ]),
+    );
+    expect(costs.get('111111111111')?.get('Amazon Bedrock')).toBeCloseTo(3);
+    expect(costs.get('111111111111')?.get('AWS Lambda')).toBeCloseTo(1);
+    expect(costs.get('222222222222')?.get('Amazon Bedrock')).toBeCloseTo(2);
+  });
+
+  it('全アカウントの合算で組織全体のサービス内訳が出る', () => {
+    const costs = aggregateServicesByAccount(
+      resultWith([
+        ['111111111111', 'Amazon Bedrock', '3.00'],
+        ['222222222222', 'Amazon Bedrock', '2.00'],
+        ['222222222222', 'Amazon S3', '0.50'],
+      ]),
+    );
+    const total = sumServicesAcrossAccounts(costs);
+    expect(total.get('Amazon Bedrock')).toBeCloseTo(5);
+    expect(total.get('Amazon S3')).toBeCloseTo(0.5);
+  });
+});
+
 describe('formatUsd', () => {
   it('2桁固定のドル表記にする', () => {
     expect(formatUsd(12.345)).toBe('$12.35');
@@ -110,68 +141,86 @@ describe('buildBlocks', () => {
     return JSON.stringify(blocks);
   }
 
-  it('指定したアカウントがそれぞれ分かれて表示される', () => {
-    const monthly = aggregateByAccount(
-      resultWith([
-        ['111111111111', 'Usage', '10.00'],
-        ['111111111111', 'Credit', '-9.00'],
-        ['222222222222', 'Usage', '5.00'],
-      ]),
-    );
-    const daily = aggregateByAccount(resultWith([['111111111111', 'Usage', '0.50']]));
+  const monthly = aggregateByAccount(
+    resultWith([
+      ['111111111111', 'Usage', '10.00'],
+      ['111111111111', 'Credit', '-9.00'],
+      ['222222222222', 'Usage', '5.00'],
+    ]),
+  );
+  const services = aggregateServicesByAccount(
+    resultWith([
+      ['111111111111', 'AWS CloudWatch', '10.00'],
+      ['222222222222', 'Amazon Bedrock', '3.00'],
+      ['222222222222', 'AWS Lambda', '2.00'],
+    ]),
+  );
 
-    const text = textsOf(buildBlocks(TARGETS, periods, monthly, daily));
-    expect(text).toContain('親アカウント（管理）');
-    expect(text).toContain('111111111111');
-    expect(text).toContain('sakekasu-builder（アプリ本体）');
-    expect(text).toContain('222222222222');
-    // クレジット適用前・適用額・請求額の3点が出る
-    expect(text).toContain('$10.00');
+  it('組織全体の合計が先頭で、続けて指定アカウントが載る', () => {
+    const text = textsOf(buildBlocks(TARGETS, periods, monthly, new Map(), services));
+    const totalIndex = text.indexOf('組織全体の合計');
+    const accountIndex = text.indexOf('sakekasu-builder（アプリ本体）');
+    expect(totalIndex).toBeGreaterThan(-1);
+    expect(accountIndex).toBeGreaterThan(totalIndex);
+    // 合計は全アカウント分（10 + 5 = 15、クレジット -9、請求 6）
+    expect(text).toContain('$15.00');
     expect(text).toContain('-$9.00');
-    expect(text).toContain('$1.00');
+    expect(text).toContain('$6.00');
   });
 
-  it('指定外のアカウントに費用があれば「その他」として載る', () => {
-    const monthly = aggregateByAccount(
-      resultWith([
-        ['111111111111', 'Usage', '1.00'],
-        ['333333333333', 'Usage', '4.00'],
-      ]),
-    );
-    const text = textsOf(buildBlocks(TARGETS, periods, monthly, new Map()));
-    expect(text).toContain('その他のアカウント');
-    expect(text).toContain('$4.00');
-  });
-
-  it('指定外のアカウントに費用が無ければ「その他」は出ない', () => {
-    const monthly = aggregateByAccount(resultWith([['111111111111', 'Usage', '1.00']]));
-    const text = textsOf(buildBlocks(TARGETS, periods, monthly, new Map()));
+  it('親アカウント・その他アカウントのセクションは出ない', () => {
+    const text = textsOf(buildBlocks(TARGETS, periods, monthly, new Map(), services));
+    expect(text).not.toContain('親アカウント');
     expect(text).not.toContain('その他のアカウント');
+    expect(text).not.toContain('111111111111');
   });
 
-  it('組織全体の合計が出る', () => {
-    const monthly = aggregateByAccount(
+  it('組織全体と指定アカウントの両方に上位サービスが載る', () => {
+    const text = textsOf(buildBlocks(TARGETS, periods, monthly, new Map(), services));
+    expect(text).toContain('上位サービス');
+    // 組織全体: 全アカウント合算で CloudWatch が1位
+    expect(text).toContain('1. AWS CloudWatch: $10.00');
+    // sakekasu-builder: 自分の分だけで Bedrock が1位
+    expect(text).toContain('1. Amazon Bedrock: $3.00');
+    expect(text).toContain('2. AWS Lambda: $2.00');
+  });
+
+  it('サービスが6個以上あれば上位5個と「その他」に畳む', () => {
+    const many = aggregateServicesByAccount(
       resultWith([
-        ['111111111111', 'Usage', '1.00'],
-        ['222222222222', 'Usage', '2.00'],
-        ['333333333333', 'Usage', '4.00'],
+        ['222222222222', 'Service A', '7.00'],
+        ['222222222222', 'Service B', '6.00'],
+        ['222222222222', 'Service C', '5.00'],
+        ['222222222222', 'Service D', '4.00'],
+        ['222222222222', 'Service E', '3.00'],
+        ['222222222222', 'Service F', '2.00'],
+        ['222222222222', 'Service G', '1.00'],
       ]),
     );
-    const text = textsOf(buildBlocks(TARGETS, periods, monthly, new Map()));
-    expect(text).toContain('組織全体の合計');
-    expect(text).toContain('$7.00');
+    const text = textsOf(buildBlocks(TARGETS, periods, monthly, new Map(), many));
+    expect(text).toContain('5. Service E: $3.00');
+    expect(text).not.toContain('Service F');
+    expect(text).toContain('その他: $3.00');
   });
 
-  it('データが無いアカウントも $0.00 で表示される（欠落で落ちない）', () => {
-    const blocks = buildBlocks(TARGETS, periods, new Map(), new Map());
-    const text = textsOf(blocks);
-    expect(text).toContain('111111111111');
+  it('サービス名の mrkdwn 特殊文字は無害化される', () => {
+    const withAmp = aggregateServicesByAccount(
+      resultWith([['222222222222', 'AWS Cost & Usage Report', '1.00']]),
+    );
+    const text = textsOf(buildBlocks(TARGETS, periods, monthly, new Map(), withAmp));
+    expect(text).toContain('AWS Cost &amp; Usage Report');
+  });
+
+  it('データが無くても $0.00 と「利用なし」表示で落ちない', () => {
+    const text = textsOf(buildBlocks(TARGETS, periods, new Map(), new Map(), new Map()));
+    expect(text).toContain('222222222222');
     expect(text).toContain('$0.00');
+    expect(text).toContain('今月の利用はまだありません');
   });
 
   it('月初日の実行では「確定」の見出しになる', () => {
     const firstDay = resolvePeriods(new Date('2026-09-01T00:05:00Z'));
-    const text = textsOf(buildBlocks(TARGETS, firstDay, new Map(), new Map()));
+    const text = textsOf(buildBlocks(TARGETS, firstDay, new Map(), new Map(), new Map()));
     expect(text).toContain('8月分（確定）');
   });
 });
