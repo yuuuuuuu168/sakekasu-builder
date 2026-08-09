@@ -9,8 +9,6 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as appsync from 'aws-cdk-lib/aws-appsync';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as logs from 'aws-cdk-lib/aws-logs';
-import * as applicationsignals from 'aws-cdk-lib/aws-applicationsignals';
-import * as xray from 'aws-cdk-lib/aws-xray';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import * as path from 'node:path';
@@ -67,20 +65,20 @@ export class MonitoringStack extends cdk.Stack {
     const canaryCredentialsSecretName = `${prefix}/monitoring/canary-user`;
 
     // --- Application Signals（Issue #86）---
-
-    // アカウントに1つだけ置くリソース。Application Signals に
-    // サービスを見つけるための読み取り権限（サービスリンクロール）を与える。
-    // これが無いと、計装したのにサービスマップに何も出てこない
-    new applicationsignals.CfnDiscovery(this, 'ApplicationSignalsDiscovery', {});
-
-    // X-Ray のスパンを CloudWatch Logs 側に送り、トレースを検索できるようにする。
-    // ソムリエ（AgentCore）の GenAI Observability もこれが前提なので相乗りできる。
     //
-    // インデックス率は 1%。取り込み（$0.35/GB）とは別にインデックス済みスパンで
-    // 課金されるが、先頭 1% は無料枠に収まる。足りなければ上げる
-    new xray.CfnTransactionSearchConfig(this, 'TransactionSearchConfig', {
-      indexingPercentage: 1,
-    });
+    // サービス検出（AWS::ApplicationSignals::Discovery）と Transaction Search
+    // （AWS::XRay::TransactionSearchConfig）は、ここでは作らない。
+    //
+    // どちらもアカウントに1つの設定で、このアカウントでは 2026-08-04 に
+    // ソムリエの GenAI Observability を入れたときから有効になっている。
+    // 知らずにスタックへ足したところ、AlreadyExists で作成に失敗し、
+    // そのロールバックが「既に有効だった設定」を消しにいった。
+    //
+    // 片方のスタックの巻き戻しが他機能の可観測性を道連れにする形なので、
+    // スタックの寿命とは切り離してアカウント側の設定として扱う。
+    // 新しいアカウントに展開するときの有効化手順は docs/application-signals.md を参照。
+    //
+    // 計装そのもの（ADOT レイヤー・実行ロールの権限）は API スタック側にある。
 
     // --- 通知経路 ---
 
