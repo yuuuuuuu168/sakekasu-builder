@@ -27,14 +27,40 @@
 
 監視系（health-check / slack-notifier / sommelier-canary / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増える。テストでこの線引きを固定してあるので、計装を足すとテストが落ちて気づける。
 
-### サービス検出と Transaction Search（`infra/lib/monitoring-stack.ts`）
+### サービス検出と Transaction Search（アカウント単位・CDK 管理外）
 
-- `AWS::ApplicationSignals::Discovery` — Application Signals にサービスを見つけるための読み取り権限を与える。**これが無いと、計装してもサービスマップに何も出てこない**
-- `AWS::XRay::TransactionSearchConfig` — X-Ray のスパンを CloudWatch Logs 側へ送り、トレースを検索できるようにする。インデックス率は 1%
+計装が働くには、これら2つがアカウントで有効になっている必要がある。
 
-どちらもアカウントに1つだけ置くリソースなので、監視の集約先である monitoring スタックに置いた。
+- **サービス検出**（`AWS::ApplicationSignals::Discovery`）— Application Signals にサービスを見つけるための読み取り権限を与える。**これが無いと、計装してもサービスマップに何も出てこない**
+- **Transaction Search**（`AWS::XRay::TransactionSearchConfig`）— X-Ray のスパンを CloudWatch Logs 側へ送り、トレースを検索できるようにする
 
-ソムリエ（AgentCore Runtime）の GenAI Observability も Transaction Search が前提なので、ここに相乗りできる。
+このアカウントでは、どちらも 2026-08-04 にソムリエの GenAI Observability を入れたときから有効になっている。**CDK では管理していない。**
+
+一度スタックに載せて失敗している。既に有効なので `AlreadyExists` で作成に失敗し、そのロールバックが「既に有効だった設定」を消しにいった（実際には無効化まで至らなかったが、片方のスタックの巻き戻しが他機能の可観測性を道連れにしうる形だった）。アカウントに1つしかない設定を、1つのスタックの寿命に紐づけるべきではない。
+
+monitoring スタックのテストで「この2つをスタックが作らないこと」を固定してある。
+
+現在の状態はこれで確認できる。
+
+```bash
+AWS_PROFILE=sakekasu-builder aws xray get-trace-segment-destination --region ap-northeast-1
+# → { "Destination": "CloudWatchLogs", "Status": "ACTIVE" }
+
+AWS_PROFILE=sakekasu-builder aws iam get-role \
+  --role-name AWSServiceRoleForCloudWatchApplicationSignals --query 'Role.RoleName'
+# → サービス検出が有効なら存在する
+```
+
+新しいアカウントに展開するときは、先にここを有効にする。
+
+```bash
+# Transaction Search
+AWS_PROFILE=<profile> aws xray update-trace-segment-destination \
+  --destination CloudWatchLogs --region ap-northeast-1
+
+# サービス検出（コンソールの Application Signals から有効化しても同じ）
+AWS_PROFILE=<profile> aws application-signals start-discovery --region ap-northeast-1
+```
 
 ## デプロイ後にやること
 
@@ -47,7 +73,7 @@ main へマージすれば GitHub Actions が `cdk deploy --all` を実行する
 5. **トレースに利用者の識別子が入っていないか確認する**（下記）
 6. **1週間後にコストを見る** — Cost Explorer で CloudWatch の増分を確認する
 
-出てこないときは、まず Discovery が作られているかを疑う。次に関数の環境変数とレイヤーが実機に入っているかを見る。
+出てこないときは、まずサービス検出が有効かを疑う（上記の `get-role`）。次に関数の環境変数とレイヤーが実機に入っているかを見る。
 
 ```bash
 AWS_PROFILE=sakekasu-builder aws lambda get-function-configuration \
@@ -104,7 +130,13 @@ SLO 自体も Application Signals の課金対象なので、数を絞る。
 - Transaction Search: 取り込み $0.35/GB + インデックス済みスパン $0.75/100万（先頭 1% は無料）
 - 参考として、既存の監視スタックが月 $5 前後
 
-インデックス率を上げると、そのぶんインデックス済みスパンの課金が増える。1% で始めて、トレースが足りなければ上げる。
+インデックス率は現在 100%（`Default` ルール）。当初は 1% にするつもりだったが、この規模では 100% のままでよい。OCR とソムリエを合わせて月に数百リクエスト、1リクエストあたり10スパンとしても月数千スパンで、$0.75/100万 に対して完全に誤差になる。むしろ 1% にするとトレースがほとんど残らず、障害時に見たいリクエストが入っていない状態になる。
+
+リクエスト数が桁で増えたら下げる。
+
+```bash
+AWS_PROFILE=sakekasu-builder aws xray get-indexing-rules --region ap-northeast-1
+```
 
 ## 注意点
 
