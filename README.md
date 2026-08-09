@@ -56,6 +56,7 @@
 | 新規ユーザー登録の Slack 通知 | Cognito Post Confirmation → SNS（[#66](https://github.com/yuuuuuu168/sakekasu-builder/issues/66)） |
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuu168/sakekasu-builder/issues/92)） |
 | DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。コンソール側の設定あり（[#67](https://github.com/yuuuuuu168/sakekasu-builder/issues/67)） |
+| Application Signals による APM | OCR と画像アップロードの分散トレース・ゴールデンメトリクス。SLO は実測待ち（[#86](https://github.com/yuuuuuu168/sakekasu-builder/issues/86)） |
 | CDK デプロイの自動化 | main へのマージで GitHub Actions が `cdk deploy`（OIDC 認証、[#94](https://github.com/yuuuuuu168/sakekasu-builder/issues/94)） |
 | 一覧画面の画像表示高速化 | サムネイル生成・Presigned URL キャッシュ・遅延読み込み |
 
@@ -89,7 +90,7 @@
 
 | やりたいこと | メモ | Issue |
 |------------|------|-------|
-| Application Signals | 分散トレース・ゴールデンメトリクス・SLO。DevOps Agent の調査インプットも厚くなる | [#86](https://github.com/yuuuuuu168/sakekasu-builder/issues/86) |
+| SLO とエラーバジェット消費アラーム | 計装は済んでいる。しきい値を実測（p50/p90/p99）から決めるところが残り | [#86](https://github.com/yuuuuuu168/sakekasu-builder/issues/86) |
 | Security Agent の Agent Space 移行 | 管理アカウントから運用ツール専用アカウントへ | [#107](https://github.com/yuuuuuu168/sakekasu-builder/issues/107) |
 | 登録データの傾向分析を Quick Suite で外出し | アプリ本体には組み込まない方針 | [#74](https://github.com/yuuuuuu168/sakekasu-builder/issues/74) |
 | 画像表示のさらなる高速化 | Presigned URL のバッチ取得・CloudFront + OAC。体感で困っていなければ優先度は低い | [#54](https://github.com/yuuuuuu168/sakekasu-builder/issues/54) |
@@ -556,6 +557,18 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev
 
 セットアップ手順、優先度の割り当て、カスタムスキルに入れる運用ナレッジ、費用の詳細は [docs/devops-agent.md](docs/devops-agent.md) にまとめてある。
 
+## Application Signals による APM（Issue #86）
+
+既存の監視は「異常が起きたこと」までは知らせてくれるが、そこから先の切り分けはログの突き合わせに頼っていた。リクエスト単位のトレースと、レイテンシー・エラー率・リクエスト数を自動で集めてそこを埋める。
+
+計装したのは OCR（`ocr-analyzer`）と画像アップロードの入口（`presigned-url`）の2つだけ。ADOT のレイヤーが起動時に割り込んで OpenTelemetry を仕込むので、関数のコードには手を入れていない。監視系の関数（health-check / slack-notifier / カナリア / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。
+
+あわせて Transaction Search をインデックス率 1%（無料枠の範囲）で有効にしている。ソムリエ（AgentCore）の GenAI Observability もこれが前提なので相乗りできる。サービス検出用の `AWS::ApplicationSignals::Discovery` が無いと、計装してもサービスマップに何も出てこない点に注意。
+
+SLO とエラーバジェット消費アラームはまだ入れていない。しきい値は実測を見てから決めるもので、当てずっぽうで作ると鳴りっぱなしか鳴らないかのどちらかになるため、先に計装だけ入れてデータを溜める。
+
+対象を絞った理由、デプロイ後の確認手順、SLO の決め方、費用は [docs/application-signals.md](docs/application-signals.md) にまとめてある。
+
 ## 技術スタック
 
 - React 19 + TypeScript 5.9
@@ -608,6 +621,7 @@ docs/            # 設計ドキュメント
 |------------|------|
 | [docs/agentcore-phase1-design.md](docs/agentcore-phase1-design.md) | ソムリエ Phase 1 の設計（認証の二段構え・ツール設計・決定事項） |
 | [docs/devops-agent.md](docs/devops-agent.md) | DevOps Agent のセットアップ手順・優先度の割り当て・カスタムスキル・費用 |
+| [docs/application-signals.md](docs/application-signals.md) | Application Signals の計装対象・デプロイ後の確認手順・SLO の決め方・費用 |
 | [docs/claude-code-web.md](docs/claude-code-web.md) | Claude Code on the web での開発環境（外出先から PR まで） |
 
 ## セットアップ
