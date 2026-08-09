@@ -117,15 +117,22 @@ function buildApplicationStacks(app: cdk.App): void {
   const agentSpaceArn = app.node.tryGetContext('agentSpaceArn') as string | undefined;
 
   if (agentSpaceArn) {
-    // Agent Space を置いたプライマリアカウント。信頼条件に使うため、
-    // ARN から読み取って書き間違いを防ぐ
-    const monitoringAccountId = agentSpaceArn.split(':')[4];
-    if (!/^\d{12}$/.test(monitoringAccountId ?? '')) {
+    // ARN は丸ごと形を見る。アカウント ID だけを見ていると
+    // `.../agentspace/*` のようなワイルドカード付きでも通ってしまい、
+    // 信頼条件は完全一致（ArnEquals）なので実際の Agent Space と永久に
+    // 一致しない。デプロイは成功するのに調査だけが始まらない状態になる
+    const AGENT_SPACE_ARN =
+      /^arn:aws:aidevops:[a-z0-9-]+:\d{12}:agentspace\/[A-Za-z0-9_-]+$/;
+    if (!AGENT_SPACE_ARN.test(agentSpaceArn)) {
       throw new Error(
         `agentSpaceArn が Agent Space の ARN として不正です: "${agentSpaceArn}"。` +
         ' 例: arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/xxxxxxxx'
       );
     }
+
+    // Agent Space を置いたプライマリアカウント。信頼条件に使うため、
+    // ARN から読み取って書き間違いを防ぐ
+    const monitoringAccountId = agentSpaceArn.split(':')[4];
 
     const devopsAgentStack = new DevOpsAgentStack(app, `${prefix}-devops-agent`, {
       envName: env,

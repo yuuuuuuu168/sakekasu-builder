@@ -39,6 +39,30 @@ const CONFIG_CACHE_TTL_MS = 5 * 60 * 1000;
  */
 const MAX_FIELD_CHARS = 500;
 const MAX_DESCRIPTION_CHARS = 4_000;
+/** 見出しは一覧と Slack の投稿に出るため、本文よりさらに短く抑える */
+const MAX_TITLE_CHARS = 200;
+
+/**
+ * Webhook の送り先にできないホスト。
+ *
+ * 送り先は手で登録した Secrets Manager から来るので、ここが破られている時点で
+ * 攻撃者はアカウント内に足場を持っている。それでも塞いでおくのは、
+ * 誤って内部のエンドポイントを登録したときに調査の本文（アカウント ID や
+ * リソースの ARN が入る）をそこへ投げ続けないようにするため
+ */
+const INTERNAL_HOSTNAMES: RegExp[] = [
+  /^localhost$/,
+  /^127\./,
+  /^0\.0\.0\.0$/,
+  /^10\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^192\.168\./,
+  // リンクローカル。EC2 / Lambda のメタデータ（169.254.169.254）を含む
+  /^169\.254\./,
+  /^::1$/,
+  /^fd[0-9a-f]{2}:/,
+  /^fe80:/,
+];
 
 /** 調査の優先度。DevOps Agent の Webhook スキーマで決まっている値 */
 type Priority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'MINIMAL';
@@ -218,7 +242,7 @@ function fromAlarm(alarm: AlarmMessage, snsTimestamp: string): IncidentPayload |
     incidentId: buildIncidentId([alarmName, stateChangeTime]),
     action: 'created',
     priority: priorityForAlarm(alarmName),
-    title: `CloudWatch アラーム: ${alarmName}`,
+    title: clip(`CloudWatch アラーム: ${alarmName}`, MAX_TITLE_CHARS),
     description: clip(lines.join('\n'), MAX_DESCRIPTION_CHARS),
     timestamp: stateChangeTime,
     service: SERVICE_NAME,
@@ -252,7 +276,9 @@ function fromHealthEvent(event: HealthEvent, snsTimestamp: string): IncidentPayl
 
   const lines = [
     `AWS 側の障害イベントを受け取りました（${detail.service ?? 'サービス不明'} / ${affectedRegion}）。`,
-    detail.eventTypeCode ? `イベント種別: ${detail.eventTypeCode}` : null,
+    detail.eventTypeCode
+      ? `イベント種別: ${clip(detail.eventTypeCode, MAX_FIELD_CHARS)}`
+      : null,
     detail.eventDescription?.[0]?.latestDescription
       ? clip(detail.eventDescription[0].latestDescription, MAX_FIELD_CHARS)
       : null,
@@ -269,7 +295,7 @@ function fromHealthEvent(event: HealthEvent, snsTimestamp: string): IncidentPayl
     ]),
     action: 'created',
     priority: 'HIGH',
-    title: `AWS Health 障害: ${detail.service ?? '不明'}`,
+    title: clip(`AWS Health 障害: ${detail.service ?? '不明'}`, MAX_TITLE_CHARS),
     description: clip(lines.join('\n'), MAX_DESCRIPTION_CHARS),
     timestamp: startTime,
     service: SERVICE_NAME,
@@ -328,6 +354,13 @@ export function assertHttpsUrl(raw: string): string {
   if (parsed.protocol !== 'https:') {
     throw new Error(
       `Webhook の webhookUrl は https でなければなりません（${parsed.protocol} が指定されています）`,
+    );
+  }
+  // IPv6 は hostname が [] 付きで返る
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (INTERNAL_HOSTNAMES.some((pattern) => pattern.test(hostname))) {
+    throw new Error(
+      `Webhook の webhookUrl に内部向けのアドレスは指定できません: ${WEBHOOK_SECRET_ID}`,
     );
   }
   return raw;
@@ -389,6 +422,9 @@ async function postToWebhook(incident: IncidentPayload): Promise<void> {
     },
     body,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    // 転送先の検証は設定を読んだときの1回だけなので、リダイレクトを追うと
+    // 検証を通っていない先へ本文ごと運んでしまう。307/308 は POST と本文を保つ
+    redirect: 'error',
   });
 
   if (!response.ok) {
