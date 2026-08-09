@@ -563,7 +563,7 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev
 
 計装したのは OCR（`ocr-analyzer`）と画像アップロードの入口（`presigned-url`）の2つだけ。ADOT のレイヤーが起動時に割り込んで OpenTelemetry を仕込むので、関数のコードには手を入れていない。監視系の関数（health-check / slack-notifier / カナリア / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。
 
-あわせて Transaction Search をインデックス率 1%（無料枠の範囲）で有効にしている。ソムリエ（AgentCore）の GenAI Observability もこれが前提なので相乗りできる。サービス検出用の `AWS::ApplicationSignals::Discovery` が無いと、計装してもサービスマップに何も出てこない点に注意。
+計装が働くには、サービス検出と Transaction Search がアカウントで有効になっている必要がある。どちらもソムリエの GenAI Observability を入れたときから有効で、**アカウントに1つの設定なので CDK では管理していない**。1つのスタックに載せると、そのスタックの巻き戻しが他機能の可観測性を道連れにするため（実際に一度やらかした）。
 
 SLO とエラーバジェット消費アラームはまだ入れていない。しきい値は実測を見てから決めるもので、当てずっぽうで作ると鳴りっぱなしか鳴らないかのどちらかになるため、先に計装だけ入れてデータを溜める。
 
