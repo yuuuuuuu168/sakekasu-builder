@@ -4,7 +4,8 @@ import * as cdk from 'aws-cdk-lib';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import { DevOpsAgentStack } from '../lib/devops-agent-stack.js';
 
-const MONITORING_ACCOUNT_ID = '<管理アカウント ID>';
+// Agent Space を置く運用ツール専用アカウント（ops-tooling）
+const MONITORING_ACCOUNT_ID = '<運用アカウント ID>';
 const AGENT_SPACE_ARN = `arn:aws:aidevops:ap-northeast-1:${MONITORING_ACCOUNT_ID}:agentspace/abc123`;
 
 function synth(): Template {
@@ -55,11 +56,19 @@ describe('DevOpsAgentStack', () => {
           Match.objectLike({
             Condition: {
               StringEquals: { 'aws:SourceAccount': MONITORING_ACCOUNT_ID },
-              ArnLike: { 'aws:SourceArn': AGENT_SPACE_ARN },
+              // ワイルドカードを解釈する ArnLike ではなく完全一致で受ける
+              ArnEquals: { 'aws:SourceArn': AGENT_SPACE_ARN },
             },
           }),
         ]),
       },
+    });
+  });
+
+  it('転送 Lambda の同時実行数を絞る（一斉発報で調査が同時に立ち上がるのを避ける）', () => {
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'dev-sakekasu-devops-agent-webhook',
+      ReservedConcurrentExecutions: 2,
     });
   });
 

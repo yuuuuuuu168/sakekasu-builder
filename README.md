@@ -394,7 +394,7 @@ SNS（dev-sakekasu-alerts）┬→ Slack 通知 Lambda → Slack（既存のア�
 
 既存の Slack 通知は変えていない。転送 Lambda は同じトピックをもう1つの購読者として受け取るだけなので、エージェント側が止まってもアラート自体は届く。
 
-Agent Space はプライマリアカウント（`<管理アカウント ID>`）に置き、調査対象はアプリ本体のアカウント（`232791540685`）。CDK が作るのはアプリ本体側の2つで、調査用のクロスアカウントロール（読み取り専用）と、アラームを Webhook へ転送する Lambda。Agent Space の作成・Slack 連携・GitHub 連携・Webhook の発行はコンソールでの手作業になる。
+Agent Space は運用ツール専用アカウント（`<運用アカウント ID>` / `ops-tooling`）に置き、調査対象はアプリ本体のアカウント（`232791540685`）。CDK が作るのはアプリ本体側の2つで、調査用のクロスアカウントロール（読み取り専用）と、アラームを Webhook へ転送する Lambda。Agent Space の作成・Slack 連携・GitHub 連携・Webhook の発行はコンソールでの手作業になる。
 
 エージェントは秒課金なので、投げるものを絞っている。アラームは `ALARM` に変わったときだけ（復旧では投げない）、AWS Health は実際の障害だけ（予定された変更では投げない）、転送 Lambda 自身の失敗アラームは捨てる。
 
@@ -403,7 +403,7 @@ Agent Space はプライマリアカウント（`<管理アカウント ID>`）�
 ```bash
 cd infra
 AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev \
-  -c agentSpaceArn=arn:aws:aidevops:ap-northeast-1:<管理アカウント ID>:agentspace/xxxxxxxx
+  -c agentSpaceArn=arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/xxxxxxxx
 ```
 
 セットアップ手順、優先度の割り当て、カスタムスキルに入れる運用ナレッジ、費用の詳細は [docs/devops-agent.md](docs/devops-agent.md) にまとめてある。

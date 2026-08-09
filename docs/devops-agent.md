@@ -17,10 +17,12 @@ AWS Health ──────────┘                            │
 
 | 役割 | アカウント | プロファイル |
 |------|-----------|-------------|
-| プライマリ（Agent Space を置く） | `<管理アカウント ID>` | `yuuuuuuuki7749` |
+| プライマリ（Agent Space を置く） | `<運用アカウント ID>` | `ops-tooling` |
 | セカンダリ（調査対象＝アプリ本体） | `232791540685` | `sakekasu-builder` |
 
-Agent Space はプライマリに集約する。AWS Security Agent が同じアカウントで動いており、フロンティアエージェント系をまとめたいため。調査対象はアプリ本体のアカウントなので、そちら側にクロスアカウントロールを置き、DevOps Agent のサービスプリンシパル（`aidevops.amazonaws.com`）から直接引き受けさせる。
+Agent Space は運用ツール専用のメンバーアカウント `ops-tooling` に集約する。DevOps Agent は Slack・GitHub・Webhook という外部との接点を持つワークロードで、Organization の管理アカウントは唯一 SCP の制約を受けない場所にあたるため、事故を組織のガードレールで止められる側に置く。AWS Security Agent も同じ理由で `ops-tooling` へ移す（Issue #107）。
+
+調査対象はアプリ本体のアカウントなので、そちら側にクロスアカウントロールを置き、DevOps Agent のサービスプリンシパル（`aidevops.amazonaws.com`）から直接引き受けさせる。
 
 リージョンは `ap-northeast-1`。
 
@@ -56,6 +58,8 @@ Agent Space はプライマリに集約する。AWS Security Agent が同じア�
 
 表に無いアラームは HIGH に倒す。増やしたときに黙って埋もれるより、鳴りすぎて表を直す方を選んでいる。
 
+判定は上から順に見て最初に当たったものを使うが、MEDIUM だけは HIGH より先に評価する。`watcher-failure-sommelier-canary` のように監視の停止を表すアラームが名前に `sommelier` を含んでおり、順に見ると「ソムリエの故障」として HIGH に落ちてしまうため。壊れているのは監視の側なので MEDIUM が正しい。
+
 認証は HMAC を使う。本文と時刻をまとめて署名鍵でハッシュ化し、`x-amzn-event-signature` ヘッダーで送る。Bearer トークンより設定は面倒だが、鍵そのものが通信に乗らず、時刻が署名に入るので再送も弾ける。
 
 ## セットアップ手順
@@ -64,9 +68,9 @@ Agent Space の ARN と Webhook の鍵が決まらないと CDK 側が意味を�
 
 ### 1. Agent Space を作る（プライマリ）
 
-DevOps Agent のコンソールに `yuuuuuuuki7749` で入り、`ap-northeast-1` で Agent Space を作る。作成後、ARN（`arn:aws:aidevops:ap-northeast-1:<管理アカウント ID>:agentspace/xxxxxxxx`）を控える。
+DevOps Agent のコンソールに `ops-tooling` で入り、`ap-northeast-1` で Agent Space を作る。作成後、ARN（`arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/xxxxxxxx`）を控える。
 
-Security Agent 用の既存 Agent Space（`appsignals-fargate-poc`）とは分ける。調査対象も通知先チャンネルも別で、混ぜると Slack の投稿がどちらのものか分からなくなる。
+Security Agent の Agent Space（Issue #107 で同じ `ops-tooling` に移してくる）とは分ける。調査対象も通知先チャンネルも別で、混ぜると Slack の投稿がどちらのものか分からなくなる。
 
 ### 2. Slack を繋ぐ
 
@@ -104,7 +108,7 @@ AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
 ```bash
 cd infra
 AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev \
-  -c agentSpaceArn=arn:aws:aidevops:ap-northeast-1:<管理アカウント ID>:agentspace/xxxxxxxx
+  -c agentSpaceArn=arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/xxxxxxxx
 ```
 
 動作を確認したら `infra/cdk.json` の `context` に `agentSpaceArn` を書いてコミットする。以降は他のスタックと同じく、main へのマージで GitHub Actions が更新する。
@@ -113,7 +117,7 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev
 {
   "context": {
     "env": "dev",
-    "agentSpaceArn": "arn:aws:aidevops:ap-northeast-1:<管理アカウント ID>:agentspace/xxxxxxxx"
+    "agentSpaceArn": "arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/xxxxxxxx"
   }
 }
 ```
@@ -168,7 +172,9 @@ HTTP 200 が返るのに調査が始まらないときは、本文の形式か�
 
 最初の2ヶ月は無料トライアルがあり、月あたり Agent Space 10個・調査20時間・評価15時間・SRE タスク20時間まで無料。導入初期の検証はほぼゼロ円で済む。
 
-プライマリアカウントは Business Support+ 契約なので、前月のサポート料金の30%が DevOps Agent 用クレジットとして毎月付与される。サポート料金がミニマムの $29 なら月 $8.7 相当、エージェント稼働で17分ほど。クレジットはその月のうちに使わないと失効し、繰り越せない。
+月次の利用クレジットは付かない。クレジットは Business Support+ / Enterprise Support / Unified Operations のいずれかに入っているアカウントで、Support Center コンソール経由で有効化した場合の特典で、プライマリの `ops-tooling` は Basic のため対象外になる。サポートプランは組織の他アカウントに波及せず、アカウントごとに個別契約になるため、管理アカウントが Business Support+ でも引き継がれない。
+
+機能自体は Basic のまま使える。CLI / CDK 経由のオンボーディングにサポートプランの要件は無く、純粋な従量課金になる。クレジット額は月 $8.7 相当（エージェント稼働で17分ほど）で、それを得るために管理アカウントへ Agent Space を置く方が割に合わない、という判断（Issue #67 のコメントを参照）。
 
 転送 Lambda 側の費用は誤差の範囲（発報のたびに1回動くだけ）。
 
