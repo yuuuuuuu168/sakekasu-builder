@@ -1,0 +1,315 @@
+import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
+import { createHmac } from 'node:crypto';
+
+const secretsClient = new SecretsManagerClient({});
+
+/** Webhook の URL と署名鍵を入れた Secrets Manager の名前 */
+const WEBHOOK_SECRET_ID = process.env.WEBHOOK_SECRET_ID!;
+/** 環境名（dev, staging, prod）。調査の本文に添える */
+const ENV_NAME = process.env.ENV_NAME ?? '不明';
+/**
+ * この Lambda 自身の失敗を監視するアラーム名。
+ *
+ * 転送に失敗するとこのアラームが鳴り、それが同じトピックを通って
+ * また転送されてくる。届かないことを届けようとして無駄に調査を起こすため、
+ * 名前で突き合わせて捨てる
+ */
+const SELF_ALARM_NAME = process.env.SELF_ALARM_NAME ?? '';
+/** 調査の対象サービス名。DevOps Agent 側の一覧に出る */
+const SERVICE_NAME = process.env.SERVICE_NAME ?? 'sakekasu-builder';
+
+/** Webhook は1回の呼び出しで返ってこなければ諦める（SNS 側が再試行する） */
+const REQUEST_TIMEOUT_MS = 10_000;
+
+/** 調査の優先度。DevOps Agent の Webhook スキーマで決まっている値 */
+type Priority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'MINIMAL';
+
+interface SnsEventRecord {
+  Sns: {
+    Subject?: string | null;
+    Message: string;
+    Timestamp: string;
+  };
+}
+
+export interface SnsEvent {
+  Records: SnsEventRecord[];
+}
+
+/** CloudWatch アラームが SNS に流す本文（使う項目だけ） */
+interface AlarmMessage {
+  AlarmName?: string;
+  AlarmDescription?: string | null;
+  NewStateValue?: string;
+  OldStateValue?: string;
+  NewStateReason?: string;
+  StateChangeTime?: string;
+  Region?: string;
+  AWSAccountId?: string;
+  Trigger?: {
+    MetricName?: string;
+    Namespace?: string;
+    Threshold?: number;
+    ComparisonOperator?: string;
+    EvaluationPeriods?: number;
+    Period?: number;
+  };
+}
+
+/** AWS Health が EventBridge に流すイベント（使う項目だけ） */
+interface HealthEvent {
+  source?: string;
+  region?: string;
+  time?: string;
+  detail?: {
+    service?: string;
+    eventArn?: string;
+    eventTypeCode?: string;
+    eventTypeCategory?: string;
+    startTime?: string;
+    eventDescription?: { latestDescription?: string }[];
+    affectedEntities?: { entityValue?: string }[];
+  };
+}
+
+/** DevOps Agent の Webhook が受け取る本文 */
+export interface IncidentPayload {
+  eventType: 'incident';
+  incidentId: string;
+  action: 'created';
+  priority: Priority;
+  title: string;
+  description: string;
+  timestamp: string;
+  service: string;
+  data: Record<string, unknown>;
+}
+
+/**
+ * アラーム名から調査の優先度を決める。
+ *
+ * DevOps Agent は優先度で調査の深さを変えないが、Web アプリの一覧と
+ * Slack 投稿に出るため、「今すぐ見るべきか」が人間に伝わる粒度にしておく。
+ * 上から順に最初に当たったものを使う
+ */
+const PRIORITY_RULES: { match: RegExp; priority: Priority }[] = [
+  // 利用者がサイトを開けない・記録を読み書きできない
+  { match: /health-check-frontend|appsync-5xx/, priority: 'CRITICAL' },
+  // 主要機能（ソムリエ・OCR・記録の保存）が壊れている
+  {
+    match: /sommelier|ocr-|lambda-errors-|dynamodb-throttle-|health-check-/,
+    priority: 'HIGH',
+  },
+  // 利用者からは見えないが放置はできないもの（通知の失敗・後片付けの失敗・監視の停止）
+  {
+    match: /notify-fail|image-delete-fail|slack-notifier-failure|watcher-/,
+    priority: 'MEDIUM',
+  },
+];
+
+export function priorityForAlarm(alarmName: string): Priority {
+  const rule = PRIORITY_RULES.find((r) => r.match.test(alarmName));
+  // 想定していないアラームは軽く扱わない。増やしたときに黙って埋もれるより、
+  // 鳴りすぎて優先度の表を直す方に倒す
+  return rule?.priority ?? 'HIGH';
+}
+
+/**
+ * 調査の識別子。同じ値で送ると DevOps Agent 側で重複として捨てられる。
+ *
+ * アラーム名だけだと2度目の発報が捨てられてしまうため、状態が変わった時刻を
+ * 足して「この発報」を表す。逆に SNS の再試行では同じ値になるので、
+ * 転送が二重に走っても調査は1件で済む
+ */
+export function buildIncidentId(parts: (string | undefined)[]): string {
+  const raw = parts.filter((p) => !!p).join('-');
+  // 記号の扱いは Webhook 側の実装に依存するため、英数と - _ . : だけに寄せる。
+  // アンダースコアを残すのは、AWS Health のイベント種別（AWS_..._ISSUE）が
+  // 潰れて読めなくなるのを避けるため
+  return raw.replace(/[^A-Za-z0-9\-._:]/g, '-').slice(0, 200) || 'unknown-incident';
+}
+
+function isHealthEvent(value: unknown): value is HealthEvent {
+  return (
+    typeof value === 'object' && value !== null && (value as HealthEvent).source === 'aws.health'
+  );
+}
+
+function isAlarmMessage(value: unknown): value is AlarmMessage {
+  return (
+    typeof value === 'object' && value !== null && typeof (value as AlarmMessage).AlarmName === 'string'
+  );
+}
+
+/** アラームから調査依頼を組み立てる。 */
+function fromAlarm(alarm: AlarmMessage, snsTimestamp: string): IncidentPayload | null {
+  const alarmName = alarm.AlarmName!;
+
+  // 復旧（OK）とデータ不足では調査しない。エージェントは秒課金のため、
+  // 「壊れている間」だけに絞る
+  if (alarm.NewStateValue !== 'ALARM') return null;
+  if (SELF_ALARM_NAME && alarmName === SELF_ALARM_NAME) return null;
+
+  const trigger = alarm.Trigger ?? {};
+  const lines = [
+    `${ENV_NAME} 環境の酒カス（sakekasu-builder）で CloudWatch アラームが発報しました。`,
+    alarm.AlarmDescription ? `アラームの説明: ${alarm.AlarmDescription}` : null,
+    alarm.NewStateReason ? `発報の理由: ${alarm.NewStateReason}` : null,
+    trigger.MetricName
+      ? `メトリクス: ${trigger.Namespace ?? '(名前空間不明)'} / ${trigger.MetricName}`
+      : null,
+    typeof trigger.Threshold === 'number'
+      ? `しきい値: ${trigger.ComparisonOperator ?? ''} ${trigger.Threshold}`
+      : null,
+    `アカウント: ${alarm.AWSAccountId ?? '不明'} / リージョン: ${alarm.Region ?? '不明'}`,
+  ].filter((line): line is string => line !== null);
+
+  return {
+    eventType: 'incident',
+    incidentId: buildIncidentId([alarmName, alarm.StateChangeTime ?? snsTimestamp]),
+    action: 'created',
+    priority: priorityForAlarm(alarmName),
+    title: `CloudWatch アラーム: ${alarmName}`,
+    description: lines.join('\n'),
+    timestamp: alarm.StateChangeTime ?? snsTimestamp,
+    service: SERVICE_NAME,
+    // 元のイベントをそのまま添える。エージェントが自分で読み解けるようにする
+    data: { source: 'cloudwatch-alarm', envName: ENV_NAME, alarm },
+  };
+}
+
+/**
+ * AWS Health のイベントから調査依頼を組み立てる。
+ *
+ * こちらで直せる事象ではないが、影響範囲の切り分け（自分のどのリソースが
+ * 巻き込まれているか）はエージェントの得意分野なので調査に回す
+ */
+function fromHealthEvent(event: HealthEvent, snsTimestamp: string): IncidentPayload | null {
+  const detail = event.detail ?? {};
+
+  // 予定された変更やお知らせで調査を起こしても意味がないため、障害だけに絞る
+  if (detail.eventTypeCategory !== 'issue') return null;
+
+  const entities = (detail.affectedEntities ?? [])
+    .map((e) => e.entityValue)
+    .filter((v): v is string => !!v);
+
+  const lines = [
+    `AWS 側の障害イベントを受け取りました（${detail.service ?? 'サービス不明'} / ${event.region ?? 'リージョン不明'}）。`,
+    detail.eventTypeCode ? `イベント種別: ${detail.eventTypeCode}` : null,
+    detail.eventDescription?.[0]?.latestDescription ?? null,
+    entities.length > 0 ? `影響を受けるリソース: ${entities.join(', ')}` : null,
+  ].filter((line): line is string => line !== null);
+
+  return {
+    eventType: 'incident',
+    incidentId: buildIncidentId([
+      detail.eventArn ?? detail.eventTypeCode ?? 'aws-health',
+      detail.eventArn ? undefined : (detail.startTime ?? event.time ?? snsTimestamp),
+    ]),
+    action: 'created',
+    priority: 'HIGH',
+    title: `AWS Health 障害: ${detail.service ?? '不明'}`,
+    description: lines.join('\n'),
+    timestamp: detail.startTime ?? event.time ?? snsTimestamp,
+    service: SERVICE_NAME,
+    data: { source: 'aws-health', envName: ENV_NAME, event },
+  };
+}
+
+/**
+ * SNS の1件から調査依頼を組み立てる。調査に回さないものは null を返す。
+ *
+ * アラームでも Health イベントでもない本文（外形監視からの任意メッセージなど）は
+ * 調査の材料が無いので送らない
+ */
+export function buildIncident(
+  message: string,
+  snsTimestamp: string,
+): IncidentPayload | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(message);
+  } catch {
+    return null;
+  }
+
+  if (isHealthEvent(parsed)) return fromHealthEvent(parsed, snsTimestamp);
+  if (isAlarmMessage(parsed)) return fromAlarm(parsed, snsTimestamp);
+  return null;
+}
+
+interface WebhookConfig {
+  webhookUrl: string;
+  signingSecret: string;
+}
+
+/** 実行環境が生きている間は使い回す（発報のたびに Secrets Manager を叩かない） */
+let cachedConfig: WebhookConfig | null = null;
+
+async function getWebhookConfig(): Promise<WebhookConfig> {
+  if (cachedConfig) return cachedConfig;
+
+  const result = await secretsClient.send(
+    new GetSecretValueCommand({ SecretId: WEBHOOK_SECRET_ID }),
+  );
+  if (!result.SecretString) {
+    throw new Error(`Webhook の設定が未登録です: ${WEBHOOK_SECRET_ID}`);
+  }
+
+  const parsed = JSON.parse(result.SecretString) as Partial<WebhookConfig>;
+  if (!parsed.webhookUrl || !parsed.signingSecret) {
+    throw new Error(
+      `Webhook の設定に webhookUrl / signingSecret がありません: ${WEBHOOK_SECRET_ID}`,
+    );
+  }
+
+  cachedConfig = { webhookUrl: parsed.webhookUrl, signingSecret: parsed.signingSecret };
+  return cachedConfig;
+}
+
+/**
+ * HMAC 署名を作る。署名の対象は「タイムスタンプ:本文」で、
+ * 時刻を含めることで古い要求の再送を Webhook 側で弾けるようにしている
+ */
+export function sign(timestamp: string, payload: string, secret: string): string {
+  return createHmac('sha256', secret).update(`${timestamp}:${payload}`, 'utf8').digest('base64');
+}
+
+async function postToWebhook(incident: IncidentPayload): Promise<void> {
+  const { webhookUrl, signingSecret } = await getWebhookConfig();
+
+  const body = JSON.stringify(incident);
+  const timestamp = new Date().toISOString();
+
+  const response = await fetch(webhookUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-amzn-event-timestamp': timestamp,
+      'x-amzn-event-signature': sign(timestamp, body, signingSecret),
+    },
+    body,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    // URL も署名鍵もログに残さない（本文にも入れない）
+    throw new Error(`DevOps Agent への転送に失敗しました (HTTP ${response.status})`);
+  }
+}
+
+export const handler = async (event: SnsEvent): Promise<void> => {
+  for (const record of event.Records) {
+    const incident = buildIncident(record.Sns.Message, record.Sns.Timestamp);
+    if (!incident) {
+      console.log('調査の対象外のため転送しませんでした');
+      continue;
+    }
+
+    await postToWebhook(incident);
+    console.log(
+      `調査を依頼しました: ${incident.incidentId}（優先度 ${incident.priority}）`,
+    );
+  }
+};

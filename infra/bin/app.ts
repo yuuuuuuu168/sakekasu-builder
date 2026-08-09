@@ -6,6 +6,7 @@ import { MonitoringStack } from '../lib/monitoring-stack.js';
 import { HealthGlobalStack } from '../lib/health-global-stack.js';
 import { BillingNotifierStack } from '../lib/billing-notifier-stack.js';
 import { GithubOidcStack } from '../lib/github-oidc-stack.js';
+import { DevOpsAgentStack } from '../lib/devops-agent-stack.js';
 
 const app = new cdk.App();
 
@@ -108,6 +109,33 @@ function buildApplicationStacks(app: cdk.App): void {
     targetRegion: cdkEnv.region!,
     env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
   });
+
+  // DevOps Agent 連携（Issue #67）。Agent Space はプライマリアカウントの
+  // コンソールで作るため、その ARN がコンテキストに入るまでは合成しない。
+  // コンソール作業が済んだら cdk.json の context に agentSpaceArn を書けば、
+  // 以降は他のスタックと同じく `cdk deploy --all` で更新される
+  const agentSpaceArn = app.node.tryGetContext('agentSpaceArn') as string | undefined;
+
+  if (agentSpaceArn) {
+    // Agent Space を置いたプライマリアカウント。信頼条件に使うため、
+    // ARN から読み取って書き間違いを防ぐ
+    const monitoringAccountId = agentSpaceArn.split(':')[4];
+    if (!/^\d{12}$/.test(monitoringAccountId ?? '')) {
+      throw new Error(
+        `agentSpaceArn が Agent Space の ARN として不正です: "${agentSpaceArn}"。` +
+        ' 例: arn:aws:aidevops:ap-northeast-1:<管理アカウント ID>:agentspace/xxxxxxxx'
+      );
+    }
+
+    const devopsAgentStack = new DevOpsAgentStack(app, `${prefix}-devops-agent`, {
+      envName: env,
+      monitoringAccountId,
+      agentSpaceArn,
+      alertTopic: monitoringStack.alertTopic,
+      env: cdkEnv,
+    });
+    devopsAgentStack.addDependency(monitoringStack);
+  }
 
   // スタック間の依存関係を明示
   apiStack.addDependency(authStack);
