@@ -43,7 +43,8 @@ export class GithubOidcStack extends cdk.Stack {
 
     const deployRole = new iam.Role(this, 'DeployRole', {
       roleName: 'sakekasu-github-actions-deploy',
-      description: 'GitHub Actions（mainブランチ）からのCDKデプロイ用',
+      // IAM の description は ASCII + Latin-1 のみ（日本語を入れるとデプロイが 400 で落ちる）
+      description: 'CDK deploy from GitHub Actions (main branch only)',
       assumedBy: new iam.WebIdentityPrincipal(provider.openIdConnectProviderArn, {
         StringEquals: {
           [`${githubDomain}:aud`]: 'sts.amazonaws.com',
@@ -60,7 +61,7 @@ export class GithubOidcStack extends cdk.Stack {
 
     const diffRole = new iam.Role(this, 'DiffRole', {
       roleName: 'sakekasu-github-actions-diff',
-      description: 'GitHub Actions（pull_request）でのcdk diff用（読み取り専用）',
+      description: 'Read-only cdk diff from GitHub Actions (pull_request)',
       assumedBy: new iam.WebIdentityPrincipal(provider.openIdConnectProviderArn, {
         StringEquals: {
           [`${githubDomain}:aud`]: 'sts.amazonaws.com',
