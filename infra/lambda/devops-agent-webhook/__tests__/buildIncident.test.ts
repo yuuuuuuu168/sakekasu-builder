@@ -12,7 +12,7 @@ process.env.SERVICE_NAME = 'sakekasu-builder';
 /** Secrets Manager が返す中身。鍵の入れ替えを再現するためテストから差し替える */
 const secretState = vi.hoisted(() => ({
   value: JSON.stringify({
-    webhookUrl: 'https://event-ai.example/webhook/generic/test',
+    webhookUrl: 'https://event-ai.ap-northeast-1.api.aws/webhook/generic/test',
     signingSecret: 'secret',
   }),
 }));
@@ -334,7 +334,7 @@ describe('Webhook が失敗したとき', () => {
     try {
       await expect(
         mod.handler({ Records: [{ Sns: { Message: alarmMessage(), Timestamp: SNS_TIMESTAMP } }] }),
-      ).rejects.toThrow(/^(?!.*(event-ai\.example|secret)).*$/s);
+      ).rejects.toThrow(/^(?!.*(event-ai\.ap-northeast-1\.api\.aws|secret)).*$/s);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -385,19 +385,29 @@ describe('toIsoTimestamp', () => {
 
 describe('assertHttpsUrl', () => {
   it('https ならそのまま通す', () => {
-    expect(mod.assertHttpsUrl('https://event-ai.example/webhook/generic/test')).toBe(
-      'https://event-ai.example/webhook/generic/test',
+    expect(mod.assertHttpsUrl('https://event-ai.ap-northeast-1.api.aws/webhook/generic/test')).toBe(
+      'https://event-ai.ap-northeast-1.api.aws/webhook/generic/test',
     );
   });
 
   it('https 以外は送る前に弾く', () => {
-    expect(() => mod.assertHttpsUrl('http://event-ai.example/webhook')).toThrow(/https/);
+    expect(() => mod.assertHttpsUrl('http://event-ai.ap-northeast-1.api.aws/webhook')).toThrow(/https/);
     expect(() => mod.assertHttpsUrl('file:///etc/passwd')).toThrow(/https/);
   });
 
   it('URL として読めない値も弾き、値そのものはメッセージに残さない', () => {
     expect(() => mod.assertHttpsUrl('だいたいこのへん')).toThrow(/URL として読めません/);
     expect(() => mod.assertHttpsUrl('だいたいこのへん')).not.toThrow(/だいたいこのへん/);
+  });
+
+  it('AWS の Webhook エンドポイントは通す', () => {
+    // 実際の形は https://event-ai.<region>.api.aws/webhook/generic/<id>
+    expect(() =>
+      mod.assertHttpsUrl('https://event-ai.ap-northeast-1.api.aws/webhook/generic/abc123'),
+    ).not.toThrow();
+    expect(() =>
+      mod.assertHttpsUrl('https://event-ai.us-east-1.api.aws/webhook/generic/abc123'),
+    ).not.toThrow();
   });
 
   it('内部向けのアドレスは https でも弾く', () => {
@@ -412,16 +422,33 @@ describe('assertHttpsUrl', () => {
       'https://192.168.1.1/webhook',
       'https://[::1]/webhook',
       'https://[fd00::1]/webhook',
+      // fc00::/7 の前半。ULA は fd だけではない
+      'https://[fc00::1]/webhook',
+      // IPv4 射影の IPv6。URL の正規化で ::ffff:a9fe:a9fe になり、
+      // 内部アドレスを1つずつ弾く書き方だとすり抜けていた
+      'https://[::ffff:169.254.169.254]/latest/meta-data/',
+      'https://[::ffff:127.0.0.1]/webhook',
+      // 6to4。内側に IPv4 を埋め込める
+      'https://[2002:a9fe:a9fe::1]/webhook',
+      // 10進数・8進数表記の IPv4
+      'https://2130706433/webhook',
+      'https://0177.0.0.1/webhook',
     ];
 
     for (const url of internal) {
-      expect(() => mod.assertHttpsUrl(url), url).toThrow(/内部向けのアドレス/);
+      expect(() => mod.assertHttpsUrl(url), url).toThrow(/api\.aws のエンドポイント/);
     }
   });
 
-  it('外向けのホストは通す（172.16/12 の外側を巻き込まない）', () => {
-    expect(() => mod.assertHttpsUrl('https://event-ai.ap-northeast-1.api.aws/webhook')).not.toThrow();
-    expect(() => mod.assertHttpsUrl('https://172.32.0.1/webhook')).not.toThrow();
+  it('AWS 以外のドメインも弾く（許す形だけを通す）', () => {
+    // 内部アドレスを塞いでも、任意の公開ドメインへ本文を送れては意味がない。
+    // api.aws 配下は第三者が取得できないため、ここを通れば送り先は AWS に限られる
+    expect(() => mod.assertHttpsUrl('https://attacker.example/collect')).toThrow(
+      /api\.aws のエンドポイント/,
+    );
+    expect(() => mod.assertHttpsUrl('https://event-ai.ap-northeast-1.api.aws.evil.example/x')).toThrow(
+      /api\.aws のエンドポイント/,
+    );
   });
 });
 
@@ -464,7 +491,7 @@ describe('Webhook 設定のキャッシュ', () => {
 
   it('期限が切れるまでは読み直さず、切れたら新しい鍵で署名する', async () => {
     secretState.value = JSON.stringify({
-      webhookUrl: 'https://event-ai.example/webhook/generic/test',
+      webhookUrl: 'https://event-ai.ap-northeast-1.api.aws/webhook/generic/test',
       signingSecret: 'rotated',
     });
 
@@ -492,7 +519,7 @@ describe('Webhook 設定のキャッシュ', () => {
   });
 
   it('設定が JSON でないとき、中身をメッセージに載せない', async () => {
-    secretState.value = 'https://event-ai.example/webhook/generic/test';
+    secretState.value = 'https://event-ai.ap-northeast-1.api.aws/webhook/generic/test';
     vi.setSystemTime(Date.now() + 6 * 60 * 1000);
 
     // JSON.parse の例外は読めなかった中身の先頭を載せるため、握らないと URL や鍵がログに出る
@@ -501,6 +528,6 @@ describe('Webhook 設定のキャッシュ', () => {
     });
 
     await expect(run).rejects.toThrow(/JSON として読めません/);
-    await expect(run).rejects.toThrow(/^(?!.*event-ai\.example).*$/s);
+    await expect(run).rejects.toThrow(/^(?!.*event-ai\.ap-northeast-1\.api\.aws).*$/s);
   });
 });

@@ -43,26 +43,19 @@ const MAX_DESCRIPTION_CHARS = 4_000;
 const MAX_TITLE_CHARS = 200;
 
 /**
- * Webhook の送り先にできないホスト。
+ * Webhook の送り先として許すホスト名。
  *
- * 送り先は手で登録した Secrets Manager から来るので、ここが破られている時点で
- * 攻撃者はアカウント内に足場を持っている。それでも塞いでおくのは、
- * 誤って内部のエンドポイントを登録したときに調査の本文（アカウント ID や
- * リソースの ARN が入る）をそこへ投げ続けないようにするため
+ * 最初は内部向けのアドレスを1つずつ弾く形にしていたが、同じ宛先は別の書き方でも
+ * 表せる（`::ffff:169.254.169.254` のような IPv4 射影の IPv6、8進数表記の IPv4、
+ * 6to4 など）ため、塞ぎ漏れを追いかけ続けることになる。送り先は AWS が発行する
+ * Webhook エンドポイントの1つに決まっているので、許す形を書く方に変えた。
+ *
+ * 実際の値は `https://event-ai.<region>.api.aws/webhook/generic/<id>`。
+ * `api.aws` 配下は AWS のサービスエンドポイント専用で第三者が取得できないため、
+ * ここを通るホストは内部アドレスにも攻撃者のドメインにもならない。
+ * AWS 側がホスト名を変えたらここも直す（疎通確認で分かる）
  */
-const INTERNAL_HOSTNAMES: RegExp[] = [
-  /^localhost$/,
-  /^127\./,
-  /^0\.0\.0\.0$/,
-  /^10\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./,
-  // リンクローカル。EC2 / Lambda のメタデータ（169.254.169.254）を含む
-  /^169\.254\./,
-  /^::1$/,
-  /^fd[0-9a-f]{2}:/,
-  /^fe80:/,
-];
+const ALLOWED_WEBHOOK_HOST = /^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)*\.api\.aws$/;
 
 /** 調査の優先度。DevOps Agent の Webhook スキーマで決まっている値 */
 type Priority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'MINIMAL';
@@ -358,9 +351,11 @@ export function assertHttpsUrl(raw: string): string {
   }
   // IPv6 は hostname が [] 付きで返る
   const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  if (INTERNAL_HOSTNAMES.some((pattern) => pattern.test(hostname))) {
+  if (!ALLOWED_WEBHOOK_HOST.test(hostname)) {
+    // ホスト名は秘密ではない（鍵と Webhook の ID はパスと本文の側）。
+    // 出さないと登録ミスの切り分けができないので、ここだけは載せる
     throw new Error(
-      `Webhook の webhookUrl に内部向けのアドレスは指定できません: ${WEBHOOK_SECRET_ID}`,
+      `Webhook の webhookUrl は api.aws のエンドポイントでなければなりません（${hostname} が指定されています）`,
     );
   }
   return raw;
