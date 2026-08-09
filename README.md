@@ -36,6 +36,7 @@
 | 28 | データ保護（DynamoDB PITR・削除保護、S3 バージョニング） | ✅ 実装済み |
 | 29 | 監視とアラート通知（AI・サービス正常性・外形監視・AWS Health → Slack） | ✅ 実装済み ※デプロイ前に手動登録あり |
 | 30 | 新規ユーザー登録の Slack 通知（Cognito Post Confirmation → SNS） | ✅ 実装済み（Issue #66） |
+| 31 | 毎日の AWS 利用料金 Slack 通知（アカウント別・クレジット込み） | ✅ 実装済み（Issue #92）※管理アカウントへデプロイ |
 
 ### 検索・フィルタ強化（#18・完了）
 
@@ -333,6 +334,53 @@ npx cdk deploy sakekasu-dev-monitoring -c env=dev \
 ### 費用の目安
 
 概算で**月5ドル前後**。内訳は CloudWatch アラーム21件（$0.10/件）とカスタムメトリクス8種（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。カナリアの Bedrock 呼び出しは月120回・短い応答のため数円程度。
+
+## 毎日の利用料金 Slack 通知（#92）
+
+AWS の利用料金を毎日 09:05 JST に Slack へ通知する。Organization の**親アカウントと sakekasu-builder を分けて**表示し、実際に請求される額だけでなく**クレジットで賄われた分**も載せる（クレジット適用前の利用額・クレジット適用額・請求見込みの3点）。指定外のアカウントに費用が出ていれば「その他」として、組織全体の合計とあわせて表示する。
+
+```
+EventBridge（毎日 00:05 UTC）→ billing-notifier Lambda → Cost Explorer API
+                                        └→ Slack Incoming Webhook
+```
+
+### 他のスタックとの違い
+
+アカウント別の内訳（`LINKED_ACCOUNT`）を Cost Explorer で見られるのは **Organization の管理アカウントだけ**のため、このスタック（`sakekasu-billing-notifier`）は他と違い**管理アカウント（<管理アカウント ID>）へデプロイする**。環境（dev/staging/prod）にも紐づかない単一のスタックで、通常の `cdk deploy --all` に混ざらないよう `-c billing=true` を付けたときだけ合成される。
+
+対象アカウントの一覧（表示ラベル含む）は `infra/bin/app.ts` の `targetAccounts` で変更できる。
+
+### 監視
+
+レポートが止まっても気づけるよう、3つのアラーム（レポート Lambda の失敗・1日以上の沈黙・Slack 通知の失敗）を同じスタック内に持つ。通知経路は監視スタック（#29）と同じ Slack 通知 Lambda の実装を再利用している。
+
+### デプロイ手順（管理アカウント）
+
+```bash
+# 1. 管理アカウントの認証情報で入っていることを確認する
+AWS_PROFILE=yuuuuuuuki7749 aws sts get-caller-identity
+
+# 2. （初回のみ）管理アカウントを CDK bootstrap する
+cd infra
+AWS_PROFILE=yuuuuuuuki7749 npx cdk bootstrap aws://<管理アカウント ID>/ap-northeast-1 -c billing=true
+
+# 3. Slack の Incoming Webhook URL を管理アカウント側に登録する
+AWS_PROFILE=yuuuuuuuki7749 aws ssm put-parameter \
+  --name /sakekasu-billing/slack-webhook-url \
+  --type SecureString \
+  --value 'https://hooks.slack.com/services/XXX/YYY/ZZZ' \
+  --region ap-northeast-1
+
+# 4. デプロイ
+AWS_PROFILE=yuuuuuuuki7749 npx cdk deploy sakekasu-billing-notifier -c billing=true
+
+# 5. 動作確認（手動で1回実行して Slack に届くか見る）
+AWS_PROFILE=yuuuuuuuki7749 aws lambda invoke \
+  --function-name sakekasu-billing-notifier \
+  --region ap-northeast-1 /dev/stdout
+```
+
+数値は Cost Explorer の集計途中の概算（UTC 日単位）で、確定額は請求書と一致しないことがある。月初日の実行では「今月累計」が空になるため、前月まるごとを「確定」として通知する。Cost Explorer API は 1 リクエスト $0.01 で、1日2回の呼び出しなので**月1ドル未満**。
 
 ## 技術スタック
 
