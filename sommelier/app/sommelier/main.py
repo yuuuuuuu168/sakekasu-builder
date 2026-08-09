@@ -479,11 +479,23 @@ def _neutralize_text(text: str) -> Optional[str]:
     return text.replace("<", "(").replace(">", ")").replace("&", "＆")
 
 
+def _flatten_whitespace(text: str) -> str:
+    """改行を含むあらゆる空白を半角スペース1つに畳む。
+
+    ツール結果は JSON として渡るので改行は文字列の中に収まるが、
+    システムプロンプトは地の文なので改行がそのまま構造になる。
+    山括弧を潰すだけでは "\\n# 新しいルール" のような見出しを差し込まれると、
+    <user_data> の囲みの中にいながら「# セキュリティ」と同じ高さの節に
+    見えてしまう。1行に畳んで、箇条書きの1項目から出られないようにする。
+    """
+    return " ".join(text.split())
+
+
 def _build_system_prompt(preferences: list) -> str:
     """学習済みの好みをシステムプロンプトへ差し込む。好みが無ければ元のまま。
 
     好みは LLM がユーザー入力から抽出した文章なので、ツール結果と同じ
-    無害化を通し <user_data> で囲んでから渡す。
+    無害化を通し、1行に畳んでから <user_data> で囲んで渡す。
     """
     lines = []
     for preference in preferences:
@@ -492,7 +504,12 @@ def _build_system_prompt(preferences: list) -> str:
         safe = _neutralize_text(preference[:MAX_PREFERENCE_TEXT_LENGTH])
         # 正規化が収束しない文字列は、記録側と違って差し替えずに捨てる。
         # 好みは無くても相談は成立するので、疑わしいものを渡す理由がない
-        if safe is None or not safe.strip():
+        if safe is None:
+            continue
+        # 畳むのは NFKC の後。NFKC は全角スペースなどを半角へ寄せるため、
+        # 先に畳むと正規化で新しく現れた空白が残る
+        safe = _flatten_whitespace(safe)
+        if not safe:
             continue
         lines.append(f"- <user_data>{safe[:MAX_PREFERENCE_TEXT_LENGTH]}</user_data>")
 
@@ -878,14 +895,23 @@ async def invoke(payload, context):
 
     # 今回のやり取りを長期記憶に残す（次の相談で引き当てる好みの材料）。
     # 応答はすでに返し終えているので、ここで失敗しても相談には影響しない。
-    # 途中で中断された場合はこの行に到達せず、中途半端な会話は記録されない
+    # 途中で中断された場合はこの行に到達せず、中途半端な会話は記録されない。
+    #
+    # 応答も無害化してから残す。ユーザーの発話が無害化済みでも、そこから
+    # 誘導された応答の文面までは縛れない。記憶は好みの抽出を経て次回の
+    # システムプロンプトに載るため、書く側でも一度潰しておく
+    # （読み出し側の _build_system_prompt と二重にかける）
+    reply = _neutralize_text("".join(reply_parts))
+    if reply is None:
+        log.warning("正規化が収束しない応答だったため記憶に残しません")
+        return
     try:
         await asyncio.to_thread(
             _preference_memory.remember,
             owner_sub,
             getattr(context, "session_id", None),
             prompt,
-            "".join(reply_parts),
+            reply,
         )
     except Exception as err:
         log.warning("好みの記録を試みて失敗しました: %s", err)
