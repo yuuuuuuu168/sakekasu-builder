@@ -234,7 +234,9 @@ AWS_PROFILE=sakekasu-builder aws bedrock-agentcore list-memory-records \
   --namespace "sommelier/preference/<Cognitoのsub>"
 ```
 
-抽出は非同期なので、会話直後は空でも数分待つと入る。イベント自体が入っていないなら書き込み側（`CreateEvent`）の問題で、Runtime のログに「好みの記録に失敗しました」が出ているはず。イベントはあるのにレコードが増えないなら抽出側の問題で、Memory の実行ロール（`AgentCore-sommelier-dev` スタックが作る）に権限を足す必要がある。
+抽出は非同期なので、会話直後は空でも数分待つと入る。イベント自体が入っていないなら書き込み側（`CreateEvent`）の問題で、Runtime のログに「好みの記録に失敗しました」が出ているはず。
+
+イベントはあるのにレコードが増えないなら抽出側の問題。L3 コンストラクトが作る Memory の実行ロールには、synth で見るかぎり信頼ポリシーだけで**権限ポリシーが1つも付いていない**。プロンプトやモデルを差し替えない素の組み込みストラテジは AWS 側の推論で動くため本来これで足りるはずだが、そうでなかった場合は実行ロール（`AgentCore-sommelier-dev` スタックが作る `...MemoryPreferenceExecutionRole...`）に `AmazonBedrockAgentCoreMemoryBedrockModelInferenceExecutionRolePolicy` を貼れば抽出が動きだす。
 
 Runtime の ARN はフロントの `src/features/sommelier/config.ts` に持つ（`VITE_SOMMELIER_RUNTIME_ARN` で上書き可）。Runtime を作り直したら更新する。
 
