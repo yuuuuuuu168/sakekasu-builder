@@ -55,6 +55,7 @@
 | 監視とアラート通知 | 22アラーム（AI・サービス正常性・外形監視・カナリア）と AWS Health を Slack へ。デプロイ前に手動登録あり |
 | 新規ユーザー登録の Slack 通知 | Cognito Post Confirmation → SNS（[#66](https://github.com/yuuuuuu168/sakekasu-builder/issues/66)） |
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuu168/sakekasu-builder/issues/92)） |
+| DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。コンソール側の設定あり（[#67](https://github.com/yuuuuuu168/sakekasu-builder/issues/67)） |
 | CDK デプロイの自動化 | main へのマージで GitHub Actions が `cdk deploy`（OIDC 認証、[#94](https://github.com/yuuuuuu168/sakekasu-builder/issues/94)） |
 | 一覧画面の画像表示高速化 | サムネイル生成・Presigned URL キャッシュ・遅延読み込み |
 
@@ -88,8 +89,7 @@
 
 | やりたいこと | メモ | Issue |
 |------------|------|-------|
-| DevOps Agent による自動インシデント調査 | アラーム発報をそのままエージェントに渡して調査を始めさせる | [#67](https://github.com/yuuuuuu168/sakekasu-builder/issues/67) |
-| Application Signals | 分散トレース・ゴールデンメトリクス・SLO | [#86](https://github.com/yuuuuuu168/sakekasu-builder/issues/86) |
+| Application Signals | 分散トレース・ゴールデンメトリクス・SLO。DevOps Agent の調査インプットも厚くなる | [#86](https://github.com/yuuuuuu168/sakekasu-builder/issues/86) |
 | Security Agent の Agent Space 移行 | 管理アカウントから運用ツール専用アカウントへ | [#107](https://github.com/yuuuuuu168/sakekasu-builder/issues/107) |
 | 登録データの傾向分析を Quick Suite で外出し | アプリ本体には組み込まない方針 | [#74](https://github.com/yuuuuuu168/sakekasu-builder/issues/74) |
 | 画像表示のさらなる高速化 | Presigned URL のバッチ取得・CloudFront + OAC。体感で困っていなければ優先度は低い | [#54](https://github.com/yuuuuuu168/sakekasu-builder/issues/54) |
@@ -531,6 +531,31 @@ AWS_PROFILE=yuuuuuuuki7749 aws lambda invoke \
 
 数値は Cost Explorer の集計途中の概算（UTC 日単位）で、確定額は請求書と一致しないことがある。月初日の実行では「今月累計」が空になるため、前月まるごとを「確定」として通知する。Cost Explorer API は 1 リクエスト $0.01 で、1日3回の呼び出し（アカウント別の今月・昨日、サービス別の今月）なので**月1ドル前後**。
 
+## DevOps Agent による自動インシデント調査（Issue #67）
+
+アラームが鳴ってから調べ始めるまでの時間をなくすため、CloudWatch アラームの発報をそのまま AWS DevOps Agent に渡して調査を始めさせる。エージェントがテレメトリ・ログ・デプロイ履歴を突き合わせ、根本原因と緩和策を専用の Slack チャンネルに投稿する。
+
+```
+SNS（dev-sakekasu-alerts）┬→ Slack 通知 Lambda → Slack（既存のアラートチャンネル）
+                          └→ 転送 Lambda → DevOps Agent Webhook → 自動調査 → Slack（専用チャンネル）
+```
+
+既存の Slack 通知は変えていない。転送 Lambda は同じトピックをもう1つの購読者として受け取るだけなので、エージェント側が止まってもアラート自体は届く。
+
+Agent Space は運用ツール専用アカウント（`<運用アカウント ID>` / `ops-tooling`）に置き、調査対象はアプリ本体のアカウント（`<アプリのアカウント ID>`）。CDK が作るのはアプリ本体側の2つで、調査用のクロスアカウントロール（読み取り専用）と、アラームを Webhook へ転送する Lambda。Agent Space の作成・Slack 連携・GitHub 連携・Webhook の発行はコンソールでの手作業になる。
+
+エージェントは秒課金なので、投げるものを絞っている。アラームは `ALARM` に変わったときだけ（復旧では投げない）、AWS Health は実際の障害だけ（予定された変更では投げない）、転送 Lambda 自身の失敗アラームは捨てる。
+
+`agentSpaceArn` がコンテキストに入っているときだけスタックが合成される。コンソール作業が済むまでは `cdk deploy --all` に混ざらない。
+
+```bash
+cd infra
+AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev \
+  -c agentSpaceArn=arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/xxxxxxxx
+```
+
+セットアップ手順、優先度の割り当て、カスタムスキルに入れる運用ナレッジ、費用の詳細は [docs/devops-agent.md](docs/devops-agent.md) にまとめてある。
+
 ## 技術スタック
 
 - React 19 + TypeScript 5.9
@@ -563,11 +588,12 @@ src/
   components/    # 共通コンポーネント（shadcn/ui, ThemeProvider 等）
 infra/
   lib/           # CDK スタック（auth / api / monitoring / health-global /
-                 #                billing-notifier / github-oidc）
+                 #                billing-notifier / devops-agent / github-oidc）
   graphql/       # AppSync GraphQL スキーマ
   lambda/        # Lambda 関数（presigned-url, ocr-analyzer, health-check,
                  #              slack-notifier, sommelier-canary,
-                 #              signup-notifier, billing-notifier）
+                 #              signup-notifier, billing-notifier,
+                 #              devops-agent-webhook）
   scripts/       # amplify_outputs.json 生成、サムネイルのバックフィル
 sommelier/       # AgentCore プロジェクト（ソムリエエージェント）
   app/sommelier/ # Strands Agent 本体（Python）
@@ -581,6 +607,7 @@ docs/            # 設計ドキュメント
 | ドキュメント | 内容 |
 |------------|------|
 | [docs/agentcore-phase1-design.md](docs/agentcore-phase1-design.md) | ソムリエ Phase 1 の設計（認証の二段構え・ツール設計・決定事項） |
+| [docs/devops-agent.md](docs/devops-agent.md) | DevOps Agent のセットアップ手順・優先度の割り当て・カスタムスキル・費用 |
 | [docs/claude-code-web.md](docs/claude-code-web.md) | Claude Code on the web での開発環境（外出先から PR まで） |
 
 ## セットアップ
