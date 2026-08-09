@@ -221,6 +221,12 @@ AWS_PROFILE=sakekasu-builder agentcore deploy --target dev
 cd sommelier/agentcore/cdk && npm ci && npm test
 ```
 
+##### agentcore deploy は CDK の依存を勝手に上げる
+
+`agentcore deploy` は本体の処理に入る前に `agentcore/cdk` の依存を最新へ書き換えて `npm install` まで走らせる。**CI が確かめた版と、実際にデプロイされる版が別物になりうる**（2026-08-09 のデプロイでは `@aws/agentcore-cdk` が alpha.20 から alpha.45 へ飛び、`Namespaces` が `NamespaceTemplates` に改名されていた）。
+
+デプロイしたら `package.json` と `package-lock.json` の差分を見て、`npm test` を新しい版で通し直す。テストが落ちたらデプロイ済みのものが落ちているということなので、先に中身を確かめる。この自動更新を止めるなら `agentcore config disableDependencyManagement true`。
+
 ##### デプロイ後に好み学習が生きているか確かめる
 
 好み学習はフェイルオープンなので、**動いていなくても画面上は「好みを覚えていないだけ」にしか見えない**。抽出はサービス側の非同期処理で、Memory の実行ロールに権限が足りなければ黙って止まる。デプロイしたら数往復会話してから、レコードが増えているか一度だけ確認する。
@@ -234,9 +240,11 @@ AWS_PROFILE=sakekasu-builder aws bedrock-agentcore list-memory-records \
   --namespace "sommelier/preference/<Cognitoのsub>"
 ```
 
-抽出は非同期なので、会話直後は空でも数分待つと入る。イベント自体が入っていないなら書き込み側（`CreateEvent`）の問題で、Runtime のログに「好みの記録に失敗しました」が出ているはず。
+抽出は非同期だが、2026-08-09 に確かめたかぎりでは会話の1〜2分後にはレコードが入っていた。空のまましばらく変わらないなら、どちら側が止まっているかで切り分ける。イベント自体が入っていないなら書き込み側（`CreateEvent`）の問題で、Runtime のログに「好みの記録に失敗しました」が出ているはず。
 
-イベントはあるのにレコードが増えないなら抽出側の問題。L3 コンストラクトが作る Memory の実行ロールには、synth で見るかぎり信頼ポリシーだけで**権限ポリシーが1つも付いていない**。プロンプトやモデルを差し替えない素の組み込みストラテジは AWS 側の推論で動くため本来これで足りるはずだが、そうでなかった場合は実行ロール（`AgentCore-sommelier-dev` スタックが作る `...MemoryPreferenceExecutionRole...`）に `AmazonBedrockAgentCoreMemoryBedrockModelInferenceExecutionRolePolicy` を貼れば抽出が動きだす。
+イベントはあるのにレコードが増えないなら抽出側の問題。ここで実行ロールを疑いたくなるが、**疑わなくてよい**。L3 コンストラクトが作る Memory の実行ロールには信頼ポリシーだけで権限ポリシーが1つも付いておらず、それでも抽出は動いている（2026-08-09 に実測）。プロンプトもモデルも差し替えていない素の組み込みストラテジは AWS 側の推論で動くため、`memoryExecutionRoleArn` に Bedrock の権限は要らない（[Customize a built-in strategy or create your own strategy](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory-custom-strategy.html) が権限を要求しているのは、組み込みを上書きした場合と自前ストラテジの場合）。
+
+ストラテジを上書きするよう変えたときは話が別で、そのときは実行ロール（`AgentCore-sommelier-dev` スタックが作る `...MemoryPreferenceExecutionRole...`）に `AmazonBedrockAgentCoreMemoryBedrockModelInferenceExecutionRolePolicy` が要る。
 
 Runtime の ARN はフロントの `src/features/sommelier/config.ts` に持つ（`VITE_SOMMELIER_RUNTIME_ARN` で上書き可）。Runtime を作り直したら更新する。
 

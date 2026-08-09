@@ -75,26 +75,20 @@ export class AgentCoreStack extends Stack {
       // 権限を付けられないまま進むと、権限不足のエージェントが黙って
       // デプロイされる。設定ミスは synth 時に落とす（フェイルクローズ）
       if (!environment) {
-        throw new Error(
-          `エージェント "${agent.name}" の環境が見つからないため権限を付与できません`,
-        );
+        throw new Error(`エージェント "${agent.name}" の環境が見つからないため権限を付与できません`);
       }
 
       for (const tableEnvName of TABLE_ENV_NAMES) {
-        const tableName = agent.envVars?.find(
-          (v) => v.name === tableEnvName,
-        )?.value;
+        const tableName = agent.envVars?.find(v => v.name === tableEnvName)?.value;
         if (!tableName) {
-          throw new Error(
-            `エージェント "${agent.name}" に ${tableEnvName} が設定されていません`,
-          );
+          throw new Error(`エージェント "${agent.name}" に ${tableEnvName} が設定されていません`);
         }
         // formatArn は文字列連結なので、設定ファイルの値をそのまま渡すと
         // "*" や "/" を仕込まれた場合に権限が意図せず広がる。
         // DynamoDB のテーブル名として妥当な文字だけを許可する
         if (!DYNAMODB_TABLE_NAME_PATTERN.test(tableName)) {
           throw new Error(
-            `${tableEnvName} の値が不正です: "${tableName}"（使用できるのは英数字と _ . - の3〜255文字）`,
+            `${tableEnvName} の値が不正です: "${tableName}"（使用できるのは英数字と _ . - の3〜255文字）`
           );
         }
 
@@ -109,7 +103,7 @@ export class AgentCoreStack extends Stack {
             // GSI 経由で読むためインデックスも対象にするが、実際に使う
             // owner-index だけに限定する（今後 GSI が増えても自動で広がらない）
             resources: [tableArn, `${tableArn}/index/${OWNER_INDEX_NAME}`],
-          }),
+          })
         );
       }
     }
