@@ -6,10 +6,66 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { Runtime } from 'aws-cdk-lib/aws-lambda';
+import { Architecture, LayerVersion, Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
+
+/**
+ * Application Signals 用の ADOT レイヤー（Node.js / x86_64 / ap-northeast-1）。
+ *
+ * 名前にランタイムのバージョンが埋まっているため、上げるときは ARN ごと差し替える。
+ * 実在は `aws lambda get-layer-version-by-arn` で確認できる。
+ *
+ * @see https://aws-otel.github.io/docs/getting-started/lambda
+ */
+const ADOT_NODEJS_LAYER_ARN =
+  'arn:aws:lambda:ap-northeast-1:901920570463:layer:aws-otel-nodejs-amd64-ver-1-30-2:1';
+
+/**
+ * Lambda に Application Signals の計装を付ける（Issue #86）。
+ *
+ * ADOT のレイヤーが起動時に割り込んで OpenTelemetry を仕込むので、
+ * 関数のコードには手を入れない。これでレイテンシー・エラー率・リクエスト数と、
+ * 下流（Bedrock / S3 / DynamoDB）への呼び出しがトレースとして送られる。
+ *
+ * レイヤーは x86_64 版を指しているため、関数側もアーキテクチャを明示している
+ * （既定値に任せると、既定が変わったときに黙って噛み合わなくなる）。
+ */
+function enableApplicationSignals(fn: NodejsFunction): void {
+  // レイヤーは同じリージョンのものしか付けられない。合成の時点で気づかないと、
+  // デプロイは通ってコールドスタートだけが InvalidParameterValueException で落ちる
+  const stackRegion = cdk.Stack.of(fn).region;
+  if (
+    !cdk.Token.isUnresolved(stackRegion) &&
+    !ADOT_NODEJS_LAYER_ARN.includes(`:${stackRegion}:`)
+  ) {
+    throw new Error(
+      `ADOT のレイヤーが ${stackRegion} のものではありません（${ADOT_NODEJS_LAYER_ARN}）。` +
+        ' リージョンを変えるときは ADOT_NODEJS_LAYER_ARN も差し替える',
+    );
+  }
+
+  fn.addLayers(LayerVersion.fromLayerVersionArn(fn, 'AdotLayer', ADOT_NODEJS_LAYER_ARN));
+  fn.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/otel-instrument');
+
+  // レイヤーと権限は必ず揃っていないといけない。権限だけ落ちると、
+  // 起動したレイヤーが X-Ray に書けずに毎回 AccessDenied で落ちる。
+  // 既定のロールを使う限り undefined にはならないが、あとから
+  // 外部のロールを渡す変更が入ったときに黙って壊れないようにする
+  if (!fn.role) {
+    throw new Error(
+      `${fn.node.id} に実行ロールがありません。Application Signals の計装には` +
+        '書き込み権限が要るため、外部から渡したロールでは有効にできない',
+    );
+  }
+  fn.role.addManagedPolicy(
+    iam.ManagedPolicy.fromAwsManagedPolicyName(
+      'CloudWatchLambdaApplicationSignalsExecutionRolePolicy',
+    ),
+  );
+}
 
 export interface ApiStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
@@ -146,6 +202,11 @@ export class ApiStack extends cdk.Stack {
           '../lambda/presigned-url/index.ts',
         ),
         handler: 'handler',
+        // ADOT レイヤーが x86_64 版なので明示して合わせる
+        architecture: Architecture.X86_64,
+        // Application Signals と一緒に使うと、リクエスト単位で
+        // どこに時間がかかったかまで辿れる
+        tracing: Tracing.ACTIVE,
         environment: {
           BUCKET_NAME: this.imageBucket.bucketName,
           UPLOAD_EXPIRY: '300',
@@ -158,6 +219,9 @@ export class ApiStack extends cdk.Stack {
         },
       },
     );
+
+    // 画像アップロードの入口。詰まると記録そのものが作れないため計装する
+    enableApplicationSignals(this.presignedUrlFunction);
 
     // Lambda に S3 読み書き権限を付与
     this.imageBucket.grantReadWrite(this.presignedUrlFunction);
@@ -202,6 +266,8 @@ export class ApiStack extends cdk.Stack {
       handler: 'handler',
       timeout: cdk.Duration.seconds(30),
       memorySize: 512,
+      architecture: Architecture.X86_64,
+      tracing: Tracing.ACTIVE,
       environment: {
         BUCKET_NAME: this.imageBucket.bucketName,
         BEDROCK_MODEL_ID: 'jp.anthropic.claude-haiku-4-5-20251001-v1:0',
@@ -212,6 +278,9 @@ export class ApiStack extends cdk.Stack {
         banner: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
       },
     });
+
+    // Bedrock を呼ぶぶん遅延もエラーも起きやすい。下流ごとの内訳を見たいので計装する
+    enableApplicationSignals(this.ocrAnalyzerFunction);
 
     // S3 読み取り権限
     this.imageBucket.grantRead(this.ocrAnalyzerFunction);

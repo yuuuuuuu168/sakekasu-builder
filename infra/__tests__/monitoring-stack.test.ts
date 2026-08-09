@@ -391,4 +391,23 @@ describe('MonitoringStack', () => {
     // トピックは同スタック内なので Ref で参照される
     expect(JSON.stringify(health!.Properties.Targets[0])).toContain('AlertTopic');
   });
+
+  // Issue #86: Application Signals
+  describe('Application Signals', () => {
+    it('サービス検出を有効にする（これが無いとサービスマップに何も出ない）', () => {
+      template.resourceCountIs('AWS::ApplicationSignals::Discovery', 1);
+    });
+
+    it('Transaction Search を低いインデックス率で有効にする', () => {
+      // 取り込みとは別にインデックス済みスパンで課金されるため、
+      // 先頭 1%（無料枠）から始める
+      template.hasResourceProperties('AWS::XRay::TransactionSearchConfig', {
+        IndexingPercentage: 1,
+      });
+    });
+
+    it('アカウントに1つのリソースを重複して作らない', () => {
+      template.resourceCountIs('AWS::XRay::TransactionSearchConfig', 1);
+    });
+  });
 });
