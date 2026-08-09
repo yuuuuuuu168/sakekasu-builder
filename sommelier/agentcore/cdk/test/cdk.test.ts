@@ -62,14 +62,19 @@ function actionsOf(statement: any): string[] {
   return actions as string[];
 }
 
-/** IAM のワイルドカードを展開して、その action に届くかを見る */
+/**
+ * その許可がその action に届くかを、IAM の照合規則に合わせて見る。
+ * IAM のワイルドカードは * と ? の2つで、action 名の大文字小文字は区別しない。
+ * 照合を IAM より狭く書くと、届いている許可を数え落として素通りさせてしまう
+ */
 function grants(granted: string, action: string): boolean {
-  if (!granted.includes('*')) return granted === action;
   const pattern = granted
-    .split('*')
-    .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-    .join('.*');
-  return new RegExp(`^${pattern}$`).test(action);
+    .toLowerCase()
+    // ワイルドカードの2文字は残し、それ以外の正規表現の特殊文字だけ潰してから展開する
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
+  return new RegExp(`^${pattern}$`).test(action.toLowerCase());
 }
 
 /** その action を許可している Statement をすべて拾う（* でまとめて許可しているものも含む） */
@@ -166,12 +171,14 @@ describe('好み学習用の AgentCore Memory', () => {
   });
 
   // 上の2つは「その action に届く Statement が1つだけ」を見ている。
-  // ワイルドカードは展開して数えているので * 経由でも数に出るが、
+  // ワイルドカードは展開して数えているので * や ? 経由でも数に出るが、
   // 数え上げの網から外れる形（NotAction、組み込み関数）を疑わずに済むよう、
   // そもそもワイルドカードを書かせない側でも止めておく。
   test('action をワイルドカードで与えない', () => {
     const wildcards = allPolicyStatements().filter(
-      statement => statement.Effect === 'Allow' && actionsOf(statement).some(action => action.includes('*'))
+      statement =>
+        statement.Effect === 'Allow' &&
+        actionsOf(statement).some(action => action.includes('*') || action.includes('?'))
     );
     expect(wildcards).toEqual([]);
   });
