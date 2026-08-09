@@ -124,77 +124,42 @@ describe('ApiStack', () => {
 
   // Issue #86: Application Signals の計装
   describe('Application Signals の計装', () => {
-    const instrumented = [
-      'dev-sakekasu-ocr-analyzer',
-      'dev-sakekasu-presigned-url',
-    ];
+    const targets = ['dev-sakekasu-ocr-analyzer', 'dev-sakekasu-presigned-url'];
 
-    it.each(instrumented)('%s に ADOT レイヤーと起動ラッパーが入っている', (functionName) => {
-      template.hasResourceProperties('AWS::Lambda::Function', {
-        FunctionName: functionName,
-        Layers: Match.arrayWith([
-          Match.stringLikeRegexp('^arn:aws:lambda:ap-northeast-1:901920570463:layer:aws-otel-nodejs-amd64-'),
-        ]),
-        Environment: {
-          Variables: Match.objectLike({
-            AWS_LAMBDA_EXEC_WRAPPER: '/opt/otel-instrument',
-          }),
-        },
-      });
-    });
-
-    it.each(instrumented)('%s のアーキテクチャがレイヤーと揃っている', (functionName) => {
-      // レイヤーは amd64 版。arm64 に変わると起動時に噛み合わなくなる
-      template.hasResourceProperties('AWS::Lambda::Function', {
-        FunctionName: functionName,
-        Architectures: ['x86_64'],
-      });
-    });
-
-    it.each(instrumented)('%s の X-Ray アクティブトレースが有効である', (functionName) => {
+    it.each(targets)('%s の X-Ray アクティブトレースが有効である', (functionName) => {
+      // レイヤーに依存せず Lambda 単体で動くぶん。計装を外しても残している
       template.hasResourceProperties('AWS::Lambda::Function', {
         FunctionName: functionName,
         TracingConfig: { Mode: 'Active' },
       });
     });
 
-    it('計装した関数の実行ロールに Application Signals 用の管理ポリシーが付いている', () => {
-      const roles = Object.values(template.findResources('AWS::IAM::Role')).filter((role) =>
-        JSON.stringify(role.Properties?.ManagedPolicyArns ?? []).includes(
-          'CloudWatchLambdaApplicationSignalsExecutionRolePolicy',
-        ),
+    it.each(targets)('%s のアーキテクチャを明示している', (functionName) => {
+      // レイヤーを付け直すときに既定値と噛み合わなくなるのを防ぐ
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: functionName,
+        Architectures: ['x86_64'],
+      });
+    });
+
+    it('起動ラッパーを指定した関数が無い（実機で確認できていないレイヤーを使わない）', () => {
+      // ラッパーだけ指定してレイヤーに実体が無いと、関数は Runtime.ExitError で
+      // 起動しなくなる。実際にこれで画像アップロードを全滅させた。
+      // 付け直すときは、レイヤーに /opt/otel-instrument があることを
+      // 実機で確かめてからこのテストを変える
+      const withWrapper = Object.values(template.findResources('AWS::Lambda::Function')).filter(
+        (fn) => fn.Properties?.Environment?.Variables?.AWS_LAMBDA_EXEC_WRAPPER !== undefined,
       );
 
-      // OCR と presigned-url の2つ
-      expect(roles).toHaveLength(2);
+      expect(withWrapper).toHaveLength(0);
     });
 
-    it('レイヤーと違うリージョンに置こうとすると合成の時点で止まる', () => {
-      // レイヤーは同じリージョンのものしか付けられない。ここで止めないと、
-      // デプロイは通ってコールドスタートだけが落ちる
-      const otherRegion = new cdk.App();
-      const auth = new AuthStack(otherRegion, 'OtherRegionAuth', {
-        envName: 'dev',
-        env: { account: '<アプリのアカウント ID>', region: 'us-east-1' },
-      });
+    it('レイヤーを付けた関数が無い', () => {
+      const withLayers = Object.values(template.findResources('AWS::Lambda::Function')).filter(
+        (fn) => (fn.Properties?.Layers ?? []).length > 0,
+      );
 
-      expect(
-        () =>
-          new ApiStack(otherRegion, 'OtherRegionApi', {
-            envName: 'dev',
-            userPool: auth.userPool,
-            env: { account: '<アプリのアカウント ID>', region: 'us-east-1' },
-          }),
-      ).toThrow(/us-east-1 のものではありません/);
-    });
-
-    it('監視系の関数までは計装しない（ノイズと費用を増やさない）', () => {
-      const functions = Object.values(template.findResources('AWS::Lambda::Function'));
-      const instrumentedNames = functions
-        .filter((fn) => (fn.Properties?.Layers ?? []).length > 0)
-        .map((fn) => fn.Properties?.FunctionName as string);
-
-      expect(instrumentedNames.sort()).toEqual([...instrumented].sort());
+      expect(withLayers).toHaveLength(0);
     });
   });
 });
