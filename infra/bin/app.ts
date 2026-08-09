@@ -15,8 +15,9 @@ const app = new cdk.App();
 // 使用例: npx cdk deploy sakekasu-billing-notifier -c billing=true
 if (app.node.tryGetContext('billing')) {
   new BillingNotifierStack(app, 'sakekasu-billing-notifier', {
+    // 個別に内訳を出すアカウント。組織全体の合計は常に出るため、
+    // 親アカウント単体の表示は不要という判断（Issue #92 のレビュー）
     targetAccounts: [
-      { id: '<管理アカウント ID>', label: '親アカウント（管理）' },
       { id: '<アプリのアカウント ID>', label: 'sakekasu-builder（アプリ本体）' },
     ],
     // Organization の管理アカウント。デプロイ時はこのアカウントの認証情報が必要

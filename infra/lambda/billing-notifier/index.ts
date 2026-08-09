@@ -36,6 +36,12 @@ export interface AccountCost {
 /** アカウント ID → 集計。合計は呼び出し側で全アカウントを足して出す */
 export type CostsByAccount = Map<string, AccountCost>;
 
+/** アカウント ID → サービス名 → クレジット適用前の利用額（USD） */
+export type ServiceCostsByAccount = Map<string, Map<string, number>>;
+
+/** レポートに載せる上位サービスの数 */
+const TOP_SERVICES_LIMIT = 5;
+
 /** レポートが対象とする期間。日付は Cost Explorer に合わせて UTC 基準 */
 export interface ReportPeriods {
   /** 昨日1日分: [start, end) */
@@ -105,6 +111,42 @@ export function aggregateByAccount(results: ResultByTime[]): CostsByAccount {
   return costs;
 }
 
+/**
+ * Cost Explorer の応答（LINKED_ACCOUNT × SERVICE のグループ）を
+ * アカウントごと・サービスごとに集計する。クエリ側でクレジットを
+ * 除外しているため、ここの値は「クレジット適用前の利用額」になる
+ */
+export function aggregateServicesByAccount(results: ResultByTime[]): ServiceCostsByAccount {
+  const costs: ServiceCostsByAccount = new Map();
+
+  for (const result of results) {
+    for (const group of result.Groups ?? []) {
+      const [accountId, service] = group.Keys ?? [];
+      if (!accountId || !service) continue;
+
+      const amount = Number(group.Metrics?.UnblendedCost?.Amount ?? '0');
+      if (Number.isNaN(amount)) continue;
+
+      const services = costs.get(accountId) ?? new Map<string, number>();
+      services.set(service, (services.get(service) ?? 0) + amount);
+      costs.set(accountId, services);
+    }
+  }
+
+  return costs;
+}
+
+/** 全アカウントのサービス別費用を1つに合算する（組織全体の内訳用） */
+export function sumServicesAcrossAccounts(costs: ServiceCostsByAccount): Map<string, number> {
+  const total = new Map<string, number>();
+  for (const services of costs.values()) {
+    for (const [service, amount] of services) {
+      total.set(service, (total.get(service) ?? 0) + amount);
+    }
+  }
+  return total;
+}
+
 /** "$12.34" / "-$0.12" の形式。Slack で桁が読みやすいよう2桁固定 */
 export function formatUsd(amount: number): string {
   // -0.0001 のような誤差で "-$0.00" と表示されないよう丸めてから符号を見る
@@ -127,15 +169,6 @@ function sumCosts(costs: Iterable<AccountCost>): AccountCost {
   return total;
 }
 
-/** 指定アカウント以外（その他）の合計。組織にアカウントが増えても取りこぼさない */
-function sumOtherAccounts(costs: CostsByAccount, targets: TargetAccount[]): AccountCost {
-  const targetIds = new Set(targets.map((t) => t.id));
-  const others = [...costs.entries()]
-    .filter(([accountId]) => !targetIds.has(accountId))
-    .map(([, cost]) => cost);
-  return sumCosts(others);
-}
-
 /** 1アカウント分の表示。利用額・クレジット・請求額を1行ずつ並べる */
 function costLines(monthly: AccountCost, daily: AccountCost): string {
   return [
@@ -147,14 +180,61 @@ function costLines(monthly: AccountCost, daily: AccountCost): string {
 }
 
 /**
+ * サービス名は AWS 由来の文字列のため、mrkdwn が解釈する文字だけ無害化する。
+ * （例: "AWS Cost & Usage Report" のような & を含む名前がある）
+ */
+function escapeMrkdwn(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** 利用料の上位サービスを並べる。残りは「その他」に合算して合計と突き合わせられるようにする */
+function serviceLines(services: Map<string, number>): string {
+  const sorted = [...services.entries()].sort(([, a], [, b]) => b - a);
+  const top = sorted.slice(0, TOP_SERVICES_LIMIT);
+  const rest = sorted.slice(TOP_SERVICES_LIMIT).reduce((sum, [, amount]) => sum + amount, 0);
+
+  if (top.length === 0) return '_今月の利用はまだありません_';
+
+  const lines = top.map(
+    ([service, amount], index) => `${index + 1}. ${escapeMrkdwn(service)}: ${formatUsd(amount)}`,
+  );
+  // 表示上 $0.00 になる端数だけの場合は載せない
+  if (Math.round(rest * 100) !== 0) {
+    lines.push(`その他: ${formatUsd(rest)}`);
+  }
+  return lines.join('\n');
+}
+
+/** 1セクション分（見出し＋費用サマリー＋上位サービス）を組み立てる */
+function accountSection(
+  title: string,
+  monthly: AccountCost,
+  daily: AccountCost,
+  services: Map<string, number>,
+): unknown {
+  return {
+    type: 'section',
+    text: {
+      type: 'mrkdwn',
+      text:
+        `${title}\n` +
+        `${costLines(monthly, daily)}\n` +
+        `*上位サービス（今月・クレジット適用前）*\n` +
+        serviceLines(services),
+    },
+  };
+}
+
+/**
  * Slack へ送るブロックを組み立てる。
- * 値はすべて自前で整形した数値と定数ラベルのため、mrkdwn のエスケープは不要
+ * 組織全体の合計を先頭に置き、続けて指定アカウントを個別に載せる
  */
 export function buildBlocks(
   targets: TargetAccount[],
   periods: ReportPeriods,
   monthlyCosts: CostsByAccount,
   dailyCosts: CostsByAccount,
+  monthlyServices: ServiceCostsByAccount,
 ): unknown[] {
   const monthLabel = periods.isPreviousMonth
     ? `${Number(periods.monthly.start.slice(5, 7))}月分（確定）`
@@ -178,61 +258,39 @@ export function buildBlocks(
     },
   ];
 
+  // 組織全体の合計を先頭に。全アカウント分を足すので、
+  // 個別表示していないアカウントの費用も取りこぼさない
+  blocks.push(
+    { type: 'divider' },
+    accountSection(
+      '*組織全体の合計*',
+      sumCosts(monthlyCosts.values()),
+      sumCosts(dailyCosts.values()),
+      sumServicesAcrossAccounts(monthlyServices),
+    ),
+  );
+
   for (const target of targets) {
     blocks.push(
       { type: 'divider' },
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text:
-            `*${target.label}* \`${target.id}\`\n` +
-            costLines(
-              monthlyCosts.get(target.id) ?? emptyCost(),
-              dailyCosts.get(target.id) ?? emptyCost(),
-            ),
-        },
-      },
+      accountSection(
+        `*${target.label}* \`${target.id}\``,
+        monthlyCosts.get(target.id) ?? emptyCost(),
+        dailyCosts.get(target.id) ?? emptyCost(),
+        monthlyServices.get(target.id) ?? new Map(),
+      ),
     );
   }
 
-  // 指定外のアカウントに費用が出ていたら、気づけるように載せる
-  const otherMonthly = sumOtherAccounts(monthlyCosts, targets);
-  const otherDaily = sumOtherAccounts(dailyCosts, targets);
-  if (otherMonthly.gross !== 0 || otherMonthly.credit !== 0 || otherDaily.gross !== 0) {
-    blocks.push(
-      { type: 'divider' },
+  blocks.push({
+    type: 'context',
+    elements: [
       {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `*その他のアカウント*\n${costLines(otherMonthly, otherDaily)}`,
-        },
-      },
-    );
-  }
-
-  const totalMonthly = sumCosts(monthlyCosts.values());
-  const totalDaily = sumCosts(dailyCosts.values());
-  blocks.push(
-    { type: 'divider' },
-    {
-      type: 'section',
-      text: {
         type: 'mrkdwn',
-        text: `*組織全体の合計*\n${costLines(totalMonthly, totalDaily)}`,
+        text: '<https://console.aws.amazon.com/costmanagement/home#/cost-explorer|Cost Explorer を開く>',
       },
-    },
-    {
-      type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: '<https://console.aws.amazon.com/costmanagement/home#/cost-explorer|Cost Explorer を開く>',
-        },
-      ],
-    },
-  );
+    ],
+  });
 
   return blocks;
 }
@@ -266,6 +324,26 @@ async function fetchCosts(period: { start: string; end: string }, granularity: '
     ],
   });
   return aggregateByAccount(results);
+}
+
+/**
+ * サービス別の内訳を取る。GroupBy は2次元までのため RECORD_TYPE を諦め、
+ * 代わりにフィルターでクレジットを除外して「適用前の利用額」に揃える
+ */
+async function fetchServiceCosts(period: { start: string; end: string }) {
+  const results = await getCostAndUsage({
+    TimePeriod: { Start: period.start, End: period.end },
+    Granularity: 'MONTHLY',
+    Metrics: ['UnblendedCost'],
+    GroupBy: [
+      { Type: 'DIMENSION', Key: 'LINKED_ACCOUNT' },
+      { Type: 'DIMENSION', Key: 'SERVICE' },
+    ],
+    Filter: {
+      Not: { Dimensions: { Key: 'RECORD_TYPE', Values: ['Credit'] } },
+    },
+  });
+  return aggregateServicesByAccount(results);
 }
 
 async function getWebhookUrl(): Promise<string> {
@@ -308,12 +386,13 @@ export const handler = async (): Promise<void> => {
   const targets = JSON.parse(TARGET_ACCOUNTS_JSON) as TargetAccount[];
   const periods = resolvePeriods(new Date());
 
-  const [monthlyCosts, dailyCosts] = await Promise.all([
+  const [monthlyCosts, dailyCosts, monthlyServices] = await Promise.all([
     fetchCosts(periods.monthly, 'MONTHLY'),
     fetchCosts(periods.daily, 'DAILY'),
+    fetchServiceCosts(periods.monthly),
   ]);
 
-  const blocks = buildBlocks(targets, periods, monthlyCosts, dailyCosts);
+  const blocks = buildBlocks(targets, periods, monthlyCosts, dailyCosts, monthlyServices);
   const total = sumCosts(monthlyCosts.values());
   await postToSlack(blocks, `AWS 利用料金レポート: 今月の請求見込み ${formatUsd(total.net)}`);
 };
