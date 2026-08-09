@@ -82,6 +82,41 @@ describe('runtimeSend', () => {
     expect(JSON.parse(init.body)).toEqual({ prompt: '相談', history: [] });
   });
 
+  it('添付画像を必要なキーだけに絞ってペイロードに含める', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(['data: "ok"\n\n']));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await collect(
+      runtimeSend('この中でおすすめある？', {
+        signal,
+        history: [],
+        images: [
+          // プレビュー用 dataURL のような余計なキーは送らないこと
+          {
+            format: 'jpeg',
+            data: 'aGVsbG8=',
+            dataUrl: 'data:image/jpeg;base64,aGVsbG8=',
+          } as unknown as { format: 'jpeg'; data: string },
+        ],
+      }),
+    );
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      prompt: 'この中でおすすめある？',
+      history: [],
+      images: [{ format: 'jpeg', data: 'aGVsbG8=' }],
+    });
+  });
+
+  it('画像がないときは images キー自体を送らない', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(['data: "ok"\n\n']));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await collect(runtimeSend('相談', { signal, history: [], images: [] }));
+
+    expect('images' in JSON.parse(fetchMock.mock.calls[0][1].body)).toBe(false);
+  });
+
   it('直前までの会話を文脈として送る', async () => {
     const fetchMock = vi
       .fn()

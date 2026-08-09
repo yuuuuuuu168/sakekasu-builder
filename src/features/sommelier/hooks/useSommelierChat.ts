@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatMessage, SendToSommelier } from '../types';
+import type { PreparedChatImage } from '../lib/chatImages';
 import { clearMessages, loadMessages, saveMessages } from '../lib/chatStorage';
 import { SommelierError, isAbortError, messageForError } from '../lib/errors';
 
@@ -7,7 +8,7 @@ export interface UseSommelierChatReturn {
   messages: ChatMessage[];
   /** 応答待ちかどうか */
   isResponding: boolean;
-  sendMessage: (prompt: string) => Promise<void>;
+  sendMessage: (prompt: string, images?: PreparedChatImage[]) => Promise<void>;
   /** 応答の受信を中断する */
   stop: () => void;
   /** 会話を破棄して最初からやり直す */
@@ -73,17 +74,28 @@ export function useSommelierChat(
   }, [stop, userId]);
 
   const sendMessage = useCallback(
-    async (prompt: string) => {
+    async (prompt: string, images: PreparedChatImage[] = []) => {
       const trimmed = prompt.trim();
-      if (!trimmed || isResponding) return;
+      // 写真だけの相談も許可する（「この中でおすすめある？」は文面がなくても成立する）
+      if ((!trimmed && images.length === 0) || isResponding) return;
 
       // 今回の発言を積む前の会話を、文脈として送る
       const history = messagesRef.current;
 
+      const userMessage: ChatMessage = {
+        id: createId('user'),
+        role: 'user',
+        content: trimmed,
+      };
+      if (images.length > 0) {
+        userMessage.images = images.map((image) => image.dataUrl);
+        userMessage.imageCount = images.length;
+      }
+
       const assistantId = createId('assistant');
       applyMessages((prev) => [
         ...prev,
-        { id: createId('user'), role: 'user', content: trimmed },
+        userMessage,
         { id: assistantId, role: 'assistant', content: '', isStreaming: true },
       ]);
       setIsResponding(true);
@@ -102,6 +114,10 @@ export function useSommelierChat(
         for await (const chunk of send(trimmed, {
           signal: controller.signal,
           history,
+          images:
+            images.length > 0
+              ? images.map(({ format, data }) => ({ format, data }))
+              : undefined,
         })) {
           if (controller.signal.aborted) break;
           content += chunk;
