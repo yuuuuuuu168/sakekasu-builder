@@ -70,11 +70,16 @@ READMEの機能 #21〜#23 で構想した「パーソナル酒ソムリエ・エ
 ### Agent が使う Tool（最小）
 - `list_my_purchase_records(category?, drinking_status?)` - 自分の購入記録を取得（飲みきり状態でフィルタ可）
 
-### まだ実装しない（Phase 1 の 2 回目以降）
+### Phase 1 の 2 回目（Issue #51 で実装済み）
 - ペアリング提案（料理との相性）
 - 似た銘柄レコメンド
 - 酒知識 Q&A
 - AgentCore Memory 連携（好み学習）
+
+前3つはツールを増やさず、システムプロンプトに相談の型を足して既存の
+`list_my_purchase_records` / `list_my_drinking_records` で賄っている。
+好み学習だけは `USER_PREFERENCE` ストラテジの Memory リソースを追加した。
+現在の構成は README の「AgentCore ソムリエエージェント」を参照。
 
 ## 新規追加するもの
 

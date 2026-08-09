@@ -17,5 +17,15 @@ dependencies = [
     "strands-agents >= 1.13.0",
 ]
 
+[dependency-groups]
+# テスト用。デプロイの梱包は `uv pip install -r pyproject.toml` で
+# [project].dependencies だけを入れるため、ここに足しても Runtime には載らない
+dev = ["pytest >= 8.0.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# main.py / preference_memory.py はプロジェクト直下にあるため import パスに加える
+pythonpath = ["."]
+
 [tool.hatch.build.targets.wheel]
 packages = ["."]
