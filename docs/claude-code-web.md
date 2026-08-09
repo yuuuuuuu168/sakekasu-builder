@@ -19,6 +19,20 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 - スクリプトはルートと `infra/` の `npm ci` を行う。インストール時に `package-lock.json` のハッシュを `node_modules/.package-lock.sha256` に控えておき、一致する（＝依存が変わっていない）ときだけスキップして高速起動する。ロックファイルだけ更新されたブランチでも古い依存のまま動くことはない
 - `$CLAUDE_CODE_REMOTE` がクラウド VM でだけ `true` になるため、ローカルの Claude Code セッションでは何もしない
 
+## MCP サーバー（.mcp.json・Issue #96）
+
+リポジトリ直下の `.mcp.json` で、クラウドセッションに持ち込む MCP を定義している。**AWS 認証が必要な MCP（cloudwatch / awsiac / awspricing 等）は意図的に含めていない**（長期キーを VM に置かないため。それらは Mac 作業専用）。
+
+| サーバー | 種別 | 外部に送られるもの |
+|---|---|---|
+| `aws-knowledge` | HTTP（AWS 公式） | 検索クエリが `knowledge-mcp.global.api.aws` に送られる。認証不要 |
+| `tavily-remote-mcp` | HTTP（Tavily 社） | Web 検索クエリが `mcp.tavily.com` に送られる。`TAVILY_API_KEY`（環境変数）が必要 |
+| `awslabs-aws-documentation-mcp-server` | stdio（uvx でローカル起動） | AWS ドキュメント取得のリクエストのみ。バージョンは供給網対策で `==X.Y.Z` に固定しており、更新は PR で明示的に上げる |
+
+- プロジェクトスコープの MCP は**初回セッションで承認プロンプトが出る**（無断で有効化はされない）。承認すると以後有効
+- 検索クエリは Claude が文脈から生成するため、機密にしたい値（アカウント ID 等）を検索させたくない場合はプロンプトで明示する
+- `TAVILY_API_KEY` はローカルでは `~/.zshrc.local`、クラウドでは環境設定の Environment variables で渡す。**キー本体をリポジトリに置かない**
+
 ## コスト・利用枠の注意
 
 - Web 版の利用は Max プランの共有枠（5時間枠＋週次枠）を消費する。ローカルの Claude Code やチャットと合算される
