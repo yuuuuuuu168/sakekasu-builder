@@ -32,7 +32,20 @@
       ]
     }
   ],
-  "memories": [],
+  "memories": [
+    {
+      "name": "preference",
+      "eventExpiryDuration": 90,
+      "strategies": [
+        {
+          "type": "USER_PREFERENCE",
+          "name": "sakePreference",
+          "description": "お酒の好み（味わい・産地・飲み方・シーン）を会話から抽出する",
+          "namespaces": ["sommelier/preference/{actorId}"]
+        }
+      ]
+    }
+  ],
   "credentials": [],
   "evaluators": [],
   "onlineEvalConfigs": [],

@@ -28,7 +28,7 @@
 | 20 | 写真1枚で購入登録（OCR強化の発展形） | ✅ 実装済み ※画像選択で自動OCR実行。価格・店名は手入力（Issue #49） |
 | 21 | ウィッシュリスト（買いたい銘柄の記録） | 予定（優先度：低） |
 | 22 | AgentCore ソムリエエージェント：**在庫相談**（対話型・手持ちから提案） | ✅ 実装済み（Phase 1 MVP） |
-| 23 | AgentCore ソムリエ：ペアリング提案・銘柄レコメンド・酒知識Q&A・好み学習 | 予定（Phase 1 の残り） |
+| 23 | AgentCore ソムリエ：ペアリング提案・銘柄レコメンド・酒知識Q&A・好み学習 | ✅ 実装済み（Issue #51）※好み学習は AgentCore Memory |
 | 24 | AgentCore：外部情報連携（新発売・イベント情報収集、Webレビュー要約） | 予定（AgentCore Phase 2） |
 | 25 | AgentCore：分析・定期実行（月次振り返りレポート・節酒プランナー・高度なリピート判定） | 予定（AgentCore Phase 3） |
 | 26 | 一覧画面の画像表示高速化 | ✅ 実装済み |
@@ -111,13 +111,20 @@
 
 | Phase | 内容 | 状態 |
 |-------|------|------|
-| 1 | 対話 UI + 記録参照（在庫相談・ペアリング・銘柄レコメンド・Q&A） | 🔵 **在庫相談まで完了**（残りは #23） |
+| 1 | 対話 UI + 記録参照（在庫相談・ペアリング・銘柄レコメンド・Q&A・好み学習） | ✅ 完了 |
 | 2 | 外部情報収集（新発売情報・レビュー要約） | 予定 |
 | 3 | 定期実行系（月次レポート・節酒プランナー・傾向分析） | 予定 |
 
-#### Phase 1 MVP（在庫相談）の構成
+#### Phase 1 の構成
 
-画面右下の 🍶 ボタンからどのページでも相談でき、手持ちの購入記録をもとに提案が返る。
+画面右下の 🍶 ボタンからどのページでも相談できる。受けるのは4種類。
+
+| 相談 | 例 | 何を見て答えるか |
+|------|-----|-----------------|
+| 在庫相談 | 「今夜は何を飲もう」 | 購入記録（在庫）＋飲酒記録の評価 |
+| ペアリング | 「今夜すき焼き」 | まず手持ちから。合うものが無ければ買い足し候補まで |
+| 銘柄レコメンド | 「★4のあれが好きなら次は？」 | 高評価の記録から好みの軸（産地・造り・味わい）を読む |
+| 酒知識 Q&A | 「獺祭ってどんなお酒？」 | モデルの知識。記録に同じ蔵・近い銘柄があれば結び付ける |
 
 ```
 React（右下チャット UI）
@@ -128,15 +135,32 @@ AgentCore Runtime（PUBLIC・東京）
   │ ② アプリ内の JWKS 検証（署名・exp・iss・audience）
   ▼
 Strands Agent（Claude Haiku 4.5 / jp. CRIS）
-  │ Tool: list_my_purchase_records
+  │ Tool: list_my_purchase_records / list_my_drinking_records
   ▼
 DynamoDB（owner-index。トークンの sub で自分の記録のみ）
+  ＋
+AgentCore Memory（好み学習。名前空間は sub 単位）
 ```
 
 - **モデル**: `jp.anthropic.claude-haiku-4-5-20251001-v1:0`（OCR と共通）
 - **会話の継続**: Runtime はステートレス。直近10件の履歴をクライアントから送って文脈を引き継ぐ
 - **履歴の保存**: ブラウザの localStorage にユーザー単位で保存（最大50件）。**サインアウト時に削除**
 - **入力の安全対策**: プロンプト・履歴・記録の値はすべて正規化（HTML エンティティ展開＋NFKC を固定点まで反復）し、`<user_data>` で囲んで指示と区別。プロンプト長・DynamoDB 読み取りページ数にも上限
+
+##### 好み学習（AgentCore Memory）
+
+会話が終わるたびに、そのやり取りを AgentCore Memory へ書き込む（`CreateEvent`）。AgentCore 側の `USER_PREFERENCE` ストラテジが非同期に「辛口が好き」「燗で飲むことが多い」といった好みを抽出し、次の相談では相談内容に近いものだけを引き当ててシステムプロンプトへ入れる（`RetrieveMemoryRecords`）。localStorage の履歴が**セッション内の文脈**なのに対し、こちらは**セッションをまたぐ好み**を担う。
+
+| 決めごと | 内容 |
+|---------|------|
+| 名前空間 | `sommelier/preference/{actorId}`。`actorId` は Cognito の sub |
+| 保持期間 | 90日（`eventExpiryDuration`） |
+| 文脈に入れる件数 | 相談内容に近いもの上位5件まで |
+| 失敗したとき | 相談は止めない。記憶なしで在庫と記録だけで答える（フェイルオープン） |
+
+安全側の作りは記録の取得と揃えている。記憶は「LLM がユーザー入力から抽出した文章」なので、記録と同じ正規化を通して `<user_data>` で囲んでから渡す。正規化が収束しない文字列は、記録と違って丸ごと捨てる（好みは無くても相談は成立するため）。名前空間に埋める `actorId` は英数字・`-`・`_` だけを通し、区切り文字を含む値では読み書きしない。
+
+記憶 ID は CDK が `MEMORY_PREFERENCE_ID` 環境変数としてエージェントへ渡す（`agentcore.json` の `memories[].name` から自動導出）。この環境変数が無ければ好み学習は自動的に無効になるので、ローカル開発では何も設定しなくてよい。
 
 #### 失敗したときの切り分け
 
@@ -170,9 +194,16 @@ AWS_PROFILE=sakekasu-builder PURCHASE_TABLE_NAME=dev-sakekasu-purchase-records \
   LOCAL_DEV=1 LOCAL_DEV_OWNER_SUB=<Cognitoのsub> uv run main.py
 # → POST http://localhost:8080/invocations  {"prompt": "...", "history": []}
 
+# テスト（AWS へは出ない。Bedrock も DynamoDB も呼ばない）
+cd sommelier/app/sommelier
+uv run pytest
+
 # デプロイ
 cd sommelier
 AWS_PROFILE=sakekasu-builder agentcore deploy --target dev
+
+# CDK 側（記憶の作成・環境変数・IAM が揃っているかの synth テスト）
+cd sommelier/agentcore/cdk && npm ci && npm test
 ```
 
 Runtime の ARN はフロントの `src/features/sommelier/config.ts` に持つ（`VITE_SOMMELIER_RUNTIME_ARN` で上書き可）。Runtime を作り直したら更新する。
