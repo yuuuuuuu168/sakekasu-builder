@@ -185,21 +185,21 @@ describe('buildBlocks', () => {
     expect(text).toContain('2. AWS Lambda: $2.00');
   });
 
-  it('実サービス名でできるだけ並べ、上限（10件）を超えた分だけ「その他」に畳む', () => {
+  it('上位5位までを実サービス名で並べ、6位以下は「その他」に畳む', () => {
     const many = aggregateServicesByAccount(
       resultWith(
-        Array.from({ length: 12 }, (_, i): [string, string, string] => [
+        Array.from({ length: 7 }, (_, i): [string, string, string] => [
           '222222222222',
           `Service ${String.fromCharCode(65 + i)}`,
-          `${12 - i}.00`,
+          `${7 - i}.00`,
         ]),
       ),
     );
     const text = textsOf(buildBlocks(TARGETS, periods, monthly, new Map(), many));
-    // 10件目までは実サービス名で載る
-    expect(text).toContain('10. Service J: $3.00');
-    // 11件目以降（$2 + $1）だけが「その他」になる
-    expect(text).not.toContain('Service K');
+    // 5件目までは実サービス名で載る
+    expect(text).toContain('5. Service E: $3.00');
+    // 6件目以降（$2 + $1）だけが「その他」になる
+    expect(text).not.toContain('Service F');
     expect(text).toContain('その他: $3.00');
   });
 

@@ -39,11 +39,8 @@ export type CostsByAccount = Map<string, AccountCost>;
 /** アカウント ID → サービス名 → クレジット適用前の利用額（USD） */
 export type ServiceCostsByAccount = Map<string, Map<string, number>>;
 
-/**
- * サービス別内訳の最大行数。「その他」に畳まず実サービス名でできるだけ載せる
- * 方針だが、Slack の section は 3000 文字で送信ごと失敗するため上限は設ける
- */
-const MAX_SERVICE_LINES = 10;
+/** サービス別内訳の最大行数。上位5位まで載せ、残りは「その他」に畳む */
+const MAX_SERVICE_LINES = 5;
 
 /** レポートが対象とする期間。日付は Cost Explorer に合わせて UTC 基準 */
 export interface ReportPeriods {
@@ -231,7 +228,7 @@ function accountSection(
       text:
         `${title}\n` +
         `${costLines(monthly, daily)}\n` +
-        `*サービス別内訳（今月・クレジット適用前・Tax 除く）*\n` +
+        `*サービス別内訳（今月・クレジット適用前）*\n` +
         serviceLines(services),
     },
   };
