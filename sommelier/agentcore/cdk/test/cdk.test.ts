@@ -28,6 +28,36 @@ function synthesizeProject(): Template {
   return projectTemplate;
 }
 
+/**
+ * 全 IAM ポリシーの Statement を平らに集める。
+ *
+ * Match.arrayWith / Match.objectLike は「条件に合うものが1つ以上ある」しか見ない。
+ * 権限を絞れているかを確かめたいときは「これ以外に無い」まで言えないと意味がないため、
+ * ポリシーをまたいで数え上げる側に寄せている。
+ */
+function allPolicyStatements(): any[] {
+  const policies = synthesizeProject().findResources('AWS::IAM::Policy');
+  return Object.values(policies).flatMap((policy: any) => policy.Properties?.PolicyDocument?.Statement ?? []);
+}
+
+/** Statement の Action は単数だと文字列で入るので配列に揃える */
+function actionsOf(statement: any): string[] {
+  const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+  return actions.filter((action: unknown): action is string => typeof action === 'string');
+}
+
+/** その action を許可している Statement をすべて拾う */
+function statementsAllowing(action: string): any[] {
+  return allPolicyStatements().filter(
+    statement => statement.Effect === 'Allow' && actionsOf(statement).includes(action)
+  );
+}
+
+/** 好み記憶の ARN。論理 ID の末尾ハッシュは synth ごとに変わりうるので前方一致で見る */
+const PREFERENCE_MEMORY_ARN = {
+  'Fn::GetAtt': [expect.stringMatching(/^ApplicationMemoryPreference/), 'MemoryArn'],
+};
+
 test('AgentCoreStack synthesizes with empty spec', () => {
   const app = new cdk.App();
   const stack = new AgentCoreStack(app, 'TestStack', {
@@ -91,36 +121,31 @@ describe('好み学習用の AgentCore Memory', () => {
   // 常に不一致で全拒否になる。したがって「書き込み先を本人に限る」のは
   // preference_memory.py の actor_id 検証が唯一の砦になる。
   test('読み出しは名前空間の条件つきで与える', () => {
-    synthesizeProject().hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Action: Match.arrayWith(['bedrock-agentcore:RetrieveMemoryRecords']),
-            Condition: {
-              StringLike: {
-                'bedrock-agentcore:namespace': ['sommelier/preference/*'],
-              },
-            },
-          }),
-        ]),
+    const statements = statementsAllowing('bedrock-agentcore:RetrieveMemoryRecords');
+    expect(statements).toHaveLength(1);
+    expect(statements[0].Effect).toBe('Allow');
+    expect(statements[0].Condition).toEqual({
+      StringLike: {
+        'bedrock-agentcore:namespace': ['sommelier/preference/*'],
       },
     });
+    expect(statements[0].Resource).toEqual(PREFERENCE_MEMORY_ARN);
   });
 
   test('書き込みは条件なしだが、この記憶リソース1つに限られる', () => {
-    synthesizeProject().hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Action: Match.arrayWith(['bedrock-agentcore:CreateEvent']),
-            // 条件は付かない代わりに、対象は好み記憶の ARN ただ1つ。
-            // ワイルドカードや別リソースへ広がっていないことを見る
-            Resource: {
-              'Fn::GetAtt': [Match.stringLikeRegexp('^ApplicationMemoryPreference'), 'MemoryArn'],
-            },
-          }),
-        ]),
-      },
-    });
+    const statements = statementsAllowing('bedrock-agentcore:CreateEvent');
+    expect(statements).toHaveLength(1);
+    expect(statements[0].Effect).toBe('Allow');
+    expect(statements[0].Resource).toEqual(PREFERENCE_MEMORY_ARN);
+  });
+
+  // 上の2つは action 名の完全一致で数えているため、
+  // bedrock-agentcore:* のようにまとめて与えられた場合はすり抜ける。
+  // そちらは別に塞いでおく
+  test('bedrock-agentcore の権限をワイルドカードで与えない', () => {
+    const wildcards = allPolicyStatements().filter(statement =>
+      actionsOf(statement).some(action => action.startsWith('bedrock-agentcore:') && action.includes('*'))
+    );
+    expect(wildcards).toEqual([]);
   });
 });
