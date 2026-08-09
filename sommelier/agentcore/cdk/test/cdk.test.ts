@@ -29,27 +29,53 @@ function synthesizeProject(): Template {
 }
 
 /**
- * 全 IAM ポリシーの Statement を平らに集める。
+ * ポリシーが書かれうる場所すべてから Statement を平らに集める。
  *
  * Match.arrayWith / Match.objectLike は「条件に合うものが1つ以上ある」しか見ない。
  * 権限を絞れているかを確かめたいときは「これ以外に無い」まで言えないと意味がないため、
- * ポリシーをまたいで数え上げる側に寄せている。
+ * 数え上げる側に寄せている。数え上げである以上、見る場所が欠けるとそのまま嘘になるので
+ * AWS::IAM::Policy だけでなく管理ポリシーとロール埋め込みも辿る。
  */
 function allPolicyStatements(): any[] {
-  const policies = synthesizeProject().findResources('AWS::IAM::Policy');
-  return Object.values(policies).flatMap((policy: any) => policy.Properties?.PolicyDocument?.Statement ?? []);
+  const template = synthesizeProject();
+  const documentsOf = (type: string) =>
+    Object.values(template.findResources(type)).flatMap(
+      (resource: any) => resource.Properties?.PolicyDocument?.Statement ?? []
+    );
+  const inlineRoleStatements = Object.values(template.findResources('AWS::IAM::Role'))
+    .flatMap((role: any) => role.Properties?.Policies ?? [])
+    .flatMap((policy: any) => policy.PolicyDocument?.Statement ?? []);
+  return [...documentsOf('AWS::IAM::Policy'), ...documentsOf('AWS::IAM::ManagedPolicy'), ...inlineRoleStatements];
 }
 
-/** Statement の Action は単数だと文字列で入るので配列に揃える */
+/** Statement が許す action を並べる */
 function actionsOf(statement: any): string[] {
+  // NotAction は「並べたもの以外すべて」なので、実質のワイルドカードとして扱う
+  if (statement.NotAction !== undefined) return ['*'];
+  if (statement.Action === undefined) return [];
   const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
-  return actions.filter((action: unknown): action is string => typeof action === 'string');
+  // 組み込み関数などで文字列に落ちないものを黙って捨てると、数え上げたつもりで
+  // 数え落とすことになる。前提が崩れたと分かるよう素通りさせない
+  if (actions.some((action: unknown) => typeof action !== 'string')) {
+    throw new Error(`action を文字列として読めません: ${JSON.stringify(statement.Action)}`);
+  }
+  return actions as string[];
 }
 
-/** その action を許可している Statement をすべて拾う */
+/** IAM のワイルドカードを展開して、その action に届くかを見る */
+function grants(granted: string, action: string): boolean {
+  if (!granted.includes('*')) return granted === action;
+  const pattern = granted
+    .split('*')
+    .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  return new RegExp(`^${pattern}$`).test(action);
+}
+
+/** その action を許可している Statement をすべて拾う（* でまとめて許可しているものも含む） */
 function statementsAllowing(action: string): any[] {
   return allPolicyStatements().filter(
-    statement => statement.Effect === 'Allow' && actionsOf(statement).includes(action)
+    statement => statement.Effect === 'Allow' && actionsOf(statement).some(granted => grants(granted, action))
   );
 }
 
@@ -139,13 +165,23 @@ describe('好み学習用の AgentCore Memory', () => {
     expect(statements[0].Resource).toEqual(PREFERENCE_MEMORY_ARN);
   });
 
-  // 上の2つは action 名の完全一致で数えているため、
-  // bedrock-agentcore:* のようにまとめて与えられた場合はすり抜ける。
-  // そちらは別に塞いでおく
-  test('bedrock-agentcore の権限をワイルドカードで与えない', () => {
-    const wildcards = allPolicyStatements().filter(statement =>
-      actionsOf(statement).some(action => action.startsWith('bedrock-agentcore:') && action.includes('*'))
+  // 上の2つは「その action に届く Statement が1つだけ」を見ている。
+  // ワイルドカードは展開して数えているので * 経由でも数に出るが、
+  // 数え上げの網から外れる形（NotAction、組み込み関数）を疑わずに済むよう、
+  // そもそもワイルドカードを書かせない側でも止めておく。
+  test('action をワイルドカードで与えない', () => {
+    const wildcards = allPolicyStatements().filter(
+      statement => statement.Effect === 'Allow' && actionsOf(statement).some(action => action.includes('*'))
     );
     expect(wildcards).toEqual([]);
+  });
+
+  // 数え上げはテンプレートに書かれたポリシーしか見られない。
+  // AWS 管理ポリシーを貼られると中身がテンプレートに現れず、
+  // 権限を並べ切ったつもりのまま取りこぼす
+  test('ロールに管理ポリシーを貼らない', () => {
+    const roles = synthesizeProject().findResources('AWS::IAM::Role');
+    const attached = Object.values(roles).flatMap((role: any) => role.Properties?.ManagedPolicyArns ?? []);
+    expect(attached).toEqual([]);
   });
 });
