@@ -9,6 +9,8 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as appsync from 'aws-cdk-lib/aws-appsync';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as applicationsignals from 'aws-cdk-lib/aws-applicationsignals';
+import * as xray from 'aws-cdk-lib/aws-xray';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import * as path from 'node:path';
@@ -63,6 +65,22 @@ export class MonitoringStack extends cdk.Stack {
 
     const webhookParameterName = `/${prefix}/monitoring/slack-webhook-url`;
     const canaryCredentialsSecretName = `${prefix}/monitoring/canary-user`;
+
+    // --- Application Signals（Issue #86）---
+
+    // アカウントに1つだけ置くリソース。Application Signals に
+    // サービスを見つけるための読み取り権限（サービスリンクロール）を与える。
+    // これが無いと、計装したのにサービスマップに何も出てこない
+    new applicationsignals.CfnDiscovery(this, 'ApplicationSignalsDiscovery', {});
+
+    // X-Ray のスパンを CloudWatch Logs 側に送り、トレースを検索できるようにする。
+    // ソムリエ（AgentCore）の GenAI Observability もこれが前提なので相乗りできる。
+    //
+    // インデックス率は 1%。取り込み（$0.35/GB）とは別にインデックス済みスパンで
+    // 課金されるが、先頭 1% は無料枠に収まる。足りなければ上げる
+    new xray.CfnTransactionSearchConfig(this, 'TransactionSearchConfig', {
+      indexingPercentage: 1,
+    });
 
     // --- 通知経路 ---
 
