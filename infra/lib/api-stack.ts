@@ -34,9 +34,33 @@ const ADOT_NODEJS_LAYER_ARN =
  * （既定値に任せると、既定が変わったときに黙って噛み合わなくなる）。
  */
 function enableApplicationSignals(fn: NodejsFunction): void {
+  // レイヤーは同じリージョンのものしか付けられない。合成の時点で気づかないと、
+  // デプロイは通ってコールドスタートだけが InvalidParameterValueException で落ちる
+  const stackRegion = cdk.Stack.of(fn).region;
+  if (
+    !cdk.Token.isUnresolved(stackRegion) &&
+    !ADOT_NODEJS_LAYER_ARN.includes(`:${stackRegion}:`)
+  ) {
+    throw new Error(
+      `ADOT のレイヤーが ${stackRegion} のものではありません（${ADOT_NODEJS_LAYER_ARN}）。` +
+        ' リージョンを変えるときは ADOT_NODEJS_LAYER_ARN も差し替える',
+    );
+  }
+
   fn.addLayers(LayerVersion.fromLayerVersionArn(fn, 'AdotLayer', ADOT_NODEJS_LAYER_ARN));
   fn.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/otel-instrument');
-  fn.role?.addManagedPolicy(
+
+  // レイヤーと権限は必ず揃っていないといけない。権限だけ落ちると、
+  // 起動したレイヤーが X-Ray に書けずに毎回 AccessDenied で落ちる。
+  // 既定のロールを使う限り undefined にはならないが、あとから
+  // 外部のロールを渡す変更が入ったときに黙って壊れないようにする
+  if (!fn.role) {
+    throw new Error(
+      `${fn.node.id} に実行ロールがありません。Application Signals の計装には` +
+        '書き込み権限が要るため、外部から渡したロールでは有効にできない',
+    );
+  }
+  fn.role.addManagedPolicy(
     iam.ManagedPolicy.fromAwsManagedPolicyName(
       'CloudWatchLambdaApplicationSignalsExecutionRolePolicy',
     ),

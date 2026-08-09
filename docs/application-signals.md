@@ -43,7 +43,9 @@ main へマージすれば GitHub Actions が `cdk deploy --all` を実行する
 1. **サービスが出てくるまで待つ** — Application Signals コンソールの「Services」に2つの Lambda が現れる。デプロイ直後はデータが空で、検出まで数分から十数分かかる
 2. **トレースを確認する** — 実際に画像をアップロードし、OCR を走らせてから「Transaction search」を見る。Bedrock / S3 への呼び出しがスパンとして分かれていれば通っている
 3. **ソムリエのトレースを確認する** — GenAI Observability にソムリエ Runtime のトレースが出るか見る
-4. **1週間後にコストを見る** — Cost Explorer で CloudWatch の増分を確認する
+4. **ログの保持期間を設定する**（下記）
+5. **トレースに利用者の識別子が入っていないか確認する**（下記）
+6. **1週間後にコストを見る** — Cost Explorer で CloudWatch の増分を確認する
 
 出てこないときは、まず Discovery が作られているかを疑う。次に関数の環境変数とレイヤーが実機に入っているかを見る。
 
@@ -52,6 +54,38 @@ AWS_PROFILE=sakekasu-builder aws lambda get-function-configuration \
   --function-name dev-sakekasu-ocr-analyzer --region ap-northeast-1 \
   --query '{Layers:Layers[].Arn,Wrapper:Environment.Variables.AWS_LAMBDA_EXEC_WRAPPER,Tracing:TracingConfig.Mode}'
 ```
+
+### ログの保持期間を設定する
+
+Application Signals と Transaction Search が使うロググループは AWS 側が自動で作る。既定の保持期間は無期限なので、出てきたら設定する。CDK からは触れない（まだ存在しないものに保持期間は付けられないし、同名で作ろうとすると衝突する）。
+
+```bash
+for lg in /aws/application-signals/data aws/spans; do
+  AWS_PROFILE=sakekasu-builder aws logs put-retention-policy \
+    --log-group-name "$lg" --retention-in-days 30 --region ap-northeast-1
+done
+```
+
+X-Ray のトレースそのものは30日で消える（X-Ray 側の固定値で変更できない）。保持期間を設定するのは、Transaction Search が Logs 側に送るぶん。
+
+### トレースに利用者の識別子が入っていないか確認する
+
+S3 のキーは `<Cognito の sub>/<種別>/<記録 ID>/<ファイル名>` という形をしている。計装が AWS SDK の呼び出しパラメータをスパンに載せる実装だと、この sub がトレースに残ることになる。sub は利用者ごとに固定の UUID なので、残るなら扱いを決めておきたい。
+
+OpenTelemetry の JS 版 AWS SDK 計装は S3 専用の拡張を持たず、記録するのは呼び出したサービス名と操作名までなので、そのままでは載らない見込み。ただしバージョンによって変わりうるので、最初のトレースが出た時点で実際に見て確かめる。
+
+```bash
+# GetObject / DeleteObject のスパンに S3 のキーが含まれていないかを見る
+AWS_PROFILE=sakekasu-builder aws logs start-query \
+  --log-group-name aws/spans \
+  --start-time $(( $(date +%s) - 3600 )) --end-time $(date +%s) \
+  --query-string 'fields @message | filter @message like /GetObject/ | limit 5' \
+  --region ap-northeast-1
+```
+
+実際に載っていたら、キーの構造を変える（sub をハッシュ化する、階層から外す）か、スパンプロセッサで該当の属性を落とす。
+
+属性の値を一律で切り詰める `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT=0` は使わない。全部の属性が潰れて、下流ごとの内訳という計装の目的そのものが消えるため。
 
 ## SLO をまだ入れていない理由
 
@@ -75,8 +109,9 @@ SLO 自体も Application Signals の課金対象なので、数を絞る。
 ## 注意点
 
 - **コールドスタートが数百ms 悪化する。** ADOT のレイヤーを読み込むぶん。OCR は待つ前提の操作なので許容範囲とみているが、体感が悪くなったらメモリ増量で緩和する
-- **レイヤーの ARN にはランタイムのバージョンが埋まっている**（`aws-otel-nodejs-amd64-ver-1-30-2`）。上げるときは `api-stack.ts` の `ADOT_NODEJS_LAYER_ARN` を差し替える。実在は `aws lambda get-layer-version-by-arn` で確認できる
+- **レイヤーの ARN にはランタイムのバージョンが埋まっている**（`aws-otel-nodejs-amd64-ver-1-30-2`）。上げるときは `api-stack.ts` の `ADOT_NODEJS_LAYER_ARN` を差し替える。実在は `aws lambda get-layer-version-by-arn` で確認できる。自動で追随する仕組みは入れていないので、[ADOT のリリース](https://github.com/aws-observability/aws-otel-lambda/releases)をたまに見る
 - **アーキテクチャを x86_64 で明示している。** レイヤーが amd64 版なので、既定に任せて arm64 に変わると起動時に噛み合わなくなる
+- **リージョンを変えるならレイヤーの ARN も差し替える。** レイヤーは同じリージョンのものしか付けられない。合成の時点で止まるようにしてあるので、忘れて気づかないままデプロイされることはない
 - **AppSync（JS リゾルバー）は Application Signals の対象外。** 必要なら AppSync 側の X-Ray トレーシングを別途有効にする（README の「Issue にしていない小さな宿題」）
 
 ## 参考
