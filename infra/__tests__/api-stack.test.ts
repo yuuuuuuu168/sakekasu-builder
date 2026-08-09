@@ -121,4 +121,80 @@ describe('ApiStack', () => {
   it('ApiRegion の CfnOutput が存在する', () => {
     template.hasOutput('ApiRegion', {});
   });
+
+  // Issue #86: Application Signals の計装
+  describe('Application Signals の計装', () => {
+    const instrumented = [
+      'dev-sakekasu-ocr-analyzer',
+      'dev-sakekasu-presigned-url',
+    ];
+
+    it.each(instrumented)('%s に ADOT レイヤーと起動ラッパーが入っている', (functionName) => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: functionName,
+        Layers: Match.arrayWith([
+          Match.stringLikeRegexp('^arn:aws:lambda:ap-northeast-1:901920570463:layer:aws-otel-nodejs-amd64-'),
+        ]),
+        Environment: {
+          Variables: Match.objectLike({
+            AWS_LAMBDA_EXEC_WRAPPER: '/opt/otel-instrument',
+          }),
+        },
+      });
+    });
+
+    it.each(instrumented)('%s のアーキテクチャがレイヤーと揃っている', (functionName) => {
+      // レイヤーは amd64 版。arm64 に変わると起動時に噛み合わなくなる
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: functionName,
+        Architectures: ['x86_64'],
+      });
+    });
+
+    it.each(instrumented)('%s の X-Ray アクティブトレースが有効である', (functionName) => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: functionName,
+        TracingConfig: { Mode: 'Active' },
+      });
+    });
+
+    it('計装した関数の実行ロールに Application Signals 用の管理ポリシーが付いている', () => {
+      const roles = Object.values(template.findResources('AWS::IAM::Role')).filter((role) =>
+        JSON.stringify(role.Properties?.ManagedPolicyArns ?? []).includes(
+          'CloudWatchLambdaApplicationSignalsExecutionRolePolicy',
+        ),
+      );
+
+      // OCR と presigned-url の2つ
+      expect(roles).toHaveLength(2);
+    });
+
+    it('レイヤーと違うリージョンに置こうとすると合成の時点で止まる', () => {
+      // レイヤーは同じリージョンのものしか付けられない。ここで止めないと、
+      // デプロイは通ってコールドスタートだけが落ちる
+      const otherRegion = new cdk.App();
+      const auth = new AuthStack(otherRegion, 'OtherRegionAuth', {
+        envName: 'dev',
+        env: { account: '<アプリのアカウント ID>', region: 'us-east-1' },
+      });
+
+      expect(
+        () =>
+          new ApiStack(otherRegion, 'OtherRegionApi', {
+            envName: 'dev',
+            userPool: auth.userPool,
+            env: { account: '<アプリのアカウント ID>', region: 'us-east-1' },
+          }),
+      ).toThrow(/us-east-1 のものではありません/);
+    });
+
+    it('監視系の関数までは計装しない（ノイズと費用を増やさない）', () => {
+      const functions = Object.values(template.findResources('AWS::Lambda::Function'));
+      const instrumentedNames = functions
+        .filter((fn) => (fn.Properties?.Layers ?? []).length > 0)
+        .map((fn) => fn.Properties?.FunctionName as string);
+
+      expect(instrumentedNames.sort()).toEqual([...instrumented].sort());
+    });
+  });
 });
