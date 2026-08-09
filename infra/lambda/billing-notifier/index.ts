@@ -39,8 +39,11 @@ export type CostsByAccount = Map<string, AccountCost>;
 /** アカウント ID → サービス名 → クレジット適用前の利用額（USD） */
 export type ServiceCostsByAccount = Map<string, Map<string, number>>;
 
-/** レポートに載せる上位サービスの数 */
-const TOP_SERVICES_LIMIT = 5;
+/**
+ * サービス別内訳の最大行数。「その他」に畳まず実サービス名でできるだけ載せる
+ * 方針だが、Slack の section は 3000 文字で送信ごと失敗するため上限は設ける
+ */
+const MAX_SERVICE_LINES = 10;
 
 /** レポートが対象とする期間。日付は Cost Explorer に合わせて UTC 基準 */
 export interface ReportPeriods {
@@ -187,18 +190,27 @@ function escapeMrkdwn(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** 利用料の上位サービスを並べる。残りは「その他」に合算して合計と突き合わせられるようにする */
+/**
+ * 利用料の多い順に、できるだけ実サービス名のまま並べる。
+ * 「その他」に畳むのは、表示上 $0.00 になる端数と上限を超えた分だけ
+ */
 function serviceLines(services: Map<string, number>): string {
   const sorted = [...services.entries()].sort(([, a], [, b]) => b - a);
-  const top = sorted.slice(0, TOP_SERVICES_LIMIT);
-  const rest = sorted.slice(TOP_SERVICES_LIMIT).reduce((sum, [, amount]) => sum + amount, 0);
+  const visible = sorted
+    .filter(([, amount]) => Math.round(amount * 100) !== 0)
+    .slice(0, MAX_SERVICE_LINES);
 
-  if (top.length === 0) return '_今月の利用はまだありません_';
+  if (visible.length === 0) return '_今月の利用はまだありません_';
 
-  const lines = top.map(
+  const visibleNames = new Set(visible.map(([service]) => service));
+  const rest = sorted
+    .filter(([service]) => !visibleNames.has(service))
+    .reduce((sum, [, amount]) => sum + amount, 0);
+
+  const lines = visible.map(
     ([service, amount], index) => `${index + 1}. ${escapeMrkdwn(service)}: ${formatUsd(amount)}`,
   );
-  // 表示上 $0.00 になる端数だけの場合は載せない
+  // 端数の集まりが表示上 $0.00 になる場合は載せない
   if (Math.round(rest * 100) !== 0) {
     lines.push(`その他: ${formatUsd(rest)}`);
   }
@@ -219,7 +231,7 @@ function accountSection(
       text:
         `${title}\n` +
         `${costLines(monthly, daily)}\n` +
-        `*上位サービス（今月・クレジット適用前）*\n` +
+        `*サービス別内訳（今月・クレジット適用前・Tax 除く）*\n` +
         serviceLines(services),
     },
   };
@@ -328,7 +340,8 @@ async function fetchCosts(period: { start: string; end: string }, granularity: '
 
 /**
  * サービス別の内訳を取る。GroupBy は2次元までのため RECORD_TYPE を諦め、
- * 代わりにフィルターでクレジットを除外して「適用前の利用額」に揃える
+ * 代わりにフィルターでクレジットを除外して「適用前の利用額」に揃える。
+ * 税はサービスの利用状況を表さないため内訳からは外す（費用サマリーには含まれる）
  */
 async function fetchServiceCosts(period: { start: string; end: string }) {
   const results = await getCostAndUsage({
@@ -340,7 +353,7 @@ async function fetchServiceCosts(period: { start: string; end: string }) {
       { Type: 'DIMENSION', Key: 'SERVICE' },
     ],
     Filter: {
-      Not: { Dimensions: { Key: 'RECORD_TYPE', Values: ['Credit'] } },
+      Not: { Dimensions: { Key: 'RECORD_TYPE', Values: ['Credit', 'Tax'] } },
     },
   });
   return aggregateServicesByAccount(results);

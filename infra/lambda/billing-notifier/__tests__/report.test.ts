@@ -175,9 +175,9 @@ describe('buildBlocks', () => {
     expect(text).not.toContain('111111111111');
   });
 
-  it('組織全体と指定アカウントの両方に上位サービスが載る', () => {
+  it('組織全体と指定アカウントの両方にサービス別内訳が載る', () => {
     const text = textsOf(buildBlocks(TARGETS, periods, monthly, new Map(), services));
-    expect(text).toContain('上位サービス');
+    expect(text).toContain('サービス別内訳');
     // 組織全体: 全アカウント合算で CloudWatch が1位
     expect(text).toContain('1. AWS CloudWatch: $10.00');
     // sakekasu-builder: 自分の分だけで Bedrock が1位
@@ -185,22 +185,37 @@ describe('buildBlocks', () => {
     expect(text).toContain('2. AWS Lambda: $2.00');
   });
 
-  it('サービスが6個以上あれば上位5個と「その他」に畳む', () => {
+  it('実サービス名でできるだけ並べ、上限（10件）を超えた分だけ「その他」に畳む', () => {
     const many = aggregateServicesByAccount(
-      resultWith([
-        ['222222222222', 'Service A', '7.00'],
-        ['222222222222', 'Service B', '6.00'],
-        ['222222222222', 'Service C', '5.00'],
-        ['222222222222', 'Service D', '4.00'],
-        ['222222222222', 'Service E', '3.00'],
-        ['222222222222', 'Service F', '2.00'],
-        ['222222222222', 'Service G', '1.00'],
-      ]),
+      resultWith(
+        Array.from({ length: 12 }, (_, i): [string, string, string] => [
+          '222222222222',
+          `Service ${String.fromCharCode(65 + i)}`,
+          `${12 - i}.00`,
+        ]),
+      ),
     );
     const text = textsOf(buildBlocks(TARGETS, periods, monthly, new Map(), many));
-    expect(text).toContain('5. Service E: $3.00');
-    expect(text).not.toContain('Service F');
+    // 10件目までは実サービス名で載る
+    expect(text).toContain('10. Service J: $3.00');
+    // 11件目以降（$2 + $1）だけが「その他」になる
+    expect(text).not.toContain('Service K');
     expect(text).toContain('その他: $3.00');
+  });
+
+  it('表示上 $0.00 になる端数のサービスは実名では載せない', () => {
+    const withDust = aggregateServicesByAccount(
+      resultWith([
+        ['222222222222', 'Amazon Bedrock', '3.00'],
+        ['222222222222', 'Amazon SNS', '0.003'],
+        ['222222222222', 'Amazon SQS', '0.004'],
+      ]),
+    );
+    const text = textsOf(buildBlocks(TARGETS, periods, monthly, new Map(), withDust));
+    expect(text).toContain('1. Amazon Bedrock: $3.00');
+    expect(text).not.toContain('Amazon SNS');
+    // 端数の集まり（$0.007）は四捨五入で $0.01 になるので「その他」に載る
+    expect(text).toContain('その他: $0.01');
   });
 
   it('サービス名の mrkdwn 特殊文字は無害化される', () => {
