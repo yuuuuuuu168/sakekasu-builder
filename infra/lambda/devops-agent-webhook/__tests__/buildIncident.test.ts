@@ -360,6 +360,14 @@ describe('本文の長さ', () => {
       5000,
     );
   });
+
+  it('見出しも切る（一覧と Slack の投稿に出るため）', async () => {
+    const alarm = await forward(alarmMessage({ AlarmName: `dev-sakekasu-${'x'.repeat(500)}` }));
+    expect(alarm!.incident.title.length).toBeLessThanOrEqual(210);
+
+    const health = await forward(healthEvent('issue', { service: 'y'.repeat(500) }));
+    expect(health!.incident.title.length).toBeLessThanOrEqual(210);
+  });
 });
 
 describe('toIsoTimestamp', () => {
@@ -390,6 +398,53 @@ describe('assertHttpsUrl', () => {
   it('URL として読めない値も弾き、値そのものはメッセージに残さない', () => {
     expect(() => mod.assertHttpsUrl('だいたいこのへん')).toThrow(/URL として読めません/);
     expect(() => mod.assertHttpsUrl('だいたいこのへん')).not.toThrow(/だいたいこのへん/);
+  });
+
+  it('内部向けのアドレスは https でも弾く', () => {
+    // 誤って内部のエンドポイントを登録したとき、アカウント ID やリソースの
+    // ARN が入った調査の本文をそこへ投げ続けないようにする
+    const internal = [
+      'https://169.254.169.254/latest/meta-data/',
+      'https://127.0.0.1/webhook',
+      'https://localhost/webhook',
+      'https://10.0.0.5/webhook',
+      'https://172.16.0.1/webhook',
+      'https://192.168.1.1/webhook',
+      'https://[::1]/webhook',
+      'https://[fd00::1]/webhook',
+    ];
+
+    for (const url of internal) {
+      expect(() => mod.assertHttpsUrl(url), url).toThrow(/内部向けのアドレス/);
+    }
+  });
+
+  it('外向けのホストは通す（172.16/12 の外側を巻き込まない）', () => {
+    expect(() => mod.assertHttpsUrl('https://event-ai.ap-northeast-1.api.aws/webhook')).not.toThrow();
+    expect(() => mod.assertHttpsUrl('https://172.32.0.1/webhook')).not.toThrow();
+  });
+});
+
+describe('転送のしかた', () => {
+  it('リダイレクトは追わない（検証していない先へ本文を運ばない）', async () => {
+    const captured: { redirect?: string }[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init: { redirect?: string }) => {
+      captured.push(init);
+      return { ok: true, status: 200 } as Response;
+    }) as unknown as typeof fetch;
+    try {
+      await mod.handler({
+        Records: [{ Sns: { Message: alarmMessage(), Timestamp: SNS_TIMESTAMP } }],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    // 転送先の検証は設定を読んだときの1回だけ。307/308 は POST と本文を保つため、
+    // 追ってしまうと検証を通っていない先へ調査の本文が渡る
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.redirect).toBe('error');
   });
 });
 
