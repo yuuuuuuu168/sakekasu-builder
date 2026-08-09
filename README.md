@@ -436,6 +436,29 @@ npx cdk deploy --context env=dev
 
 デプロイ後、`infra/scripts/generate-outputs.ts` を実行して `amplify_outputs.json` を生成してください。
 
+## デプロイ（CDK）
+
+**バックエンド（CDK）のデプロイは main へのマージ経由のみ。ローカルからの手動 `cdk deploy` は原則禁止**（Issue #94）。
+
+- main に push（= PR マージ）されると GitHub Actions（`.github/workflows/deploy.yml`）が `cdk deploy --all` を実行する
+- PR を開くと `cdk diff` の結果が自動でコメントされる（`.github/workflows/cdk-diff.yml`）
+- 認証は OIDC（`sakekasu-github-oidc` スタックの deploy ロール）。リポジトリにアクセスキーは置かない
+
+例外として、以下は今までどおり手動デプロイする:
+
+- `sakekasu-billing-notifier`（管理アカウント宛て。`-c billing=true`）
+- `sakekasu-github-oidc`（OIDC 連携自体。Actions に自分のロールを触らせないため。`-c github-oidc=true`）
+- ソムリエ Runtime（`agentcore deploy`。CDK 管理外）
+
+### OIDC 連携の初回セットアップ（1回だけ手動）
+
+```bash
+cd infra
+AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc -c github-oidc=true
+```
+
+これで OIDC プロバイダーと deploy / diff ロールが作られ、以後 Actions が動くようになる。
+
 ## テスト
 
 ```bash

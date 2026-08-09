@@ -1,0 +1,78 @@
+# PR で cdk diff を実行し、結果を PR コメントに出す（Issue #94）。
+# iPhone だけでレビューするための仕組み。使うのは読み取り専用の diff ロール
+# （lookup ロールにしか入れない）なので、PR からリソースは変更できない。
+name: cdk-diff
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/cdk-diff.yml'
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: cdk-diff-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::232791540685:role/sakekasu-github-actions-diff
+          aws-region: ap-northeast-1
+      - run: npm ci
+      - name: cdk diff
+        id: diff
+        # diff があっても exit 0 のままにし、出力だけをコメントに回す。
+        # --no-color はコメントにエスケープシーケンスを混ぜないため
+        run: |
+          npx cdk diff --all --no-color 2>&1 | tee diff.txt
+      - name: PRコメントに diff を投稿（既存コメントは更新）
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- cdk-diff -->';
+            let body = fs.readFileSync('infra/diff.txt', 'utf8');
+            // GitHub コメントの上限（65536字）に収める
+            const limit = 60000;
+            if (body.length > limit) {
+              body = body.slice(0, limit) + '\n...（長すぎるため省略。全文は Actions のログを参照）';
+            }
+            const full = `${marker}\n## cdk diff\n\n\`\`\`\n${body}\n\`\`\``;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: full,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: full,
+              });
+            }

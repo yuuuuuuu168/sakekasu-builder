@@ -5,8 +5,21 @@ import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
 import { HealthGlobalStack } from '../lib/health-global-stack.js';
 import { BillingNotifierStack } from '../lib/billing-notifier-stack.js';
+import { GithubOidcStack } from '../lib/github-oidc-stack.js';
 
 const app = new cdk.App();
+
+// GitHub Actions からの CDK デプロイ用 OIDC 連携（Issue #94）。
+// Actions 自身にこのスタックを触らせると、ロールの更新ミスで自分を
+// 締め出す恐れがあるため、billing と同様にフラグ付きの手動デプロイ専用。
+// 使用例: npx cdk deploy sakekasu-github-oidc -c github-oidc=true
+if (app.node.tryGetContext('github-oidc')) {
+  new GithubOidcStack(app, 'sakekasu-github-oidc', {
+    repository: 'yuuuuuuu168/sakekasu-builder',
+    // アプリ本体と同じ sakekasu-builder アカウント
+    env: { account: '232791540685', region: 'ap-northeast-1' },
+  });
+}
 
 // 利用料金の Slack 通知（Issue #92）は、アカウント別の内訳を見られる
 // Organization の管理アカウントにしか置けないため、通常のデプロイ先
