@@ -16,7 +16,7 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 ## 依存インストールの自動実行（リポジトリ側・設定済み）
 
 - [.claude/settings.json](../.claude/settings.json) の SessionStart フックが、セッション開始・再開のたびに [scripts/cloud-setup.sh](../scripts/cloud-setup.sh) を実行する
-- スクリプトはルートと `infra/` の `npm ci` を行う。環境キャッシュに `node_modules` が残っていればスキップして高速起動する
+- スクリプトはルートと `infra/` の `npm ci` を行う。インストール時に `package-lock.json` のハッシュを `node_modules/.package-lock.sha256` に控えておき、一致する（＝依存が変わっていない）ときだけスキップして高速起動する。ロックファイルだけ更新されたブランチでも古い依存のまま動くことはない
 - `$CLAUDE_CODE_REMOTE` がクラウド VM でだけ `true` になるため、ローカルの Claude Code セッションでは何もしない
 
 ## コスト・利用枠の注意
