@@ -26,7 +26,8 @@ export interface DevOpsAgentStackProps extends cdk.StackProps {
 /**
  * AWS DevOps Agent 連携のスタック（Issue #67）。
  *
- * Agent Space 自体はプライマリアカウント（<管理アカウント ID>）のコンソールで作る。
+ * Agent Space 自体は運用ツール用のアカウント（<運用アカウント ID> / ops-tooling）の
+ * コンソールで作る。
  * このスタックが持つのは、**アプリ本体のアカウント側に必要なもの**の2つ:
  *
  * - **調査用のクロスアカウントロール**: DevOps Agent のサービスプリンシパルが
@@ -60,7 +61,10 @@ export class DevOpsAgentStack extends cdk.Stack {
           // プライマリアカウントの、しかもこの Agent Space からの
           // 引き受けだけを許す。どちらか片方だけでは絞りきれない
           StringEquals: { 'aws:SourceAccount': props.monitoringAccountId },
-          ArnLike: { 'aws:SourceArn': props.agentSpaceArn },
+          // 渡すのは Agent Space の完全な ARN なので、ワイルドカードを解釈する
+          // ArnLike ではなく ArnEquals で受ける。ARN に * や ? が紛れ込んでも
+          // 別のスペースまで引き受けを許してしまうことがない
+          ArnEquals: { 'aws:SourceArn': props.agentSpaceArn },
         },
       }),
       managedPolicies: [
@@ -92,6 +96,11 @@ export class DevOpsAgentStack extends cdk.Stack {
       entry: path.join(here, '../lambda/devops-agent-webhook/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(20),
+      // 同時に走る本数を抑える。エージェントは秒課金なので、アラームが一斉に
+      // 鳴ったときに調査が同時に立ち上がるのを避けたい。SNS からの呼び出しは
+      // 非同期なので、絞っても捨てられずキューで順番待ちになるだけで済む。
+      // なお、これは同時に始まる本数の話であって、調査の総数の上限ではない
+      reservedConcurrentExecutions: 2,
       environment: {
         WEBHOOK_SECRET_ID: webhookSecretName,
         ENV_NAME: props.envName,

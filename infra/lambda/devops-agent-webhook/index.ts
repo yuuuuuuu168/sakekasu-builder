@@ -21,6 +21,25 @@ const SERVICE_NAME = process.env.SERVICE_NAME ?? 'sakekasu-builder';
 /** Webhook は1回の呼び出しで返ってこなければ諦める（SNS 側が再試行する） */
 const REQUEST_TIMEOUT_MS = 10_000;
 
+/**
+ * Secrets Manager から読んだ設定を使い回す時間。
+ *
+ * 署名鍵を入れ替えたとき、温まった実行環境が古い鍵で署名し続けると
+ * 転送だけが静かに落ちる。呼び出しのたびに取りに行くほどでもないので、
+ * 短い期限を付けて放っておいても入れ替わるようにする
+ */
+const CONFIG_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * 調査依頼の本文に入れる文字数の上限。
+ *
+ * アラームの説明文と発報の理由は長さの保証がない自由記述で、本文を読むのは
+ * エージェント（LLM）になる。際限なく渡すと調査の指示を押しのけてしまうため、
+ * 項目ごとと本文全体の両方で切る
+ */
+const MAX_FIELD_CHARS = 500;
+const MAX_DESCRIPTION_CHARS = 4_000;
+
 /** 調査の優先度。DevOps Agent の Webhook スキーマで決まっている値 */
 type Priority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'MINIMAL';
 
@@ -66,6 +85,8 @@ interface HealthEvent {
     eventArn?: string;
     eventTypeCode?: string;
     eventTypeCategory?: string;
+    /** 障害が起きているリージョン。イベントが配信されたリージョンとは別物 */
+    eventRegion?: string;
     startTime?: string;
     eventDescription?: { latestDescription?: string }[];
     affectedEntities?: { entityValue?: string }[];
@@ -95,15 +116,18 @@ export interface IncidentPayload {
 const PRIORITY_RULES: { match: RegExp; priority: Priority }[] = [
   // 利用者がサイトを開けない・記録を読み書きできない
   { match: /health-check-frontend|appsync-5xx/, priority: 'CRITICAL' },
+  // 利用者からは見えないが放置はできないもの（通知の失敗・後片付けの失敗・監視の停止）。
+  // HIGH より先に見るのは、監視そのものの停止を表す watcher-failure-sommelier-canary /
+  // watcher-silent-sommelier-canary が、名前に sommelier を含むために
+  // 「ソムリエの故障」と取り違えられるのを防ぐため。壊れているのは監視の側なので MEDIUM に置く
+  {
+    match: /notify-fail|image-delete-fail|slack-notifier-failure|watcher-/,
+    priority: 'MEDIUM',
+  },
   // 主要機能（ソムリエ・OCR・記録の保存）が壊れている
   {
     match: /sommelier|ocr-|lambda-errors-|dynamodb-throttle-|health-check-/,
     priority: 'HIGH',
-  },
-  // 利用者からは見えないが放置はできないもの（通知の失敗・後片付けの失敗・監視の停止）
-  {
-    match: /notify-fail|image-delete-fail|slack-notifier-failure|watcher-/,
-    priority: 'MEDIUM',
   },
 ];
 
@@ -129,6 +153,28 @@ export function buildIncidentId(parts: (string | undefined)[]): string {
   return raw.replace(/[^A-Za-z0-9\-._:]/g, '-').slice(0, 200) || 'unknown-incident';
 }
 
+/**
+ * 長すぎる自由記述を切り詰める。切ったことが読み手に分かるようにしておく。
+ */
+export function clip(value: string, max: number): string {
+  return value.length <= max ? value : `${value.slice(0, max)}…（以下省略）`;
+}
+
+/**
+ * Webhook の timestamp を ISO-8601 に揃える。
+ *
+ * AWS Health の startTime は RFC-1123（"Fri, 27 Jan 2023 06:02:51 GMT"）、
+ * CloudWatch アラームの StateChangeTime はオフセットにコロンが無い形式
+ * （"2026-08-09T08:00:00.000+0000"）で届く。どちらもそのまま渡すと解釈を
+ * 受け取り側に委ねることになるため、ここで揃えてから送る。
+ * 解釈できない値は undefined にして、呼び出し側の代替（SNS の時刻）に任せる
+ */
+export function toIsoTimestamp(value: string | undefined | null): string | undefined {
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
 function isHealthEvent(value: unknown): value is HealthEvent {
   return (
     typeof value === 'object' && value !== null && (value as HealthEvent).source === 'aws.health'
@@ -151,10 +197,13 @@ function fromAlarm(alarm: AlarmMessage, snsTimestamp: string): IncidentPayload |
   if (SELF_ALARM_NAME && alarmName === SELF_ALARM_NAME) return null;
 
   const trigger = alarm.Trigger ?? {};
+  const stateChangeTime = toIsoTimestamp(alarm.StateChangeTime) ?? snsTimestamp;
   const lines = [
     `${ENV_NAME} 環境の酒カス（sakekasu-builder）で CloudWatch アラームが発報しました。`,
-    alarm.AlarmDescription ? `アラームの説明: ${alarm.AlarmDescription}` : null,
-    alarm.NewStateReason ? `発報の理由: ${alarm.NewStateReason}` : null,
+    alarm.AlarmDescription
+      ? `アラームの説明: ${clip(alarm.AlarmDescription, MAX_FIELD_CHARS)}`
+      : null,
+    alarm.NewStateReason ? `発報の理由: ${clip(alarm.NewStateReason, MAX_FIELD_CHARS)}` : null,
     trigger.MetricName
       ? `メトリクス: ${trigger.Namespace ?? '(名前空間不明)'} / ${trigger.MetricName}`
       : null,
@@ -166,12 +215,12 @@ function fromAlarm(alarm: AlarmMessage, snsTimestamp: string): IncidentPayload |
 
   return {
     eventType: 'incident',
-    incidentId: buildIncidentId([alarmName, alarm.StateChangeTime ?? snsTimestamp]),
+    incidentId: buildIncidentId([alarmName, stateChangeTime]),
     action: 'created',
     priority: priorityForAlarm(alarmName),
     title: `CloudWatch アラーム: ${alarmName}`,
-    description: lines.join('\n'),
-    timestamp: alarm.StateChangeTime ?? snsTimestamp,
+    description: clip(lines.join('\n'), MAX_DESCRIPTION_CHARS),
+    timestamp: stateChangeTime,
     service: SERVICE_NAME,
     // 元のイベントをそのまま添える。エージェントが自分で読み解けるようにする
     data: { source: 'cloudwatch-alarm', envName: ENV_NAME, alarm },
@@ -194,24 +243,35 @@ function fromHealthEvent(event: HealthEvent, snsTimestamp: string): IncidentPayl
     .map((e) => e.entityValue)
     .filter((v): v is string => !!v);
 
+  // event.region はイベントが配信されたリージョンで、障害が起きた場所とは限らない。
+  // グローバルなサービスの障害は us-east-1 から転送されてくるため、これを使うと
+  // 「ap-northeast-1 の障害」と読めてしまい調査を誤った方向に引っ張る
+  const affectedRegion = detail.eventRegion ?? event.region ?? 'リージョン不明';
+  const startTime =
+    toIsoTimestamp(detail.startTime) ?? toIsoTimestamp(event.time) ?? snsTimestamp;
+
   const lines = [
-    `AWS 側の障害イベントを受け取りました（${detail.service ?? 'サービス不明'} / ${event.region ?? 'リージョン不明'}）。`,
+    `AWS 側の障害イベントを受け取りました（${detail.service ?? 'サービス不明'} / ${affectedRegion}）。`,
     detail.eventTypeCode ? `イベント種別: ${detail.eventTypeCode}` : null,
-    detail.eventDescription?.[0]?.latestDescription ?? null,
-    entities.length > 0 ? `影響を受けるリソース: ${entities.join(', ')}` : null,
+    detail.eventDescription?.[0]?.latestDescription
+      ? clip(detail.eventDescription[0].latestDescription, MAX_FIELD_CHARS)
+      : null,
+    entities.length > 0
+      ? `影響を受けるリソース: ${clip(entities.join(', '), MAX_FIELD_CHARS)}`
+      : null,
   ].filter((line): line is string => line !== null);
 
   return {
     eventType: 'incident',
     incidentId: buildIncidentId([
       detail.eventArn ?? detail.eventTypeCode ?? 'aws-health',
-      detail.eventArn ? undefined : (detail.startTime ?? event.time ?? snsTimestamp),
+      detail.eventArn ? undefined : startTime,
     ]),
     action: 'created',
     priority: 'HIGH',
     title: `AWS Health 障害: ${detail.service ?? '不明'}`,
-    description: lines.join('\n'),
-    timestamp: detail.startTime ?? event.time ?? snsTimestamp,
+    description: clip(lines.join('\n'), MAX_DESCRIPTION_CHARS),
+    timestamp: startTime,
     service: SERVICE_NAME,
     data: { source: 'aws-health', envName: ENV_NAME, event },
   };
@@ -244,11 +304,37 @@ interface WebhookConfig {
   signingSecret: string;
 }
 
-/** 実行環境が生きている間は使い回す（発報のたびに Secrets Manager を叩かない） */
-let cachedConfig: WebhookConfig | null = null;
+/**
+ * 実行環境が生きている間は使い回す（発報のたびに Secrets Manager を叩かない）。
+ * 鍵を入れ替えたあとも古い値で署名し続けないよう、期限を持たせている
+ */
+let cachedConfig: { value: WebhookConfig; expiresAt: number } | null = null;
+
+/**
+ * Webhook の URL が https であることを確かめる。
+ *
+ * 値の出所は手で登録した Secrets Manager だが、ここは外から入った文字列を
+ * そのまま fetch に渡す唯一の場所になる。登録の取り違えや書き間違いが
+ * 平文送信や別プロトコルへの送信にならないよう、送る前に弾く
+ */
+export function assertHttpsUrl(raw: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    // 値そのものはメッセージに載せない（ログに URL が残る）
+    throw new Error(`Webhook の webhookUrl が URL として読めません: ${WEBHOOK_SECRET_ID}`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error(
+      `Webhook の webhookUrl は https でなければなりません（${parsed.protocol} が指定されています）`,
+    );
+  }
+  return raw;
+}
 
 async function getWebhookConfig(): Promise<WebhookConfig> {
-  if (cachedConfig) return cachedConfig;
+  if (cachedConfig && cachedConfig.expiresAt > Date.now()) return cachedConfig.value;
 
   const result = await secretsClient.send(
     new GetSecretValueCommand({ SecretId: WEBHOOK_SECRET_ID }),
@@ -257,15 +343,27 @@ async function getWebhookConfig(): Promise<WebhookConfig> {
     throw new Error(`Webhook の設定が未登録です: ${WEBHOOK_SECRET_ID}`);
   }
 
-  const parsed = JSON.parse(result.SecretString) as Partial<WebhookConfig>;
+  let parsed: Partial<WebhookConfig>;
+  try {
+    parsed = JSON.parse(result.SecretString) as Partial<WebhookConfig>;
+  } catch {
+    // JSON.parse の例外は読めなかった中身の先頭をメッセージに載せる。
+    // ここで握らないと URL や署名鍵がそのままログに出る
+    throw new Error(`Webhook の設定が JSON として読めません: ${WEBHOOK_SECRET_ID}`);
+  }
+
   if (!parsed.webhookUrl || !parsed.signingSecret) {
     throw new Error(
       `Webhook の設定に webhookUrl / signingSecret がありません: ${WEBHOOK_SECRET_ID}`,
     );
   }
 
-  cachedConfig = { webhookUrl: parsed.webhookUrl, signingSecret: parsed.signingSecret };
-  return cachedConfig;
+  const value: WebhookConfig = {
+    webhookUrl: assertHttpsUrl(parsed.webhookUrl),
+    signingSecret: parsed.signingSecret,
+  };
+  cachedConfig = { value, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS };
+  return value;
 }
 
 /**

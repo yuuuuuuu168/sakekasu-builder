@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 
 /**
  * SNS のアラームを DevOps Agent の調査依頼に組み立てる部分を検証する。
@@ -9,15 +9,19 @@ process.env.ENV_NAME = 'dev';
 process.env.SELF_ALARM_NAME = 'dev-sakekasu-devops-agent-webhook-failure';
 process.env.SERVICE_NAME = 'sakekasu-builder';
 
+/** Secrets Manager が返す中身。鍵の入れ替えを再現するためテストから差し替える */
+const secretState = vi.hoisted(() => ({
+  value: JSON.stringify({
+    webhookUrl: 'https://event-ai.example/webhook/generic/test',
+    signingSecret: 'secret',
+  }),
+}));
+const DEFAULT_SECRET = secretState.value;
+
 // Webhook の設定取得で AWS を呼びに行かせない
 vi.mock('@aws-sdk/client-secrets-manager', () => ({
   SecretsManagerClient: class {
-    send = async () => ({
-      SecretString: JSON.stringify({
-        webhookUrl: 'https://event-ai.example/webhook/generic/test',
-        signingSecret: 'secret',
-      }),
-    });
+    send = async () => ({ SecretString: secretState.value });
   },
   GetSecretValueCommand: class {
     constructor(public input: unknown) {}
@@ -83,7 +87,7 @@ function alarmMessage(overrides: Record<string, unknown> = {}): string {
   });
 }
 
-function healthEvent(category: string): string {
+function healthEvent(category: string, detailOverrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     source: 'aws.health',
     region: 'ap-northeast-1',
@@ -96,6 +100,7 @@ function healthEvent(category: string): string {
       startTime: '2026-08-09T02:45:00Z',
       eventDescription: [{ latestDescription: 'We are investigating increased error rates.' }],
       affectedEntities: [{ entityValue: 'dev-sakekasu-purchases' }],
+      ...detailOverrides,
     },
   });
 }
@@ -198,6 +203,35 @@ describe('AWS Health の転送', () => {
   it('予定された変更では調査を起こさない', async () => {
     expect(await forward(healthEvent('scheduledChange'))).toBeNull();
   });
+
+  it('RFC-1123 で届く startTime を ISO-8601 に直して送る', async () => {
+    // AWS Health の時刻はこの形式で届く。そのまま渡すと受け取り側の解釈に委ねることになる
+    const sent = await forward(healthEvent('issue', { startTime: 'Fri, 27 Jan 2023 06:02:51 GMT' }));
+
+    expect(sent!.incident.timestamp).toBe('2023-01-27T06:02:51.000Z');
+  });
+
+  it('日時として読めない startTime はイベントの発生時刻で代用する', async () => {
+    const sent = await forward(healthEvent('issue', { startTime: 'いつか' }));
+
+    // event.time（2026-08-09T02:50:00Z）に落ちる。こちらも ISO に揃える
+    expect(sent!.incident.timestamp).toBe('2026-08-09T02:50:00.000Z');
+  });
+
+  it('障害のリージョンは eventRegion を使う（配信元の region ではない）', async () => {
+    // グローバルなサービスの障害は us-east-1 から転送されてくるため、
+    // event.region を信じると「東京の障害」と読めてしまう
+    const sent = await forward(healthEvent('issue', { service: 'CLOUDFRONT', eventRegion: 'global' }));
+
+    expect(sent!.incident.description).toContain('global');
+    expect(sent!.incident.description).not.toContain('ap-northeast-1');
+  });
+
+  it('eventRegion が無ければ配信元の region で代用する', async () => {
+    const sent = await forward(healthEvent('issue'));
+
+    expect(sent!.incident.description).toContain('ap-northeast-1');
+  });
 });
 
 describe('priorityForAlarm', () => {
@@ -214,6 +248,16 @@ describe('priorityForAlarm', () => {
   it('利用者から見えない失敗は MEDIUM にする', () => {
     expect(mod.priorityForAlarm('dev-sakekasu-signup-notify-fail')).toBe('MEDIUM');
     expect(mod.priorityForAlarm('dev-sakekasu-watcher-silent-health-check')).toBe('MEDIUM');
+  });
+
+  it('監視の停止は対象がソムリエでも MEDIUM にする（壊れているのは監視の側）', () => {
+    // 名前に sommelier を含むため、順に見ると「ソムリエの故障」で HIGH に落ちてしまう
+    expect(mod.priorityForAlarm('dev-sakekasu-watcher-failure-sommelier-canary')).toBe('MEDIUM');
+    expect(mod.priorityForAlarm('dev-sakekasu-watcher-silent-sommelier-canary')).toBe('MEDIUM');
+  });
+
+  it('ソムリエ本体のカナリアは HIGH のまま（監視の停止と取り違えない）', () => {
+    expect(mod.priorityForAlarm('dev-sakekasu-sommelier-canary')).toBe('HIGH');
   });
 
   it('表に無いアラームは HIGH に倒す（黙って埋もれさせない）', () => {
@@ -294,5 +338,114 @@ describe('Webhook が失敗したとき', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe('本文の長さ', () => {
+  it('長すぎる自由記述は切って、切ったことを残す', () => {
+    expect(mod.clip('あ'.repeat(10), 10)).toBe('あ'.repeat(10));
+    expect(mod.clip('あ'.repeat(11), 10)).toBe(`${'あ'.repeat(10)}…（以下省略）`);
+  });
+
+  it('アラームの説明文が長くても本文が際限なく膨らまない', async () => {
+    // 本文を読むのはエージェント（LLM）なので、調査の指示を押しのけさせない
+    const sent = await forward(
+      alarmMessage({ AlarmDescription: 'x'.repeat(5000), NewStateReason: 'y'.repeat(5000) }),
+    );
+
+    expect(sent!.incident.description.length).toBeLessThanOrEqual(4100);
+    expect(sent!.incident.description).toContain('（以下省略）');
+    // 切るのは本文だけ。エージェントが自分で読み解く生データは残す
+    expect((sent!.incident.data.alarm as { AlarmDescription: string }).AlarmDescription).toHaveLength(
+      5000,
+    );
+  });
+});
+
+describe('toIsoTimestamp', () => {
+  it('RFC-1123 とオフセット付きの表記を ISO-8601 に揃える', () => {
+    expect(mod.toIsoTimestamp('Fri, 27 Jan 2023 06:02:51 GMT')).toBe('2023-01-27T06:02:51.000Z');
+    expect(mod.toIsoTimestamp('2026-08-09T08:00:00.000+0000')).toBe('2026-08-09T08:00:00.000Z');
+  });
+
+  it('日時として読めない値と空の値は undefined にする（呼び出し側の代替に任せる）', () => {
+    expect(mod.toIsoTimestamp('いつか')).toBeUndefined();
+    expect(mod.toIsoTimestamp(undefined)).toBeUndefined();
+    expect(mod.toIsoTimestamp('')).toBeUndefined();
+  });
+});
+
+describe('assertHttpsUrl', () => {
+  it('https ならそのまま通す', () => {
+    expect(mod.assertHttpsUrl('https://event-ai.example/webhook/generic/test')).toBe(
+      'https://event-ai.example/webhook/generic/test',
+    );
+  });
+
+  it('https 以外は送る前に弾く', () => {
+    expect(() => mod.assertHttpsUrl('http://event-ai.example/webhook')).toThrow(/https/);
+    expect(() => mod.assertHttpsUrl('file:///etc/passwd')).toThrow(/https/);
+  });
+
+  it('URL として読めない値も弾き、値そのものはメッセージに残さない', () => {
+    expect(() => mod.assertHttpsUrl('だいたいこのへん')).toThrow(/URL として読めません/);
+    expect(() => mod.assertHttpsUrl('だいたいこのへん')).not.toThrow(/だいたいこのへん/);
+  });
+});
+
+/**
+ * 設定のキャッシュは実行環境をまたいで残るため、時計を進めて期限切れを起こす。
+ * 実タイマーまで差し替えると fetch の中断制御に影響するので Date だけ偽装する
+ */
+describe('Webhook 設定のキャッシュ', () => {
+  beforeAll(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
+    secretState.value = DEFAULT_SECRET;
+  });
+
+  it('期限が切れるまでは読み直さず、切れたら新しい鍵で署名する', async () => {
+    secretState.value = JSON.stringify({
+      webhookUrl: 'https://event-ai.example/webhook/generic/test',
+      signingSecret: 'rotated',
+    });
+
+    // 期限内は前の鍵のまま（発報のたびに Secrets Manager を叩かない）
+    const during = await forward(alarmMessage());
+    expect(during!.headers['x-amzn-event-signature']).toBe(
+      mod.sign(
+        during!.headers['x-amzn-event-timestamp'],
+        JSON.stringify(during!.incident),
+        'secret',
+      ),
+    );
+
+    vi.setSystemTime(Date.now() + 6 * 60 * 1000);
+
+    // 期限が切れたら読み直す。鍵を入れ替えたあと古い鍵で署名し続けない
+    const after = await forward(alarmMessage());
+    expect(after!.headers['x-amzn-event-signature']).toBe(
+      mod.sign(
+        after!.headers['x-amzn-event-timestamp'],
+        JSON.stringify(after!.incident),
+        'rotated',
+      ),
+    );
+  });
+
+  it('設定が JSON でないとき、中身をメッセージに載せない', async () => {
+    secretState.value = 'https://event-ai.example/webhook/generic/test';
+    vi.setSystemTime(Date.now() + 6 * 60 * 1000);
+
+    // JSON.parse の例外は読めなかった中身の先頭を載せるため、握らないと URL や鍵がログに出る
+    const run = mod.handler({
+      Records: [{ Sns: { Message: alarmMessage(), Timestamp: SNS_TIMESTAMP } }],
+    });
+
+    await expect(run).rejects.toThrow(/JSON として読めません/);
+    await expect(run).rejects.toThrow(/^(?!.*event-ai\.example).*$/s);
   });
 });

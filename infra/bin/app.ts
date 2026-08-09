@@ -123,7 +123,7 @@ function buildApplicationStacks(app: cdk.App): void {
     if (!/^\d{12}$/.test(monitoringAccountId ?? '')) {
       throw new Error(
         `agentSpaceArn が Agent Space の ARN として不正です: "${agentSpaceArn}"。` +
-        ' 例: arn:aws:aidevops:ap-northeast-1:<管理アカウント ID>:agentspace/xxxxxxxx'
+        ' 例: arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/xxxxxxxx'
       );
     }
 
