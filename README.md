@@ -158,9 +158,24 @@ AgentCore Memory（好み学習。名前空間は sub 単位）
 | 文脈に入れる件数 | 相談内容に近いもの上位5件まで |
 | 失敗したとき | 相談は止めない。記憶なしで在庫と記録だけで答える（フェイルオープン） |
 
-安全側の作りは記録の取得と揃えている。記憶は「LLM がユーザー入力から抽出した文章」なので、記録と同じ正規化を通して `<user_data>` で囲んでから渡す。正規化が収束しない文字列は、記録と違って丸ごと捨てる（好みは無くても相談は成立するため）。名前空間に埋める `actorId` は英数字・`-`・`_` だけを通し、区切り文字を含む値では読み書きしない。
+安全側の作りは記録の取得と揃えている。記憶は「LLM がユーザー入力から抽出した文章」なので、記録と同じ正規化を通して `<user_data>` で囲んでから渡す。正規化が収束しない文字列は、記録と違って丸ごと捨てる（好みは無くても相談は成立するため）。
+
+記録の取得と違うのは**1行に畳む**ところ。ツール結果は JSON として渡るので改行は文字列の中に収まるが、システムプロンプトは地の文なので改行がそのまま構造になる。山括弧を潰すだけでは `\n# 新しいルール` のような見出しを差し込まれたときに、`<user_data>` の囲みの中にいながら `# セキュリティ` と同じ高さの節に見えてしまう。そのため空白ごと畳んで、箇条書きの1項目から出られないようにしている。
+
+記憶に**書く**ときも、ユーザーの発話とエージェントの応答の両方を無害化してから渡す。ユーザーの発話を無害化しても、そこから誘導された応答の文面までは縛れない。応答は好みの抽出を経て次回のシステムプロンプトに載るため、読み出し側と二重にかけている。
 
 記憶 ID は CDK が `MEMORY_PREFERENCE_ID` 環境変数としてエージェントへ渡す（`agentcore.json` の `memories[].name` から自動導出）。この環境変数が無ければ好み学習は自動的に無効になるので、ローカル開発では何も設定しなくてよい。
+
+##### 記憶まわりの IAM の線引き
+
+名前空間の条件を付けられるのは、条件キー `bedrock-agentcore:namespace` を受け付ける `ListMemoryRecords` / `RetrieveMemoryRecords` の**2つだけ**。残りの `CreateEvent` `GetEvent` `ListEvents` `DeleteEvent` などは条件キーを持たないので、条件を書いても常に不一致になり全拒否になってしまう。
+
+| | IAM でどこまで守られるか |
+|---|---|
+| 読み出し（Retrieve / List MemoryRecords） | 名前空間の条件つき。`sommelier/preference/*` の外は引けない |
+| それ以外（CreateEvent・イベントの取得や削除など） | 条件なし。ただし対象は好み記憶の ARN ただ1つに限られる |
+
+つまり**「本人の棚にしか書かない」を保証しているのは IAM ではなくアプリ側**（`preference_memory.py` の `actorId` 検証と、`owner_sub` を検証済み JWT からしか取らない作り）。`actorId` は英数字・`-`・`_` だけを通し、区切り文字を含む値では読み書きしない。エージェントに記憶を触るツールは持たせていないので、モデルの判断でこの範囲が広がることもない。
 
 #### 失敗したときの切り分け
 
@@ -205,6 +220,21 @@ AWS_PROFILE=sakekasu-builder agentcore deploy --target dev
 # CDK 側（記憶の作成・環境変数・IAM が揃っているかの synth テスト）
 cd sommelier/agentcore/cdk && npm ci && npm test
 ```
+
+##### デプロイ後に好み学習が生きているか確かめる
+
+好み学習はフェイルオープンなので、**動いていなくても画面上は「好みを覚えていないだけ」にしか見えない**。抽出はサービス側の非同期処理で、Memory の実行ロールに権限が足りなければ黙って止まる。デプロイしたら数往復会話してから、レコードが増えているか一度だけ確認する。
+
+```bash
+MEMORY_ID=$(AWS_PROFILE=sakekasu-builder aws bedrock-agentcore-control list-memories \
+  --region ap-northeast-1 --query "memories[?contains(id,'sommelier_preference')].id | [0]" --output text)
+
+AWS_PROFILE=sakekasu-builder aws bedrock-agentcore list-memory-records \
+  --region ap-northeast-1 --memory-id "$MEMORY_ID" \
+  --namespace "sommelier/preference/<Cognitoのsub>"
+```
+
+抽出は非同期なので、会話直後は空でも数分待つと入る。イベント自体が入っていないなら書き込み側（`CreateEvent`）の問題で、Runtime のログに「好みの記録に失敗しました」が出ているはず。イベントはあるのにレコードが増えないなら抽出側の問題で、Memory の実行ロール（`AgentCore-sommelier-dev` スタックが作る）に権限を足す必要がある。
 
 Runtime の ARN はフロントの `src/features/sommelier/config.ts` に持つ（`VITE_SOMMELIER_RUNTIME_ARN` で上書き可）。Runtime を作り直したら更新する。
 

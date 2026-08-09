@@ -80,11 +80,20 @@ describe('好み学習用の AgentCore Memory', () => {
     });
   });
 
-  test('エージェントに記憶の読み書き権限を与える', () => {
+  // 権限の形は L3 コンストラクト（@aws/agentcore-cdk）が決める。
+  // ここで確かめたいのは「与えられているか」だけでなく、
+  // どこまで IAM で守られていて、どこからアプリの責任なのかの線引き。
+  //
+  // 名前空間の条件を付けられるのは、条件キー bedrock-agentcore:namespace を
+  // 受け付ける ListMemoryRecords / RetrieveMemoryRecords の2つだけ。
+  // CreateEvent は namespace を引数に取らず（名前空間はストラテジ設定と
+  // actorId からサービス側が決める）条件キーも持たないため、条件を付けると
+  // 常に不一致で全拒否になる。したがって「書き込み先を本人に限る」のは
+  // preference_memory.py の actor_id 検証が唯一の砦になる。
+  test('読み出しは名前空間の条件つきで与える', () => {
     synthesizeProject().hasResourceProperties('AWS::IAM::Policy', {
       PolicyDocument: {
         Statement: Match.arrayWith([
-          // 読み出しは名前空間の条件つき（他ユーザーの棚を引けない）
           Match.objectLike({
             Action: Match.arrayWith(['bedrock-agentcore:RetrieveMemoryRecords']),
             Condition: {
@@ -93,8 +102,22 @@ describe('好み学習用の AgentCore Memory', () => {
               },
             },
           }),
+        ]),
+      },
+    });
+  });
+
+  test('書き込みは条件なしだが、この記憶リソース1つに限られる', () => {
+    synthesizeProject().hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
           Match.objectLike({
             Action: Match.arrayWith(['bedrock-agentcore:CreateEvent']),
+            // 条件は付かない代わりに、対象は好み記憶の ARN ただ1つ。
+            // ワイルドカードや別リソースへ広がっていないことを見る
+            Resource: {
+              'Fn::GetAtt': [Match.stringLikeRegexp('^ApplicationMemoryPreference'), 'MemoryArn'],
+            },
           }),
         ]),
       },
