@@ -169,6 +169,25 @@ describe('ApiStack', () => {
       expect(roles).toHaveLength(2);
     });
 
+    it('レイヤーと違うリージョンに置こうとすると合成の時点で止まる', () => {
+      // レイヤーは同じリージョンのものしか付けられない。ここで止めないと、
+      // デプロイは通ってコールドスタートだけが落ちる
+      const otherRegion = new cdk.App();
+      const auth = new AuthStack(otherRegion, 'OtherRegionAuth', {
+        envName: 'dev',
+        env: { account: '<アプリのアカウント ID>', region: 'us-east-1' },
+      });
+
+      expect(
+        () =>
+          new ApiStack(otherRegion, 'OtherRegionApi', {
+            envName: 'dev',
+            userPool: auth.userPool,
+            env: { account: '<アプリのアカウント ID>', region: 'us-east-1' },
+          }),
+      ).toThrow(/us-east-1 のものではありません/);
+    });
+
     it('監視系の関数までは計装しない（ノイズと費用を増やさない）', () => {
       const functions = Object.values(template.findResources('AWS::Lambda::Function'));
       const instrumentedNames = functions
