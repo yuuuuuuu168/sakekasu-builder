@@ -269,7 +269,17 @@ export class ApiStack extends cdk.Stack {
     );
     // レイヤー v15 に実在するラッパー。汎用 ADOT の /opt/otel-handler ではない
     this.ocrAnalyzerFunction.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/otel-instrument');
-    // トレースと Application Signals のメトリクスを書くための権限
+    // テレメトリを書くための権限。中身は以下の2文だけ（v1、2024-10-16 以降変更なし）。
+    //
+    //   xray:PutTraceSegments                                  → Resource: *
+    //   logs:CreateLogGroup / CreateLogStream / PutLogEvents   → /aws/application-signals/data
+    //
+    // どちらも aws:ResourceAccount = ${aws:PrincipalAccount} の条件付きで自アカウントに閉じる。
+    //
+    // このポリシーが cloudwatch:PutMetricData を無制限に与える、という指摘が
+    // レビューで2度出ているが、PutMetricData は含まれていない。監視スタックが
+    // namespace 条件を付けているのと比べて緩い、という比較も対象が無いため成立しない。
+    // https://docs.aws.amazon.com/aws-managed-policy/latest/reference/CloudWatchLambdaApplicationSignalsExecutionRolePolicy.html
     this.ocrAnalyzerFunction.role?.addManagedPolicy(
       cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
         'CloudWatchLambdaApplicationSignalsExecutionRolePolicy',
