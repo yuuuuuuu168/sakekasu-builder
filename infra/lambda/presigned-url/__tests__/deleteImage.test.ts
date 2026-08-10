@@ -1,0 +1,133 @@
+// deleteImage の所有者チェック。
+//
+// 削除パイプラインが渡す imageKey は、削除した記録に入っていた値でしかない。
+// 作成時に他人のキーを書いた記録を自分で作って削除すると、他人の画像を
+// 消せてしまう経路があった。ここはその穴を塞いだことを固定する。
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+const sendMock = vi.fn();
+
+vi.mock('@aws-sdk/client-s3', () => ({
+  S3Client: class {
+    send = sendMock;
+  },
+  PutObjectCommand: class {
+    constructor(public input: unknown) {}
+  },
+  GetObjectCommand: class {
+    constructor(public input: unknown) {}
+  },
+  DeleteObjectCommand: class {
+    constructor(public input: { Bucket: string; Key: string }) {}
+  },
+}));
+
+vi.mock('@aws-sdk/s3-request-presigner', () => ({
+  getSignedUrl: vi.fn(async () => 'https://example.invalid/signed'),
+}));
+
+process.env.BUCKET_NAME = 'dev-sakekasu-images';
+
+const { handler } = await import('../index.js');
+
+const OWNER = '11111111-1111-1111-1111-111111111111';
+const VICTIM = '22222222-2222-2222-2222-222222222222';
+
+/** deleteImage を1回呼ぶ（パイプラインからの呼び出し形式に合わせる） */
+async function callDeleteImage(args: {
+  imageKey?: string;
+  imageKeys?: string[];
+  sub?: string;
+}) {
+  return handler({
+    info: { fieldName: 'deleteImage' },
+    arguments: { imageKey: args.imageKey, imageKeys: args.imageKeys },
+    identity: { sub: args.sub ?? OWNER },
+  } as Parameters<typeof handler>[0]);
+}
+
+/** 実際に DeleteObject が呼ばれたキーの一覧 */
+function deletedKeys(): string[] {
+  return sendMock.mock.calls.map((call) => (call[0] as { input: { Key: string } }).input.Key);
+}
+
+describe('deleteImage の所有者チェック', () => {
+  beforeEach(() => {
+    sendMock.mockReset();
+    sendMock.mockResolvedValue({});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('自分のキーは削除する', async () => {
+    const result = await callDeleteImage({ imageKey: `${OWNER}/purchase/rec-1/photo.jpg` });
+
+    expect(deletedKeys()).toEqual([`${OWNER}/purchase/rec-1/photo.jpg`]);
+    expect(result).toMatchObject({ success: true });
+  });
+
+  it('他人のキーは削除しない', async () => {
+    const result = await callDeleteImage({ imageKey: `${VICTIM}/purchase/rec-9/photo.jpg` });
+
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ imageDeleteFailed: true });
+  });
+
+  it('自分のキーと他人のキーが混ざっていても、自分のぶんだけ削除する', async () => {
+    await callDeleteImage({
+      imageKeys: [
+        `${OWNER}/purchase/rec-1/a.jpg`,
+        `${VICTIM}/purchase/rec-9/b.jpg`,
+        `${OWNER}/purchase/rec-1/c.jpg`,
+      ],
+    });
+
+    expect(deletedKeys().sort()).toEqual([
+      `${OWNER}/purchase/rec-1/a.jpg`,
+      `${OWNER}/purchase/rec-1/c.jpg`,
+    ]);
+  });
+
+  it('sub の前方一致だけで通さない（別人の sub が自分の sub で始まる場合）', async () => {
+    // 区切りの / まで含めて見ていないと、sub が前方一致する別人を通してしまう
+    await callDeleteImage({ imageKey: `${OWNER}-other/purchase/rec-9/photo.jpg` });
+
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('identity が無い呼び出しは拒否する', async () => {
+    await expect(
+      handler({
+        info: { fieldName: 'deleteImage' },
+        arguments: { imageKey: `${OWNER}/purchase/rec-1/photo.jpg` },
+      } as Parameters<typeof handler>[0]),
+    ).rejects.toThrow('Unauthorized');
+
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('削除対象が無いときは何もしない', async () => {
+    const result = await callDeleteImage({});
+
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ success: true });
+  });
+
+  it('拒否したことはログに残すが、他人のキーは書かない', async () => {
+    const spy = vi.spyOn(console, 'error');
+
+    await callDeleteImage({ imageKey: `${VICTIM}/purchase/rec-9/photo.jpg` });
+
+    const logged = spy.mock.calls.flat().join(' ');
+    // 監視スタックのメトリクスフィルター（level=ERROR かつ action=deleteImage）に拾わせる
+    expect(logged).toContain('"level":"ERROR"');
+    expect(logged).toContain('"action":"deleteImage"');
+    // 他人の sub を自分のログへ持ち込まない
+    expect(logged).not.toContain(VICTIM);
+  });
+});

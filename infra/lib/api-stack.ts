@@ -349,6 +349,22 @@ export function response(ctx) {
 export function request(ctx) {
   const now = util.time.nowISO8601();
   const input = ctx.args.input;
+
+  // 画像キーは自分のものだけを受け付ける。
+  // 他人のキーを書いた記録を作れると、その記録を削除したときに
+  // 削除パイプラインが他人の画像を消してしまう
+  const prefix = ctx.identity.sub + '/';
+  if (input.imageKey && !input.imageKey.startsWith(prefix)) {
+    util.error('Unauthorized: imageKey must belong to the requester', 'Unauthorized');
+  }
+  if (input.imageKeys) {
+    for (const key of input.imageKeys) {
+      if (!key.startsWith(prefix)) {
+        util.error('Unauthorized: imageKeys must belong to the requester', 'Unauthorized');
+      }
+    }
+  }
+
   const item = {
     ...input,
     id: util.autoId(),
@@ -552,6 +568,17 @@ export function request(ctx) {
 
 export function response(ctx) {
   if (ctx.error) {
+    // このスタックで唯一 util.error ではなく appendError を使う場所。
+    //
+    // 1段目で記録は既に削除されている。ここで中断すると「削除に失敗した」と
+    // 返しながら記録は存在しない状態になり、利用者が再試行しても直せない。
+    // 画像の消し残しは記録の削除そのものとは別の問題なので、
+    // ミューテーション自体は成功として返す。
+    //
+    // 握りつぶしているわけではない。Lambda 側は失敗を level=ERROR /
+    // action=deleteImage のログに出しており、ImageDeleteFailCount の
+    // メトリクスフィルター経由で監視スタックのアラームから Slack に届く。
+    // 消し残しは運用側で拾って対処する
     util.appendError(ctx.error.message, ctx.error.type);
   }
   return ctx.stash.deletedRecord;
