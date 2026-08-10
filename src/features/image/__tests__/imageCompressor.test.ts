@@ -190,6 +190,67 @@ describe('compressImage', () => {
 
     await expect(compressImage(file)).rejects.toThrow('画像の読み込みに失敗しました');
   });
+});
+
+// createImageBitmap は new Image() より扱える形式・サイズの幅が広い。
+// スマートフォンで撮った写真が new Image() で読めない事例があったため、
+// こちらを先に試すようにしてある
+describe('compressImage の画像読み込み経路', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('createImageBitmap が使えるならそちらで読む', async () => {
+    const { mockToBlob } = setupBrowserMocks({ blobSize: 1 * MB, imgLoadFail: true });
+    // new Image() は失敗する状態にしてあるので、圧縮まで進めば bitmap 経由と分かる
+    const createImageBitmapMock = vi.fn(async () => ({ width: 4000, height: 3000 }));
+    vi.stubGlobal('createImageBitmap', createImageBitmapMock);
+
+    const result = await compressImage(createDummyFile(4 * MB));
+
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+    expect(result.wasCompressed).toBe(true);
+    // 長辺 4000px なので 1568px へ縮小される
+    expect(mockToBlob).toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('createImageBitmap が失敗したら new Image() に落とす', async () => {
+    setupBrowserMocks({ blobSize: 1 * MB, imgWidth: 4000, imgHeight: 3000 });
+    const createImageBitmapMock = vi.fn(async () => {
+      throw new Error('decode failed');
+    });
+    vi.stubGlobal('createImageBitmap', createImageBitmapMock);
+
+    const result = await compressImage(createDummyFile(4 * MB));
+
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+    // new Image() 側で読めているので圧縮まで進む
+    expect(result.wasCompressed).toBe(true);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('どちらでも読めないときは切り分けの材料をコンソールに残す', async () => {
+    setupBrowserMocks({ imgLoadFail: true });
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal(
+      'createImageBitmap',
+      vi.fn(async () => {
+        throw new Error('decode failed');
+      }),
+    );
+
+    // 5MB 以下なので保存自体は通るが、読めなかったことは記録される
+    await compressImage(createDummyFile(4 * MB, 'image/jpeg', 'IMG_0001.JPG'));
+
+    const logged = JSON.stringify(spy.mock.calls);
+    expect(logged).toContain('IMG_0001.JPG');
+    expect(logged).toContain('image/jpeg');
+
+    vi.unstubAllGlobals();
+  });
 
   it('Canvas コンテキスト取得に失敗した場合エラーをスローする', async () => {
     setupBrowserMocks({ ctxFail: true });

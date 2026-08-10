@@ -69,17 +69,22 @@ export interface CompressionResult {
   wasCompressed: boolean;
 }
 
-/**
- * File を HTMLImageElement として読み込む
- */
-function loadImage(file: File): Promise<HTMLImageElement> {
+/** 読み込んだ画像。描画元と実寸を、読み込み方法によらず同じ形で扱う */
+interface LoadedImage {
+  source: CanvasImageSource;
+  width: number;
+  height: number;
+}
+
+/** File を HTMLImageElement として読み込む（従来の方法） */
+function loadViaImageElement(file: File): Promise<LoadedImage> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
 
     img.onload = () => {
       URL.revokeObjectURL(url);
-      resolve(img);
+      resolve({ source: img, width: img.naturalWidth, height: img.naturalHeight });
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
@@ -91,10 +96,44 @@ function loadImage(file: File): Promise<HTMLImageElement> {
 }
 
 /**
+ * File を描画できる形に読み込む。
+ *
+ * createImageBitmap を先に試す。`new Image()` より扱える形式・サイズの幅が
+ * 広く、デコードもメインスレッドの外で行われるため、スマートフォンで撮った
+ * 高解像度の写真に強い。未対応のブラウザや読めない形式では従来の方法に落とす。
+ *
+ * どちらでも読めなかった場合は、切り分けの材料をコンソールに残す。
+ * 「画像の読み込みに失敗しました」だけでは、形式が悪いのか大きさが問題なのか
+ * 判断できない
+ */
+async function loadImage(file: File): Promise<LoadedImage> {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(file);
+      return { source: bitmap, width: bitmap.width, height: bitmap.height };
+    } catch {
+      // 従来の方法で読めることもあるため、ここでは失敗を確定させない
+    }
+  }
+
+  try {
+    return await loadViaImageElement(file);
+  } catch (error) {
+    console.error('[imageCompressor] 画像を読み込めませんでした', {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      createImageBitmapAvailable: typeof createImageBitmap === 'function',
+    });
+    throw error;
+  }
+}
+
+/**
  * Canvas に画像を描画し、指定の品質で JPEG Blob に変換する
  */
 function canvasToBlob(
-  img: HTMLImageElement,
+  img: LoadedImage,
   width: number,
   height: number,
   quality: number,
@@ -110,7 +149,7 @@ function canvasToBlob(
       return;
     }
 
-    ctx.drawImage(img, 0, 0, width, height);
+    ctx.drawImage(img.source, 0, 0, width, height);
 
     canvas.toBlob(
       (blob) => {
@@ -132,7 +171,7 @@ function canvasToBlob(
  * @returns 上限以下の Blob、見つからなければ null
  */
 async function tryCompressAtResolution(
-  img: HTMLImageElement,
+  img: LoadedImage,
   width: number,
   height: number,
 ): Promise<Blob | null> {
@@ -183,7 +222,7 @@ function scaleToLongEdge(
 export async function compressImage(file: File): Promise<CompressionResult> {
   const originalSize = file.size;
 
-  let img: HTMLImageElement;
+  let img: LoadedImage;
   try {
     img = await loadImage(file);
   } catch (error) {
@@ -203,9 +242,8 @@ export async function compressImage(file: File): Promise<CompressionResult> {
       : new Error('画像の圧縮に失敗しました。もっと小さい画像を選択してください');
   }
 
-  const { width, height } = scaleToLongEdge(img.naturalWidth, img.naturalHeight);
-  const needsResize =
-    width !== img.naturalWidth || height !== img.naturalHeight;
+  const { width, height } = scaleToLongEdge(img.width, img.height);
+  const needsResize = width !== img.width || height !== img.height;
 
   // 長辺が上限以下かつサイズも上限以下なら再エンコードしない
   if (!needsResize && originalSize <= MAX_FILE_SIZE) {
@@ -308,7 +346,7 @@ export async function createThumbnail(
   fileName: string,
 ): Promise<File> {
   const img = await loadImage(file);
-  const { naturalWidth: width, naturalHeight: height } = img;
+  const { width, height } = img;
 
   // 長辺を THUMBNAIL_MAX_EDGE に収める（元が小さい場合は拡大しない）
   const scale = Math.min(1, THUMBNAIL_MAX_EDGE / Math.max(width, height));
