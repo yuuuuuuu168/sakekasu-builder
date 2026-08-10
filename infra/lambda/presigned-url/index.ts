@@ -128,6 +128,19 @@ async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; ima
 
   let hasFailure = false;
 
+  /**
+   * ログに出すキーから所有者の sub を落とす（Issue #127）。
+   *
+   * キーは `{sub}/{種別}/{recordId}/{ファイル名}` の形式で、sub は利用者ごとに
+   * 固定の識別子。そのまま出すとロググループに残り続ける。
+   *
+   * ただし丸ごと伏せると「どの画像の削除に失敗したか」が追えなくなるため、
+   * 先頭の sub だけを落として残りは出す。削除に失敗した画像は
+   * ImageDeleteFailCount のアラームから調べにいくので、recordId は要る。
+   */
+  const withoutOwner = (key: string, sub: string): string =>
+    key.startsWith(`${sub}/`) ? key.slice(sub.length + 1) : '(redacted)';
+
   // 自分のキーだけを消す。
   //
   // ここに来る imageKey は削除した記録に入っていた値で、記録の所有者とは
@@ -167,13 +180,18 @@ async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; ima
           Key: key,
         });
         await s3Client.send(command);
-        console.log(JSON.stringify({ level: 'INFO', action: 'deleteImage', imageKey: key, result: 'success' }));
+        console.log(JSON.stringify({
+          level: 'INFO',
+          action: 'deleteImage',
+          imageKey: withoutOwner(key, ownerSub),
+          result: 'success',
+        }));
       } catch (error) {
         hasFailure = true;
         console.error(JSON.stringify({
           level: 'ERROR',
           action: 'deleteImage',
-          imageKey: key,
+          imageKey: withoutOwner(key, ownerSub),
           result: 'failed',
           error: error instanceof Error ? error.message : String(error),
         }));
