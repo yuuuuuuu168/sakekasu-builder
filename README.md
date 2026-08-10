@@ -56,7 +56,7 @@
 | 新規ユーザー登録の Slack 通知 | Cognito Post Confirmation → SNS（[#66](https://github.com/yuuuuuu168/sakekasu-builder/issues/66)） |
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuu168/sakekasu-builder/issues/92)） |
 | DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。コンソール側の設定あり（[#67](https://github.com/yuuuuuu168/sakekasu-builder/issues/67)） |
-| Application Signals による APM | OCR と画像アップロードの分散トレース・ゴールデンメトリクス。SLO は実測待ち（[#86](https://github.com/yuuuuuu168/sakekasu-builder/issues/86)） |
+| Application Signals による APM | サービス検出・X-Ray トレースまで。ADOT の計装と SLO は未導入（[#86](https://github.com/yuuuuuu168/sakekasu-builder/issues/86)） |
 | CDK デプロイの自動化 | main へのマージで GitHub Actions が `cdk deploy`（OIDC 認証、[#94](https://github.com/yuuuuuu168/sakekasu-builder/issues/94)） |
 | 一覧画面の画像表示高速化 | サムネイル生成・Presigned URL キャッシュ・遅延読み込み |
 
@@ -561,11 +561,13 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev
 
 既存の監視は「異常が起きたこと」までは知らせてくれるが、そこから先の切り分けはログの突き合わせに頼っていた。リクエスト単位のトレースと、レイテンシー・エラー率・リクエスト数を自動で集めてそこを埋める。
 
-計装したのは OCR（`ocr-analyzer`）と画像アップロードの入口（`presigned-url`）の2つだけ。ADOT のレイヤーが起動時に割り込んで OpenTelemetry を仕込むので、関数のコードには手を入れていない。監視系の関数（health-check / slack-notifier / カナリア / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。
+**ADOT による計装はまだ入っていない。** 一度入れたが、起動ラッパーのパスをランタイム違いで取り違えて関数が起動しなくなり、切り戻した。いま有効なのは X-Ray のアクティブトレースと、アカウント側の設定（サービス検出・Transaction Search。ソムリエの GenAI Observability を入れたときから有効で、アカウントに1つの設定なので CDK では管理していない）。
 
-計装が働くには、サービス検出と Transaction Search がアカウントで有効になっている必要がある。どちらもソムリエの GenAI Observability を入れたときから有効で、**アカウントに1つの設定なので CDK では管理していない**。1つのスタックに載せると、そのスタックの巻き戻しが他機能の可観測性を道連れにするため（実際に一度やらかした）。
+そのため見えるのは Lambda 標準メトリクス由来のエラー率と実行時間まで。下流ごとの内訳（Bedrock に何秒、S3 に何秒）はまだ見えない。それでもエラー率は追えるので、既存のバグを1件見つけている（[#115](https://github.com/yuuuuuu168/sakekasu-builder/issues/115)）。
 
-SLO とエラーバジェット消費アラームはまだ入れていない。しきい値は実測を見てから決めるもので、当てずっぽうで作ると鳴りっぱなしか鳴らないかのどちらかになるため、先に計装だけ入れてデータを溜める。
+計装の対象は OCR（`ocr-analyzer`）と画像アップロードの入口（`presigned-url`）の2つだけにする。監視系の関数（health-check / slack-notifier / カナリア / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。
+
+SLO とエラーバジェット消費アラームも入れていない。しきい値は実測を見てから決めるもので、当てずっぽうで作ると鳴りっぱなしか鳴らないかのどちらかになる。
 
 対象を絞った理由、デプロイ後の確認手順、SLO の決め方、費用は [docs/application-signals.md](docs/application-signals.md) にまとめてある。
 
