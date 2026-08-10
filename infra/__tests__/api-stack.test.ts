@@ -162,6 +162,68 @@ describe('ApiStack', () => {
     template.hasOutput('ApiRegion', {});
   });
 
+  // Issue #82: Bedrock 呼び出しのコスト保護（IAM を使うモデルだけに絞る）
+  describe('Bedrock InvokeModel の権限', () => {
+    /** bedrock:InvokeModel を許可している文だけを集める */
+    const invokeModelStatements = () => {
+      const policies = template.findResources('AWS::IAM::Policy');
+      const statements = Object.values(policies).flatMap(
+        (policy) => (policy.Properties?.PolicyDocument?.Statement ?? []) as Record<string, unknown>[],
+      );
+      return statements.filter((statement) => {
+        const action = statement.Action;
+        return Array.isArray(action)
+          ? action.includes('bedrock:InvokeModel')
+          : action === 'bedrock:InvokeModel';
+      });
+    };
+
+    /** OCR Lambda に渡しているモデルID（ARN の突き合わせに使う） */
+    const ocrModelId = () => {
+      const [fn] = Object.values(
+        template.findResources('AWS::Lambda::Function', {
+          Properties: { FunctionName: 'dev-sakekasu-ocr-analyzer' },
+        }),
+      );
+      return fn?.Properties?.Environment?.Variables?.BEDROCK_MODEL_ID as string | undefined;
+    };
+
+    it('Resource が * のままではない', () => {
+      const statements = invokeModelStatements();
+
+      expect(statements).toHaveLength(1);
+      // 文字列でも配列でも、ワイルドカード単体は許さない
+      const resources = [statements[0].Resource].flat();
+      expect(resources).not.toContain('*');
+    });
+
+    it('推論プロファイルとその振り先 foundation-model だけを許可している', () => {
+      const serialized = JSON.stringify(invokeModelStatements()[0]?.Resource);
+
+      // プロファイル本体（アカウント単位なので region / accountId は Ref のまま）
+      expect(serialized).toContain(
+        ':inference-profile/jp.anthropic.claude-haiku-4-5-20251001-v1:0',
+      );
+      // 振り先。どちらか欠けると、その振り先に当たったリクエストだけが落ちる
+      for (const region of ['ap-northeast-1', 'ap-northeast-3']) {
+        expect(serialized).toContain(
+          `:bedrock:${region}::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0`,
+        );
+      }
+    });
+
+    // モデルを差し替えたときに ARN の更新を忘れると、デプロイは通るのに
+    // OCR だけが AccessDeniedException で止まる。ここで気づけるようにする
+    it('Lambda に渡すモデルIDと許可した推論プロファイルが一致している', () => {
+      const modelId = ocrModelId();
+      const serialized = JSON.stringify(invokeModelStatements()[0]?.Resource);
+
+      expect(modelId).toBeDefined();
+      expect(serialized).toContain(`:inference-profile/${modelId}`);
+      expect(serialized).toContain(`foundation-model/${modelId?.replace(/^jp\./, '')}`);
+    });
+  });
+
   // Issue #86: Application Signals の計装
   describe('Application Signals の計装', () => {
     const targets = ['dev-sakekasu-ocr-analyzer', 'dev-sakekasu-presigned-url'];

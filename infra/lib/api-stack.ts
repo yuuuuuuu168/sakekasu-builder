@@ -44,6 +44,42 @@ import { LAMBDA_LOG_RETENTION } from './log-retention.js';
 const APPLICATION_SIGNALS_NODEJS_LAYER_ARN =
   'arn:aws:lambda:ap-northeast-1:615299751070:layer:AWSOpenTelemetryDistroJs:15';
 
+/**
+ * OCR が呼ぶ Bedrock のモデル（Issue #82）。
+ *
+ * 先頭の `jp.` はクロスリージョン推論プロファイルの印で、リクエストは
+ * プロファイルが束ねるリージョンのどれかへ振られる。InvokeModel の認可は
+ * **プロファイル本体と振り先の foundation-model の両方**を見るため、
+ * プロファイルの ARN だけを許可すると AccessDeniedException で OCR が止まる。
+ *
+ * 振り先は実機で取得した（2026-08-10、アカウント <アプリのアカウント ID> / ap-northeast-1）。
+ *
+ * ```
+ * aws bedrock list-inference-profiles --region ap-northeast-1 \
+ *   --query "inferenceProfileSummaries[?inferenceProfileId=='jp.anthropic.claude-haiku-4-5-20251001-v1:0'].models"
+ * → arn:aws:bedrock:ap-northeast-3::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+ *   arn:aws:bedrock:ap-northeast-1::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+ * ```
+ *
+ * 「両方要る」は使い捨てロールに同じポリシーだけを付けて実測した（2026-08-10）。
+ * プロファイルの ARN だけにすると 6/6 が下のエラーで落ちる。
+ *
+ * ```
+ * AccessDeniedException: ... is not authorized to perform: bedrock:InvokeModel
+ * on resource: arn:aws:bedrock:ap-northeast-3::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+ * ```
+ *
+ * 3つ揃えたポリシーでは 6/6 成功する。なお put-role-policy の直後は前の
+ * ポリシーで通ってしまうことがある（IAM は結果整合）。少し置いてから見ること。
+ *
+ * モデルを差し替えるときは ID を書き換えるだけで済ませず、同じコマンドで
+ * 振り先リージョンを取り直すこと。振り先が1つでも欠けると、その振り先に
+ * 当たったリクエストだけが落ちる（毎回は落ちないので気づきにくい）。
+ */
+const BEDROCK_MODEL_ID = 'jp.anthropic.claude-haiku-4-5-20251001-v1:0';
+/** 上の推論プロファイルの振り先リージョン */
+const BEDROCK_INFERENCE_REGIONS = ['ap-northeast-1', 'ap-northeast-3'];
+
 export interface ApiStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
   envName: string;
@@ -248,7 +284,7 @@ export class ApiStack extends cdk.Stack {
       tracing: Tracing.ACTIVE,
       environment: {
         BUCKET_NAME: this.imageBucket.bucketName,
-        BEDROCK_MODEL_ID: 'jp.anthropic.claude-haiku-4-5-20251001-v1:0',
+        BEDROCK_MODEL_ID,
       },
       bundling: {
         format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
@@ -292,10 +328,23 @@ export class ApiStack extends cdk.Stack {
     // S3 読み取り権限
     this.imageBucket.grantRead(this.ocrAnalyzerFunction);
 
-    // Bedrock InvokeModel 権限
+    // Bedrock InvokeModel 権限（Issue #82）。
+    //
+    // 以前は Resource が `*` で、この実行ロールを取れれば同一アカウントで
+    // 有効化済みの全モデルを呼べた。OCR が使うのは1モデルだけなので、
+    // 推論プロファイルとその振り先だけに絞る。
+    //
+    // foundation-model の ARN にアカウントIDが入らないのは仕様（AWS 側の
+    // リソースのため）。プロファイル側はアカウント単位なので入る。
+    const foundationModelId = BEDROCK_MODEL_ID.replace(/^jp\./, '');
     this.ocrAnalyzerFunction.addToRolePolicy(new cdk.aws_iam.PolicyStatement({
       actions: ['bedrock:InvokeModel'],
-      resources: ['*'],
+      resources: [
+        `arn:${this.partition}:bedrock:${this.region}:${this.account}:inference-profile/${BEDROCK_MODEL_ID}`,
+        ...BEDROCK_INFERENCE_REGIONS.map(
+          (region) => `arn:${this.partition}:bedrock:${region}::foundation-model/${foundationModelId}`,
+        ),
+      ],
     }));
 
     // AppSync Lambda データソース + リゾルバー
