@@ -145,8 +145,11 @@ describe('ApiStack', () => {
     it('起動ラッパーを指定した関数が無い（実機で確認できていないレイヤーを使わない）', () => {
       // ラッパーだけ指定してレイヤーに実体が無いと、関数は Runtime.ExitError で
       // 起動しなくなる。実際にこれで画像アップロードを全滅させた。
-      // 付け直すときは、レイヤーに /opt/otel-instrument があることを
-      // 実機で確かめてからこのテストを変える
+      //
+      // 付け直すときは、レイヤーに /opt/otel-handler があることを実機で
+      // 確かめてからこのテストを変える。Node.js のラッパーは otel-handler で、
+      // otel-instrument は Python 用。公式ドキュメントの CDK サンプルが
+      // Python で書かれており、それを流用したのが前回の障害の原因だった
       const withWrapper = Object.values(template.findResources('AWS::Lambda::Function')).filter(
         (fn) => fn.Properties?.Environment?.Variables?.AWS_LAMBDA_EXEC_WRAPPER !== undefined,
       );

@@ -13,16 +13,17 @@ import type { Construct } from 'constructs';
 
 // Application Signals の ADOT 計装（Issue #86）はいったん外した。
 //
-// 指定していたレイヤー（901920570463 の aws-otel-nodejs-amd64-ver-1-30-2）に
-// 起動ラッパー /opt/otel-instrument が入っておらず、AWS_LAMBDA_EXEC_WRAPPER が
-// 解決できずに関数が Runtime.ExitError で起動しなくなった。画像アップロードが
-// 全滅している。レイヤーの「実在」は確認したが「中身」を確認していなかった。
+// AWS_LAMBDA_EXEC_WRAPPER に /opt/otel-instrument を指定したが、これは
+// Python 用のラッパー名だった。Node.js 用は /opt/otel-handler。
+// 存在しないパスを指定するとラッパーの解決に失敗した時点で関数が
+// Runtime.ExitError で落ち、画像アップロードが全滅した。
+// レイヤーの「実在」は確認したが「中身」を確認していなかった。
 //
 // X-Ray のアクティブトレースだけは残している。こちらはレイヤーに依存せず、
 // Lambda 単体で動いて害がない。
 //
-// 再挑戦は Issue #86 で、Application Signals 用の正しいレイヤーを特定し、
-// 実機で1関数だけ検証してから入れる。
+// 再挑戦は Issue #86 で、レイヤーの中身を実機で確かめ、1関数だけに入れて
+// 起動を確認してから広げる。
 
 export interface ApiStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
