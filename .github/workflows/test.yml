@@ -36,16 +36,25 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: infra/package-lock.json
-      - run: npm ci
+      # --ignore-scripts はここにも付ける。PR のブランチをそのまま checkout する
+      # 以上、lock に仕込まれたインストール時スクリプトを走らせない。
+      # esbuild だけが hasInstallScript を持つが、無くても vitest の変換と
+      # NodejsFunction のバンドルは動く（このワークフローが両方を通るので、
+      # 動かなくなればここで落ちる）
+      - run: npm ci --ignore-scripts
       # Lambda は1つずつ package.json を持ち、AWS SDK はそちらの依存にある。
       # infra 直下の npm ci だけでは入らないため、テストが SDK を import した
       # 時点で ERR_MODULE_NOT_FOUND になる（ローカルは過去の npm install が
-      # 残っていて気づけない）
+      # 残っていて気づけない）。
+      #
+      # --ignore-scripts なのは、PR のブランチをそのまま checkout して入れる以上、
+      # lock に細工されたライフサイクルスクリプトを走らせないため。8つの lock は
+      # いずれも hasInstallScript を持たないので、付けても壊れるものが無い
       - name: Lambda ごとの依存を入れる
         run: |
           for dir in lambda/*/; do
             [ -f "${dir}package.json" ] || continue
-            (cd "$dir" && npm ci)
+            (cd "$dir" && npm ci --ignore-scripts)
           done
       - run: npx tsc --noEmit
       - run: npm test
