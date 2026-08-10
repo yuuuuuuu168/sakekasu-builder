@@ -98,26 +98,49 @@ describe('compressImage', () => {
     expect(result.compressedSize).toBe(3 * MB);
   });
 
-  it('ちょうど5MBのファイルは圧縮せずそのまま返す', async () => {
+  it('上限ちょうど（3.75MB）のファイルは圧縮せずそのまま返す', async () => {
     setupBrowserMocks();
-    const file = createDummyFile(5 * MB);
+    const file = createDummyFile(3.75 * MB);
     const result = await compressImage(file);
 
     expect(result.wasCompressed).toBe(false);
     expect(result.file).toBe(file);
-    expect(result.originalSize).toBe(5 * MB);
-    expect(result.compressedSize).toBe(5 * MB);
+    expect(result.originalSize).toBe(3.75 * MB);
+    expect(result.compressedSize).toBe(3.75 * MB);
   });
 
-  it('5MB超のファイルを圧縮し wasCompressed: true を返す', async () => {
+  it('上限超のファイルを圧縮し wasCompressed: true を返す', async () => {
     setupBrowserMocks({ blobSize: 2 * MB });
     const file = createDummyFile(6 * MB);
 
     const result = await compressImage(file);
 
     expect(result.wasCompressed).toBe(true);
-    expect(result.compressedSize).toBeLessThanOrEqual(5 * MB);
+    expect(result.compressedSize).toBeLessThanOrEqual(3.75 * MB);
     expect(result.originalSize).toBe(6 * MB);
+  });
+
+  // Issue #115: Bedrock の 5MB は base64 エンコード後の値で判定される。
+  // 元ファイルで 5MB を許すと base64 で 6.7MB になり OCR だけが失敗していた
+  it('長辺が小さくても 3.75MB を超えていれば圧縮する（OCR が弾かれるため）', async () => {
+    // 長辺 1000px なのでリサイズは不要。それでもサイズ超過なら再エンコードに進む
+    setupBrowserMocks({ blobSize: 2 * MB, imgWidth: 1000, imgHeight: 800 });
+    const file = createDummyFile(4.9 * MB);
+
+    const result = await compressImage(file);
+
+    expect(result.wasCompressed).toBe(true);
+    expect(result.compressedSize).toBeLessThanOrEqual(3.75 * MB);
+  });
+
+  it('圧縮後のサイズは base64 にしても Bedrock の 5MB を超えない', async () => {
+    setupBrowserMocks({ blobSize: 3 * MB });
+    const file = createDummyFile(8 * MB);
+
+    const result = await compressImage(file);
+
+    // base64 は元の 4/3 倍。上限に収まっていれば必ず 5MB 未満になる
+    expect(Math.ceil(result.compressedSize / 3) * 4).toBeLessThanOrEqual(5 * MB);
   });
 
   it('圧縮後のファイルは JPEG 形式 (image/jpeg) である', async () => {
@@ -201,7 +224,7 @@ describe('compressImage', () => {
     const file = createDummyFile(10 * MB);
 
     await expect(compressImage(file)).rejects.toThrow(
-      '画像の圧縮に失敗しました。5MB以下の画像を選択してください',
+      '画像の圧縮に失敗しました。もっと小さい画像を選択してください',
     );
   });
 });

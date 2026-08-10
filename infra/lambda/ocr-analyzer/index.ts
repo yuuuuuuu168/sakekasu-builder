@@ -27,6 +27,15 @@ interface AppSyncEvent {
 /** 1リクエストで解析する画像の上限（トークン量とコストを抑える） */
 const MAX_OCR_IMAGES = 3;
 
+/**
+ * Bedrock が受け取れる画像の上限。
+ *
+ * base64 エンコード後の長さで判定されるため、元ファイルのサイズとは
+ * 4/3 のずれがある。フロント側（`imageCompressor.ts`）はこの値から
+ * 逆算した 3/4 を上限にしている
+ */
+const BEDROCK_IMAGE_BASE64_LIMIT = 5 * 1024 * 1024;
+
 interface OcrResult {
   sakeName: string | null;
   category: SakeCategory | null;
@@ -135,6 +144,31 @@ export function validateImageKeyAccess(sub: string, imageKey: string): void {
 
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
+/**
+ * Bedrock に渡せる大きさかを確かめる（Issue #115）。
+ *
+ * 上限は base64 エンコード後の長さで判定されるため、元ファイルのサイズとは
+ * 4/3 のずれがある。フロント側（`imageCompressor.ts`）も同じ制限から逆算した
+ * 上限で圧縮しているが、そこを通らない経路（API を直接叩く、既存データの
+ * 再解析）では効かないので、送る前にここでも見る。
+ *
+ * 超えていれば Bedrock を呼ばずに落とす。呼んでも ValidationException が
+ * 返るだけで、失敗の理由がログから読み取りにくくなる
+ */
+export function assertImagesFitBedrockLimit(
+  images: { base64: string }[],
+): void {
+  images.forEach((image, index) => {
+    if (image.base64.length > BEDROCK_IMAGE_BASE64_LIMIT) {
+      // キーには利用者の sub が入るのでログに出さない。位置だけ示す
+      console.error(
+        `[OCR] image too large for Bedrock: index=${index} base64=${image.base64.length} limit=${BEDROCK_IMAGE_BASE64_LIMIT}`,
+      );
+      throw new Error('Image too large for OCR');
+    }
+  });
+}
+
 export async function handler(event: AppSyncEvent): Promise<OcrResult> {
   const { imageKey, additionalImageKeys } = event.arguments;
   const { sub } = event.identity;
@@ -174,6 +208,9 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
   } catch {
     throw new Error('Failed to retrieve image from storage');
   }
+
+  // 取得の失敗と混同しないよう catch の外で大きさを見る
+  assertImagesFitBedrockLimit(images);
 
   // Bedrock Claude Haiku でマルチモーダル解析
   const modelId = process.env.BEDROCK_MODEL_ID ?? 'jp.anthropic.claude-haiku-4-5-20251001-v1:0';
