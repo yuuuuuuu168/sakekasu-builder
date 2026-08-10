@@ -44,6 +44,89 @@ import { LAMBDA_LOG_RETENTION } from './log-retention.js';
 const APPLICATION_SIGNALS_NODEJS_LAYER_ARN =
   'arn:aws:lambda:ap-northeast-1:615299751070:layer:AWSOpenTelemetryDistroJs:15';
 
+/**
+ * OCR が呼ぶ Bedrock のモデル（Issue #82）。
+ *
+ * 先頭の `jp.` はクロスリージョン推論プロファイルの印で、リクエストは
+ * プロファイルが束ねるリージョンのどれかへ振られる。InvokeModel の認可は
+ * **プロファイル本体と振り先の foundation-model の両方**を見るため、
+ * プロファイルの ARN だけを許可すると AccessDeniedException で OCR が止まる。
+ *
+ * 振り先は実機で取得した（2026-08-10、アカウント <アプリのアカウント ID> / ap-northeast-1）。
+ *
+ * ```
+ * aws bedrock list-inference-profiles --region ap-northeast-1 \
+ *   --query "inferenceProfileSummaries[?inferenceProfileId=='jp.anthropic.claude-haiku-4-5-20251001-v1:0'].models"
+ * → arn:aws:bedrock:ap-northeast-3::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+ *   arn:aws:bedrock:ap-northeast-1::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+ * ```
+ *
+ * 「両方要る」は使い捨てロールに同じポリシーだけを付けて実測した（2026-08-10）。
+ * プロファイルの ARN だけにすると 6/6 が下のエラーで落ちる。
+ *
+ * ```
+ * AccessDeniedException: ... is not authorized to perform: bedrock:InvokeModel
+ * on resource: arn:aws:bedrock:ap-northeast-3::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+ * ```
+ *
+ * 3つ揃えたポリシーでは 6/6 成功する。なお put-role-policy の直後は前の
+ * ポリシーで通ってしまうことがある（IAM は結果整合）。少し置いてから見ること。
+ *
+ * モデルを差し替えるときは ID を書き換えるだけで済ませず、同じコマンドで
+ * 振り先リージョンを取り直すこと。振り先が1つでも欠けると、その振り先に
+ * 当たったリクエストだけが落ちる（毎回は落ちない）。ただし気づけないわけでは
+ * なく、OCR のログに欠けている ARN 名指しの AccessDeniedException が出る。
+ * Application Signals の計装（Issue #86）が入っているのでトレースにも残る。
+ */
+const BEDROCK_MODEL_ID = 'jp.anthropic.claude-haiku-4-5-20251001-v1:0';
+/**
+ * 上の推論プロファイルが指す基盤モデル。
+ *
+ * プロファイルIDから接頭辞を落としたものだが、`BEDROCK_MODEL_ID.replace(/^jp\./, '')`
+ * のように正規表現で導出しない。接頭辞は `jp.` だけではなく（`us.` `eu.` `apac.`
+ * `global.` などがあり、今後も増える）、想定外の接頭辞を渡されたときに正規表現は
+ * 例外を出さずに接頭辞つきのまま通してしまう。結果、実在しない
+ * `foundation-model/us.anthropic...` のような ARN を黙って作り、デプロイは成功する
+ * のに全リクエストが AccessDeniedException になる。
+ *
+ * 2つを別々に持ち、対応が崩れていないかは下の synth 時チェックで見る。
+ */
+const BEDROCK_FOUNDATION_MODEL_ID = 'anthropic.claude-haiku-4-5-20251001-v1:0';
+/** 上の推論プロファイルの振り先リージョン */
+const BEDROCK_INFERENCE_REGIONS = ['ap-northeast-1', 'ap-northeast-3'];
+
+/**
+ * 推論プロファイルIDと基盤モデルIDの対応を検査する。
+ *
+ * システム定義の推論プロファイルIDは「<接頭辞>.<基盤モデルID>」の形をしていて、
+ * 接頭辞はちょうど1区切りぶん（`jp.` `us.` `apac.` `global.` など）。よって
+ * 「先頭の1区切りを落としたもの」と完全一致するかで見る。
+ *
+ * 後方一致で見ると足りない。`anthropic.` まで削りすぎた値も後方一致は通ってしまい、
+ * 実在しない `foundation-model/claude-haiku-...` を許可した状態でデプロイが成功して、
+ * 本番の OCR だけが AccessDeniedException で止まる。
+ *
+ * 接頭辞の無い素の基盤モデルIDを渡した場合も落とす。その場合は推論プロファイルでは
+ * ないので、そもそも組み立てるべき ARN の形が違う。
+ */
+export function assertInferenceProfileMatchesFoundationModel(
+  profileId: string,
+  foundationModelId: string,
+): void {
+  const stripped = profileId.replace(/^[^.]+\./, '');
+  if (stripped === profileId || stripped !== foundationModelId) {
+    throw new Error(
+      `推論プロファイルID (${profileId}) と基盤モデルID (${foundationModelId}) が対応していない。` +
+        `期待する基盤モデルIDは "${stripped}"。` +
+        '推論プロファイルIDは「<接頭辞>.<基盤モデルID>」の形になる',
+    );
+  }
+}
+
+// 片方だけ書き換えたら synth の時点で落とす。デプロイまで通してしまうと、
+// 気づくのは本番の OCR が AccessDeniedException で止まったときになる
+assertInferenceProfileMatchesFoundationModel(BEDROCK_MODEL_ID, BEDROCK_FOUNDATION_MODEL_ID);
+
 export interface ApiStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
   envName: string;
@@ -248,7 +331,7 @@ export class ApiStack extends cdk.Stack {
       tracing: Tracing.ACTIVE,
       environment: {
         BUCKET_NAME: this.imageBucket.bucketName,
-        BEDROCK_MODEL_ID: 'jp.anthropic.claude-haiku-4-5-20251001-v1:0',
+        BEDROCK_MODEL_ID,
       },
       bundling: {
         format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
@@ -292,10 +375,23 @@ export class ApiStack extends cdk.Stack {
     // S3 読み取り権限
     this.imageBucket.grantRead(this.ocrAnalyzerFunction);
 
-    // Bedrock InvokeModel 権限
+    // Bedrock InvokeModel 権限（Issue #82）。
+    //
+    // 以前は Resource が `*` で、この実行ロールを取れれば同一アカウントで
+    // 有効化済みの全モデルを呼べた。OCR が使うのは1モデルだけなので、
+    // 推論プロファイルとその振り先だけに絞る。
+    //
+    // foundation-model の ARN にアカウントIDが入らないのは仕様（AWS 側の
+    // リソースのため）。プロファイル側はアカウント単位なので入る。
     this.ocrAnalyzerFunction.addToRolePolicy(new cdk.aws_iam.PolicyStatement({
       actions: ['bedrock:InvokeModel'],
-      resources: ['*'],
+      resources: [
+        `arn:${this.partition}:bedrock:${this.region}:${this.account}:inference-profile/${BEDROCK_MODEL_ID}`,
+        ...BEDROCK_INFERENCE_REGIONS.map(
+          (region) =>
+            `arn:${this.partition}:bedrock:${region}::foundation-model/${BEDROCK_FOUNDATION_MODEL_ID}`,
+        ),
+      ],
     }));
 
     // AppSync Lambda データソース + リゾルバー

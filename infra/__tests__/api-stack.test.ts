@@ -1,7 +1,13 @@
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib';
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
+import * as url from 'node:url';
 import { AuthStack } from '../lib/auth-stack.js';
-import { ApiStack } from '../lib/api-stack.js';
+import {
+  ApiStack,
+  assertInferenceProfileMatchesFoundationModel,
+} from '../lib/api-stack.js';
 
 describe('ApiStack', () => {
   let template: Template;
@@ -160,6 +166,145 @@ describe('ApiStack', () => {
   // Requirements 3.7: ApiRegion の CfnOutput が存在する
   it('ApiRegion の CfnOutput が存在する', () => {
     template.hasOutput('ApiRegion', {});
+  });
+
+  // Issue #82: Bedrock 呼び出しのコスト保護（IAM を使うモデルだけに絞る）
+  describe('Bedrock InvokeModel の権限', () => {
+    // 期待値は lib/ から import せず、ここにリテラルで持つ。実装の定数を
+    // 参照したり実装と同じ変換をかけ直したりすると、実装が間違っていても
+    // テストが同じ間違いをして通る。特に基盤モデルIDは接頭辞を落とす加工を
+    // 通した値なので、加工そのものが壊れたときに気づける必要がある
+    const EXPECTED_MODEL_ID = 'jp.anthropic.claude-haiku-4-5-20251001-v1:0';
+    const EXPECTED_FOUNDATION_MODEL_ID = 'anthropic.claude-haiku-4-5-20251001-v1:0';
+    /** 許可してよい ARN の全量。テストのスタックには env を渡していないので疑似パラメータは Ref のまま */
+    const EXPECTED_RESOURCES = [
+      `arn:\${AWS::Partition}:bedrock:\${AWS::Region}:\${AWS::AccountId}:inference-profile/${EXPECTED_MODEL_ID}`,
+      `arn:\${AWS::Partition}:bedrock:ap-northeast-1::foundation-model/${EXPECTED_FOUNDATION_MODEL_ID}`,
+      `arn:\${AWS::Partition}:bedrock:ap-northeast-3::foundation-model/${EXPECTED_FOUNDATION_MODEL_ID}`,
+    ];
+
+    /** Fn::Join を1本の文字列に潰す。Ref は `${AWS::Partition}` の形で埋める */
+    const flattenArn = (resource: unknown): string => {
+      if (typeof resource === 'string') return resource;
+      const join = (resource as { 'Fn::Join'?: [string, unknown[]] })['Fn::Join'];
+      if (!join) return JSON.stringify(resource);
+      const [separator, parts] = join;
+      return parts
+        .map((part) =>
+          typeof part === 'string' ? part : `\${${(part as { Ref: string }).Ref}}`,
+        )
+        .join(separator);
+    };
+
+    /**
+     * bedrock:InvokeModel を **Allow** している文だけを集める。
+     *
+     * Effect を見ないと、うっかり Deny になっていても以降の検査が素通りする
+     * （ARN は同じまま Effect だけ変わるため、権限が消えているのに緑になる）
+     */
+    const invokeModelAllowStatements = () => {
+      const policies = template.findResources('AWS::IAM::Policy');
+      const statements = Object.values(policies).flatMap(
+        (policy) => (policy.Properties?.PolicyDocument?.Statement ?? []) as Record<string, unknown>[],
+      );
+      return statements.filter((statement) => {
+        const action = statement.Action;
+        const matchesAction = Array.isArray(action)
+          ? action.includes('bedrock:InvokeModel')
+          : action === 'bedrock:InvokeModel';
+        return matchesAction && statement.Effect === 'Allow';
+      });
+    };
+
+    /** 許可している ARN を平坦化して返す */
+    const allowedResources = () => {
+      const [statement] = invokeModelAllowStatements();
+      return [statement?.Resource].flat().map(flattenArn);
+    };
+
+    /** OCR Lambda に渡しているモデルID */
+    const ocrModelId = () => {
+      const [fn] = Object.values(
+        template.findResources('AWS::Lambda::Function', {
+          Properties: { FunctionName: 'dev-sakekasu-ocr-analyzer' },
+        }),
+      );
+      return fn?.Properties?.Environment?.Variables?.BEDROCK_MODEL_ID as string | undefined;
+    };
+
+    it('推論プロファイルとその振り先 foundation-model だけを許可している', () => {
+      expect(invokeModelAllowStatements()).toHaveLength(1);
+      // 部分一致ではなく全量で見る。増えた ARN も減った ARN もここで落ちる
+      expect(allowedResources()).toEqual(EXPECTED_RESOURCES);
+    });
+
+    // 元の `*` に戻す以外に、`bedrock:*::foundation-model/*` のように
+    // 部分的に緩める直し方がある。ARN 単体の等値比較では素通りするので、
+    // 文字列のどこにワイルドカードが出ても落とす
+    it('ワイルドカードを含む ARN が混ざっていない', () => {
+      for (const resource of allowedResources()) {
+        expect(resource, `${resource} にワイルドカードが含まれている`).not.toContain('*');
+      }
+    });
+
+    // モデルを差し替えたときに ARN の更新を忘れると、デプロイは通るのに
+    // OCR だけが AccessDeniedException で止まる。ここで気づけるようにする
+    it('Lambda に渡すモデルIDと許可した推論プロファイルが一致している', () => {
+      expect(ocrModelId()).toBe(EXPECTED_MODEL_ID);
+      expect(allowedResources()[0]).toContain(`:inference-profile/${EXPECTED_MODEL_ID}`);
+    });
+
+    // Lambda 側にモデルIDのリテラルが残っていると、CDK の定数だけを書き換えた
+    // ときに両者がずれる。ずれても CDK のテストは全部通ってしまうため、
+    // 実装ファイルを直接見て二重管理そのものを禁じる。
+    //
+    // 「既定値へ落ちないこと」自体はここでは見ない。ソースの文字列検査では
+    // 書き方を変えるだけですり抜けられるため、環境変数を外して実際に呼ぶ
+    // lambda/ocr-analyzer/__tests__/resolveModelId.test.ts のほうで見ている
+    it('OCR Lambda のソースにモデルIDのリテラルが残っていない', () => {
+      const source = readFileSync(
+        path.join(
+          path.dirname(url.fileURLToPath(import.meta.url)),
+          '../lambda/ocr-analyzer/index.ts',
+        ),
+        'utf-8',
+      );
+
+      expect(source).not.toContain('anthropic.claude');
+    });
+  });
+
+  // 推論プロファイルIDと基盤モデルIDの対応チェック（Issue #82）。
+  // 通ってはいけない組み合わせを並べる。ここが緩いと、実在しない ARN を
+  // 許可した状態でデプロイが成功し、本番の OCR だけが止まる
+  describe('assertInferenceProfileMatchesFoundationModel', () => {
+    it.each([
+      ['jp.anthropic.claude-haiku-4-5-20251001-v1:0', 'anthropic.claude-haiku-4-5-20251001-v1:0'],
+      // 接頭辞は jp. に限らない。どの接頭辞でも1区切りだけ落とす
+      ['us.anthropic.claude-haiku-4-5-20251001-v1:0', 'anthropic.claude-haiku-4-5-20251001-v1:0'],
+      ['global.anthropic.claude-haiku-4-5-20251001-v1:0', 'anthropic.claude-haiku-4-5-20251001-v1:0'],
+    ])('%s と %s は対応している', (profileId, foundationModelId) => {
+      expect(() =>
+        assertInferenceProfileMatchesFoundationModel(profileId, foundationModelId),
+      ).not.toThrow();
+    });
+
+    it.each([
+      // anthropic. まで削りすぎ。後方一致だけで見ると通ってしまう組み合わせ
+      ['jp.anthropic.claude-haiku-4-5-20251001-v1:0', 'claude-haiku-4-5-20251001-v1:0'],
+      // 接頭辞を落とし忘れ
+      ['jp.anthropic.claude-haiku-4-5-20251001-v1:0', 'jp.anthropic.claude-haiku-4-5-20251001-v1:0'],
+      // 別モデル
+      ['jp.anthropic.claude-haiku-4-5-20251001-v1:0', 'anthropic.claude-sonnet-4-5-20250929-v1:0'],
+      // 接頭辞の無い素の基盤モデルID。推論プロファイルではないので ARN の形が違う
+      ['anthropic.claude-haiku-4-5-20251001-v1:0', 'anthropic.claude-haiku-4-5-20251001-v1:0'],
+      // 区切りが無い
+      ['claude-haiku', 'claude-haiku'],
+    ])('%s と %s は対応していない', (profileId, foundationModelId) => {
+      expect(() =>
+        assertInferenceProfileMatchesFoundationModel(profileId, foundationModelId),
+      ).toThrow(/対応していない/);
+    });
   });
 
   // Issue #86: Application Signals の計装

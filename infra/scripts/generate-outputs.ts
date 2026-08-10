@@ -5,7 +5,7 @@ import {
 } from '@aws-sdk/client-cloudformation';
 import { writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /**
  * amplify_outputs.json 互換の出力構造
@@ -130,7 +130,15 @@ async function main(): Promise<void> {
   console.log(`✅ ${outputPath} を生成しました`);
 }
 
-main().catch((err) => {
-  console.error('❌ エラー:', err instanceof Error ? err.message : err);
-  process.exit(1);
-});
+// このファイルを直接実行したときだけ main() を走らせる。
+//
+// 無条件に呼ぶと、テストが純粋関数を import しただけで CloudFormation を叩き、
+// amplify_outputs.json を書き換えてしまう。失敗した場合は process.exit(1) が
+// テストランナーごと落とす。実際 CI ではこれで test ジョブが落ちた（ローカルは
+// cdk.out と認証が揃っていたため main() が成功してしまい、気づけなかった）。
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error('❌ エラー:', err instanceof Error ? err.message : err);
+    process.exit(1);
+  });
+}
