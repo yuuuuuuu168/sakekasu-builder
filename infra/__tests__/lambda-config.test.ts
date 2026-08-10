@@ -45,7 +45,43 @@ const EXPECTED_RETENTION_DAYS = 30;
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 const libDir = path.join(here, '../lib');
 
+/**
+ * 生きているコードの中で正規表現に当たる行数を数える。
+ *
+ * 行コメントを除くのは、`logRetention` を一時的にコメントアウトしても
+ * 数が合ってしまい、テストが通り続けるのを防ぐため。デバッグ中に
+ * コメントアウトしたまま戻し忘れる、は普通に起きる。
+ *
+ * ブロックコメント（元の指摘には無いが同じ抜け道になる）も除く。
+ */
+function countLive(source: string, pattern: RegExp): number {
+  const withoutBlockComments = source.replace(/\/\*[\s\S]*?\*\//g, '');
+  return withoutBlockComments
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith('//') || trimmed.startsWith('*')) return false;
+      return pattern.test(trimmed);
+    }).length;
+}
+
 const env = { account: '111122223333', region: 'ap-northeast-1' };
+
+/**
+ * Lambda を持つスタックのソースと、合成結果のキーの対応。
+ *
+ * ここを起点に「取りこぼしているスタックが無いか」を照合する。スタックごとに
+ * 必要な props が大きく違うため（ApiStack は UserPool、MonitoringStack は
+ * 10 個近く）、ファイル走査で機械的にインスタンス化する形は採らない。
+ * 代わりに、対応表に載っていないスタックがあれば落ちるようにする。
+ */
+const STACKS_WITH_LAMBDA: Record<string, string> = {
+  'api-stack.ts': 'api',
+  'auth-stack.ts': 'auth',
+  'monitoring-stack.ts': 'monitoring',
+  'billing-notifier-stack.ts': 'billing',
+  'devops-agent-stack.ts': 'devopsAgent',
+};
 
 /** アプリ本体・課金通知・DevOps Agent のすべてを合成する */
 function synthAllTemplates(): Record<string, Template> {
@@ -127,6 +163,30 @@ describe('Lambda のランタイム', () => {
     },
   );
 
+  // 合成の対象一覧は手で書いているので、スタックを足した人がここに追記し忘れる
+  // と、その関数は一切検査されない。ソース側と突き合わせて取りこぼしを防ぐ
+  it('Lambda を持つスタックがすべて合成の対象になっている', () => {
+    const filesWithLambda = readdirSync(libDir)
+      .filter((f) => f.endsWith('.ts'))
+      .filter((f) => countLive(readFileSync(path.join(libDir, f), 'utf8'), /new NodejsFunction\(/) > 0);
+
+    const missing = filesWithLambda.filter((f) => !(f in STACKS_WITH_LAMBDA));
+    expect(
+      missing,
+      `Lambda を持つのに検査されていないスタックがある。STACKS_WITH_LAMBDA と`
+        + ` synthAllTemplates() に追加すること:\n${missing.join('\n')}`,
+    ).toEqual([]);
+
+    // 逆向きも見る。対応表に書いたキーが実際に合成されていなければ、
+    // 追加したつもりで検査されていない状態になる
+    for (const [file, key] of Object.entries(STACKS_WITH_LAMBDA)) {
+      expect(
+        Object.keys(templates),
+        `${file} に対応する "${key}" が合成結果に無い`,
+      ).toContain(key);
+    }
+  });
+
   // 保持期間は Lambda リソースではなく Custom::LogRetention に出る。
   // 関数の Properties を見ても分からないので、そちらを検査する
   it.each(Object.keys(templates))(
@@ -198,10 +258,10 @@ describe('Lambda のランタイム', () => {
 
     for (const file of readdirSync(libDir).filter((f) => f.endsWith('.ts'))) {
       const source = readFileSync(path.join(libDir, file), 'utf8');
-      const fnCount = (source.match(/new NodejsFunction\(/g) ?? []).length;
-      const retentionCount = (
-        source.match(/logRetention: LAMBDA_LOG_RETENTION,/g) ?? []
-      ).length;
+      const fnCount = countLive(source, /new NodejsFunction\(/);
+      // 末尾のカンマは省略できる（最後のプロパティのとき）。必須にすると
+      // 正しく書いてあるコードで落ちる
+      const retentionCount = countLive(source, /logRetention:\s*LAMBDA_LOG_RETENTION\b/);
 
       functions += fnCount;
       withRetention += retentionCount;
