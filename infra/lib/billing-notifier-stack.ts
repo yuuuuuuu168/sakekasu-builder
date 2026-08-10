@@ -50,7 +50,7 @@ export class BillingNotifierStack extends cdk.Stack {
 
     const billingNotifier = new NodejsFunction(this, 'BillingNotifierFunction', {
       functionName: `${prefix}-notifier`,
-      runtime: Runtime.NODEJS_20_X,
+      runtime: Runtime.NODEJS_22_X,
       entry: path.join(here, '../lambda/billing-notifier/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(60),
@@ -95,7 +95,7 @@ export class BillingNotifierStack extends cdk.Stack {
 
     const slackNotifier = new NodejsFunction(this, 'SlackNotifierFunction', {
       functionName: `${prefix}-slack-notifier`,
-      runtime: Runtime.NODEJS_20_X,
+      runtime: Runtime.NODEJS_22_X,
       entry: path.join(here, '../lambda/slack-notifier/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(15),
