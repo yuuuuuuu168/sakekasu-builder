@@ -74,11 +74,36 @@ const APPLICATION_SIGNALS_NODEJS_LAYER_ARN =
  *
  * モデルを差し替えるときは ID を書き換えるだけで済ませず、同じコマンドで
  * 振り先リージョンを取り直すこと。振り先が1つでも欠けると、その振り先に
- * 当たったリクエストだけが落ちる（毎回は落ちないので気づきにくい）。
+ * 当たったリクエストだけが落ちる（毎回は落ちない）。ただし気づけないわけでは
+ * なく、OCR のログに欠けている ARN 名指しの AccessDeniedException が出る。
+ * Application Signals の計装（Issue #86）が入っているのでトレースにも残る。
  */
 const BEDROCK_MODEL_ID = 'jp.anthropic.claude-haiku-4-5-20251001-v1:0';
+/**
+ * 上の推論プロファイルが指す基盤モデル。
+ *
+ * プロファイルIDから接頭辞を落としたものだが、`BEDROCK_MODEL_ID.replace(/^jp\./, '')`
+ * のように正規表現で導出しない。接頭辞は `jp.` だけではなく（`us.` `eu.` `apac.`
+ * `global.` などがあり、今後も増える）、想定外の接頭辞を渡されたときに正規表現は
+ * 例外を出さずに接頭辞つきのまま通してしまう。結果、実在しない
+ * `foundation-model/us.anthropic...` のような ARN を黙って作り、デプロイは成功する
+ * のに全リクエストが AccessDeniedException になる。
+ *
+ * 2つを別々に持ち、対応が崩れていないかは下の synth 時チェックで見る。
+ */
+const BEDROCK_FOUNDATION_MODEL_ID = 'anthropic.claude-haiku-4-5-20251001-v1:0';
 /** 上の推論プロファイルの振り先リージョン */
 const BEDROCK_INFERENCE_REGIONS = ['ap-northeast-1', 'ap-northeast-3'];
+
+// 片方だけ書き換えたら synth の時点で落とす。デプロイまで通してしまうと、
+// 気づくのは本番の OCR が AccessDeniedException で止まったときになる
+if (!BEDROCK_MODEL_ID.endsWith(`.${BEDROCK_FOUNDATION_MODEL_ID}`)) {
+  throw new Error(
+    `BEDROCK_MODEL_ID (${BEDROCK_MODEL_ID}) と BEDROCK_FOUNDATION_MODEL_ID ` +
+      `(${BEDROCK_FOUNDATION_MODEL_ID}) が対応していない。` +
+      '推論プロファイルIDは「<接頭辞>.<基盤モデルID>」の形になる',
+  );
+}
 
 export interface ApiStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
@@ -336,13 +361,13 @@ export class ApiStack extends cdk.Stack {
     //
     // foundation-model の ARN にアカウントIDが入らないのは仕様（AWS 側の
     // リソースのため）。プロファイル側はアカウント単位なので入る。
-    const foundationModelId = BEDROCK_MODEL_ID.replace(/^jp\./, '');
     this.ocrAnalyzerFunction.addToRolePolicy(new cdk.aws_iam.PolicyStatement({
       actions: ['bedrock:InvokeModel'],
       resources: [
         `arn:${this.partition}:bedrock:${this.region}:${this.account}:inference-profile/${BEDROCK_MODEL_ID}`,
         ...BEDROCK_INFERENCE_REGIONS.map(
-          (region) => `arn:${this.partition}:bedrock:${region}::foundation-model/${foundationModelId}`,
+          (region) =>
+            `arn:${this.partition}:bedrock:${region}::foundation-model/${BEDROCK_FOUNDATION_MODEL_ID}`,
         ),
       ],
     }));
