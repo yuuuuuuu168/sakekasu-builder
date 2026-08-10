@@ -95,15 +95,37 @@ const BEDROCK_FOUNDATION_MODEL_ID = 'anthropic.claude-haiku-4-5-20251001-v1:0';
 /** 上の推論プロファイルの振り先リージョン */
 const BEDROCK_INFERENCE_REGIONS = ['ap-northeast-1', 'ap-northeast-3'];
 
+/**
+ * 推論プロファイルIDと基盤モデルIDの対応を検査する。
+ *
+ * システム定義の推論プロファイルIDは「<接頭辞>.<基盤モデルID>」の形をしていて、
+ * 接頭辞はちょうど1区切りぶん（`jp.` `us.` `apac.` `global.` など）。よって
+ * 「先頭の1区切りを落としたもの」と完全一致するかで見る。
+ *
+ * 後方一致で見ると足りない。`anthropic.` まで削りすぎた値も後方一致は通ってしまい、
+ * 実在しない `foundation-model/claude-haiku-...` を許可した状態でデプロイが成功して、
+ * 本番の OCR だけが AccessDeniedException で止まる。
+ *
+ * 接頭辞の無い素の基盤モデルIDを渡した場合も落とす。その場合は推論プロファイルでは
+ * ないので、そもそも組み立てるべき ARN の形が違う。
+ */
+export function assertInferenceProfileMatchesFoundationModel(
+  profileId: string,
+  foundationModelId: string,
+): void {
+  const stripped = profileId.replace(/^[^.]+\./, '');
+  if (stripped === profileId || stripped !== foundationModelId) {
+    throw new Error(
+      `推論プロファイルID (${profileId}) と基盤モデルID (${foundationModelId}) が対応していない。` +
+        `期待する基盤モデルIDは "${stripped}"。` +
+        '推論プロファイルIDは「<接頭辞>.<基盤モデルID>」の形になる',
+    );
+  }
+}
+
 // 片方だけ書き換えたら synth の時点で落とす。デプロイまで通してしまうと、
 // 気づくのは本番の OCR が AccessDeniedException で止まったときになる
-if (!BEDROCK_MODEL_ID.endsWith(`.${BEDROCK_FOUNDATION_MODEL_ID}`)) {
-  throw new Error(
-    `BEDROCK_MODEL_ID (${BEDROCK_MODEL_ID}) と BEDROCK_FOUNDATION_MODEL_ID ` +
-      `(${BEDROCK_FOUNDATION_MODEL_ID}) が対応していない。` +
-      '推論プロファイルIDは「<接頭辞>.<基盤モデルID>」の形になる',
-  );
-}
+assertInferenceProfileMatchesFoundationModel(BEDROCK_MODEL_ID, BEDROCK_FOUNDATION_MODEL_ID);
 
 export interface ApiStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */

@@ -1,0 +1,41 @@
+# infra/ のテストを PR とマージ時に走らせる（Issue #82 のレビュー指摘）。
+#
+# これまで infra のテストは CI のどこでも実行していなかった。cdk-diff は diff を
+# 出すだけ、deploy は deploy するだけで、このリポジトリは無料プランのため
+# ブランチ保護も使えない。テストは書いてあるのに、壊れたまま main へ入って
+# デプロイまで通る状態だった。
+#
+# AWS の認証は要らないので cdk-diff とは分けている。認証や AWS 側の都合で
+# 落ちたときに、テストまで一緒に走らなくなるのを避けるため。
+name: test
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/test.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test

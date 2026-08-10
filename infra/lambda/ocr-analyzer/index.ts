@@ -28,6 +28,22 @@ interface AppSyncEvent {
 const MAX_OCR_IMAGES = 3;
 
 /**
+ * OCR に使う Bedrock のモデルIDを環境変数から取る（Issue #82）。
+ *
+ * 既定値を持たない。IAM はこのモデルの ARN だけを許可しているので、ここに
+ * モデルIDを書き残すと、環境変数が欠けたときに許可されていないモデルを黙って
+ * 呼びに行き、設定漏れが AccessDeniedException として出てくる。設定漏れは
+ * 設定漏れとして出す。
+ */
+export function resolveModelId(): string {
+  const modelId = process.env.BEDROCK_MODEL_ID;
+  if (!modelId) {
+    throw new Error('BEDROCK_MODEL_ID is not set');
+  }
+  return modelId;
+}
+
+/**
  * Bedrock が受け取れる画像の上限。
  *
  * base64 エンコード後の長さで判定されるため、元ファイルのサイズとは
@@ -212,16 +228,8 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
   // 取得の失敗と混同しないよう catch の外で大きさを見る
   assertImagesFitBedrockLimit(images);
 
-  // Bedrock Claude Haiku でマルチモーダル解析。
-  //
-  // 既定値を持たないのは、IAM がこのモデルの ARN だけを許可しているため
-  // （Issue #82）。ここに古いモデルIDを書き残すと、環境変数が欠けたときに
-  // 許可されていないモデルを黙って呼びに行き、AccessDeniedException になる。
-  // 設定漏れは設定漏れとして出す。
-  const modelId = process.env.BEDROCK_MODEL_ID;
-  if (!modelId) {
-    throw new Error('BEDROCK_MODEL_ID is not set');
-  }
+  // Bedrock Claude Haiku でマルチモーダル解析
+  const modelId = resolveModelId();
   const requestBody = {
     anthropic_version: 'bedrock-2023-05-31',
     max_tokens: 1536,
