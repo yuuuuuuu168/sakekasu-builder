@@ -31,11 +31,15 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: infra/package-lock.json
+      # 依存の取得は AWS の認証情報を入れる前に済ませる（deploy.yml と同じ理由）。
+      # このワークフローは PR のブランチをそのまま checkout するので、lock を
+      # 差し替えた PR を出せばインストール時スクリプトを走らせられる。認証後だと
+      # そのスクリプトが diff ロールのセッショントークンを読める
+      - run: npm ci --ignore-scripts
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::232791540685:role/sakekasu-github-actions-diff
           aws-region: ap-northeast-1
-      - run: npm ci
       - name: cdk diff
         id: diff
         # diff があっても exit 0 のままにし、出力だけをコメントに回す。
