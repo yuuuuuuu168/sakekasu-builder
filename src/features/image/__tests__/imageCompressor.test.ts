@@ -169,6 +169,28 @@ describe('compressImage', () => {
     await expect(compressImage(file)).rejects.toThrow('画像の読み込みに失敗しました');
   });
 
+  // 読めないファイルは縮小できない。ここで圧縮の目標（3.75MB）を使うと、
+  // OCR に渡せないだけの画像まで保存できなくなる（一度この退行を出した）
+  it.each([4 * MB, 5 * MB])(
+    '読み込めない %d バイトの画像でも 5MB 以下なら保存は通す',
+    async (size) => {
+      setupBrowserMocks({ imgLoadFail: true });
+      const file = createDummyFile(size);
+
+      const result = await compressImage(file);
+
+      expect(result.wasCompressed).toBe(false);
+      expect(result.file).toBe(file);
+    },
+  );
+
+  it('読み込めない画像でも 5MB を超えていれば弾く', async () => {
+    setupBrowserMocks({ imgLoadFail: true });
+    const file = createDummyFile(5 * MB + 1);
+
+    await expect(compressImage(file)).rejects.toThrow('画像の読み込みに失敗しました');
+  });
+
   it('Canvas コンテキスト取得に失敗した場合エラーをスローする', async () => {
     setupBrowserMocks({ ctxFail: true });
     const file = createDummyFile(6 * MB);
