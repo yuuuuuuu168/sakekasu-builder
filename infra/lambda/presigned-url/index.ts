@@ -108,20 +108,56 @@ async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; ima
   // Pipeline リゾルバーから imageKey(単一) と imageKeys(複数) の両方を処理
   const imageKey = event.arguments?.imageKey || event.source?.imageKey;
   const imageKeys = event.arguments?.imageKeys || event.source?.imageKeys;
+  const ownerSub = event.identity?.sub;
 
   // 削除対象のキーを統合
-  const keysToDelete: string[] = [];
+  const requestedKeys: string[] = [];
   if (imageKeys && imageKeys.length > 0) {
-    keysToDelete.push(...imageKeys);
+    requestedKeys.push(...imageKeys);
   } else if (imageKey) {
-    keysToDelete.push(imageKey);
+    requestedKeys.push(imageKey);
   }
 
-  if (keysToDelete.length === 0) {
+  if (requestedKeys.length === 0) {
     return { success: true };
   }
 
+  if (!ownerSub) {
+    throw new Error('Unauthorized: missing identity');
+  }
+
   let hasFailure = false;
+
+  // 自分のキーだけを消す。
+  //
+  // ここに来る imageKey は削除した記録に入っていた値で、記録の所有者とは
+  // 別に検証されていない。作成時に他人のキーを書いた記録を自分で作って
+  // 削除すると、他人の画像を消せてしまう。getDownloadUrl と同じ形で塞ぐ。
+  //
+  // 弾いた場合も削除処理自体は続ける。ここで例外にすると、記録は消えている
+  // のに削除が失敗したと返ることになり、利用者から見た状態が食い違う
+  const keysToDelete = requestedKeys.filter((key) => {
+    if (key.startsWith(`${ownerSub}/`)) {
+      return true;
+    }
+    hasFailure = true;
+    // 他人の sub を自分のログへ書かないよう、キーは出さない。
+    // このログは ImageDeleteFailCount のメトリクスフィルターに拾われ、
+    // 監視スタックのアラーム経由で Slack に出る
+    console.error(
+      JSON.stringify({
+        level: 'ERROR',
+        action: 'deleteImage',
+        result: 'unauthorized',
+        reason: 'key does not belong to the requester',
+      }),
+    );
+    return false;
+  });
+
+  if (keysToDelete.length === 0) {
+    return { success: true, imageDeleteFailed: hasFailure };
+  }
 
   await Promise.all(
     keysToDelete.map(async (key) => {
