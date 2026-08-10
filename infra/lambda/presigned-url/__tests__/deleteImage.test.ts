@@ -130,4 +130,33 @@ describe('deleteImage の所有者チェック', () => {
     // 他人の sub を自分のログへ持ち込まない
     expect(logged).not.toContain(VICTIM);
   });
+
+  // Issue #127: ロググループは無期限で残るため、成功ログにも sub を出さない。
+  // ただし削除失敗の調査で recordId は要るので、sub の部分だけを落とす
+  it('成功ログに自分の sub を書かない（recordId は残す）', async () => {
+    const spy = vi.spyOn(console, 'log');
+
+    await callDeleteImage({ imageKey: `${OWNER}/purchase/rec-1/photo.jpg` });
+
+    const logged = spy.mock.calls.flat().join(' ');
+    expect(logged).toContain('"result":"success"');
+    expect(logged).not.toContain(OWNER);
+    // 調査に必要な部分は残っている
+    expect(logged).toContain('purchase/rec-1/photo.jpg');
+  });
+
+  it('削除失敗のログにも自分の sub を書かない', async () => {
+    sendMock.mockRejectedValue(new Error('S3 unavailable'));
+    const spy = vi.spyOn(console, 'error');
+
+    const result = await callDeleteImage({ imageKey: `${OWNER}/purchase/rec-1/photo.jpg` });
+
+    const logged = spy.mock.calls.flat().join(' ');
+    expect(result).toMatchObject({ imageDeleteFailed: true });
+    // 監視スタックのメトリクスフィルターに拾わせる形は保つ
+    expect(logged).toContain('"level":"ERROR"');
+    expect(logged).toContain('"action":"deleteImage"');
+    expect(logged).not.toContain(OWNER);
+    expect(logged).toContain('purchase/rec-1/photo.jpg');
+  });
 });

@@ -7,6 +7,7 @@ import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
+import { LAMBDA_LOG_RETENTION } from './log-retention.js';
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 
@@ -121,6 +122,7 @@ export class AuthStack extends cdk.Stack {
     const signupNotifier = new NodejsFunction(this, 'SignupNotifierFunction', {
       functionName: `${props.envName}-sakekasu-signup-notifier`,
       runtime: Runtime.NODEJS_22_X,
+      logRetention: LAMBDA_LOG_RETENTION,
       entry: path.join(here, '../lambda/signup-notifier/index.ts'),
       handler: 'handler',
       // Cognito はトリガーの完了を 5 秒しか待たない。Lambda 側だけ長くしても

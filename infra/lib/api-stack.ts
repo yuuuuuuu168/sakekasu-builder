@@ -10,6 +10,7 @@ import { Architecture, LayerVersion, Runtime, Tracing } from 'aws-cdk-lib/aws-la
 import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
+import { LAMBDA_LOG_RETENTION } from './log-retention.js';
 
 /**
  * Application Signals 用の OpenTelemetry レイヤー（Issue #86）。
@@ -173,6 +174,7 @@ export class ApiStack extends cdk.Stack {
       {
         functionName: `${props.envName}-sakekasu-presigned-url`,
         runtime: Runtime.NODEJS_22_X,
+        logRetention: LAMBDA_LOG_RETENTION,
         entry: path.join(
           path.dirname(url.fileURLToPath(import.meta.url)),
           '../lambda/presigned-url/index.ts',
@@ -234,6 +236,7 @@ export class ApiStack extends cdk.Stack {
     this.ocrAnalyzerFunction = new NodejsFunction(this, 'OcrAnalyzerFunction', {
       functionName: `${props.envName}-sakekasu-ocr-analyzer`,
       runtime: Runtime.NODEJS_22_X,
+      logRetention: LAMBDA_LOG_RETENTION,
       entry: path.join(
         path.dirname(url.fileURLToPath(import.meta.url)),
         '../lambda/ocr-analyzer/index.ts',
