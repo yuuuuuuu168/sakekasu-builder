@@ -39,6 +39,14 @@ jobs:
           role-to-assume: arn:aws:iam::<アプリのアカウント ID>:role/sakekasu-github-actions-deploy
           aws-region: ap-northeast-1
       - run: npm ci
+      # AWS SDK は Lambda ごとの package.json 側にある。テストが import するので
+      # 入れておく（詳細は test.yml のコメント）
+      - name: Lambda ごとの依存を入れる
+        run: |
+          for dir in lambda/*/; do
+            [ -f "${dir}package.json" ] || continue
+            (cd "$dir" && npm ci)
+          done
       # デプロイ直前の最後の関門。test ワークフローと重複するが、そちらは
       # paths 条件やマージの経路によっては走らないことがある。本番へ出す手前で
       # 必ず1回通す（Issue #82 のレビュー指摘）

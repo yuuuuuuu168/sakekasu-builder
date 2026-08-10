@@ -37,5 +37,15 @@ jobs:
           cache: npm
           cache-dependency-path: infra/package-lock.json
       - run: npm ci
+      # Lambda は1つずつ package.json を持ち、AWS SDK はそちらの依存にある。
+      # infra 直下の npm ci だけでは入らないため、テストが SDK を import した
+      # 時点で ERR_MODULE_NOT_FOUND になる（ローカルは過去の npm install が
+      # 残っていて気づけない）
+      - name: Lambda ごとの依存を入れる
+        run: |
+          for dir in lambda/*/; do
+            [ -f "${dir}package.json" ] || continue
+            (cd "$dir" && npm ci)
+          done
       - run: npx tsc --noEmit
       - run: npm test
