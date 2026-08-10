@@ -567,6 +567,17 @@ export function request(ctx) {
 
 export function response(ctx) {
   if (ctx.error) {
+    // このスタックで唯一 util.error ではなく appendError を使う場所。
+    //
+    // 1段目で記録は既に削除されている。ここで中断すると「削除に失敗した」と
+    // 返しながら記録は存在しない状態になり、利用者が再試行しても直せない。
+    // 画像の消し残しは記録の削除そのものとは別の問題なので、
+    // ミューテーション自体は成功として返す。
+    //
+    // 握りつぶしているわけではない。Lambda 側は失敗を level=ERROR /
+    // action=deleteImage のログに出しており、ImageDeleteFailCount の
+    // メトリクスフィルター経由で監視スタックのアラームから Slack に届く。
+    // 消し残しは運用側で拾って対処する
     util.appendError(ctx.error.message, ctx.error.type);
   }
   return ctx.stash.deletedRecord;
