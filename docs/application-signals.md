@@ -4,28 +4,38 @@
 
 既存の監視スタック（アラーム22件・外形監視・カナリア）は「異常が起きたこと」を知らせるところまでで、そこから先の切り分けは人力だった。ここを埋める。
 
-## リポジトリに入っているもの
+## いま入っているもの / 入っていないもの
 
-すべて CDK。コンソールでのワンクリック有効化は使っていない（同じ状態を再現できないため）。
+**ADOT による計装はまだ入っていない。** 一度入れて本番を止めたため切り戻してある（PR #114）。経緯と再挑戦の手順は Issue #86 のコメントにまとめてある。
 
-### Lambda の計装（`infra/lib/api-stack.ts`）
+| 要素 | 状態 |
+|------|------|
+| Transaction Search | 有効（2026-08-04〜）。アカウント単位・CDK 管理外 |
+| サービス検出（Discovery） | 有効（同上） |
+| X-Ray アクティブトレース | 有効（`ocr-analyzer` / `presigned-url`） |
+| アーキテクチャの明示（`x86_64`） | 入っている |
+| ADOT レイヤー・起動ラッパー・IAM ポリシー | **入っていない** |
 
-`enableApplicationSignals()` が3つを付ける。
+そのため、いま見えるのは Lambda 標準メトリクス由来のエラー率と実行時間、それに X-Ray の呼び出し単位のトレースまで。**下流ごとの内訳（Bedrock に何秒、S3 に何秒）はまだ見えない。**
 
-- ADOT のレイヤー（Node.js / x86_64）
-- 環境変数 `AWS_LAMBDA_EXEC_WRAPPER=/opt/otel-instrument`
-- 実行ロールへ `CloudWatchLambdaApplicationSignalsExecutionRolePolicy`
+なお、この状態でもエラー率は見えるので、それで既存のバグを1件見つけている（Issue #115）。
 
-あわせて X-Ray のアクティブトレースも有効にしている。レイヤーが起動時に割り込んで OpenTelemetry を仕込むので、関数のコードには手を入れていない。
+### 切り戻した理由
 
-対象は2つだけ。
+環境変数に `AWS_LAMBDA_EXEC_WRAPPER=/opt/otel-instrument` を指定したが、**これは Python 用のラッパー名**だった。Node.js 用は `/opt/otel-handler`。存在しないパスを指定すると、ラッパーの解決に失敗した時点で関数が `Runtime.ExitError` で落ちる。ハンドラに到達しないので 100% 失敗する。
+
+公式ドキュメントの CDK サンプルが Python の例で書かれており、そこから環境変数だけを持ってきたのが原因。レイヤーの ARN が実在することは確認していたが、中身にラッパーがあるかは見ていなかった。
+
+### 計装する対象（再挑戦時も同じ）
 
 | 関数 | 理由 |
 |------|------|
 | `dev-sakekasu-ocr-analyzer` | Bedrock を呼ぶぶん遅延もエラーも起きやすく、下流ごとの内訳を見たい |
 | `dev-sakekasu-presigned-url` | 画像アップロードの入口。詰まると記録そのものが作れない |
 
-監視系（health-check / slack-notifier / sommelier-canary / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増える。テストでこの線引きを固定してあるので、計装を足すとテストが落ちて気づける。
+監視系（health-check / slack-notifier / sommelier-canary / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増える。
+
+`api-stack.test.ts` に「起動ラッパーを指定した関数が無い」というテストを置いてある。付け直すときは、レイヤーに `/opt/otel-handler` があることを実機で確かめてから、このテストを意図的に書き換えることになる。
 
 ### サービス検出と Transaction Search（アカウント単位・CDK 管理外）
 
@@ -66,12 +76,24 @@ AWS_PROFILE=<profile> aws application-signals start-discovery --region ap-northe
 
 main へマージすれば GitHub Actions が `cdk deploy --all` を実行する。手動デプロイは不要。
 
-1. **サービスが出てくるまで待つ** — Application Signals コンソールの「Services」に2つの Lambda が現れる。デプロイ直後はデータが空で、検出まで数分から十数分かかる
-2. **トレースを確認する** — 実際に画像をアップロードし、OCR を走らせてから「Transaction search」を見る。Bedrock / S3 への呼び出しがスパンとして分かれていれば通っている
+**ただしデプロイの成功と関数が起動することは別。** 計装を入れたら、必ず実際のリクエストを1回通して `Runtime.ExitError` が出ないことを確かめる。前回はここを飛ばして本番を止めた。
+
+```bash
+AWS_PROFILE=sakekasu-builder aws logs tail /aws/lambda/dev-sakekasu-ocr-analyzer \
+  --since 5m --region ap-northeast-1 | grep -E "ExitError|does not exist"
+```
+
+### いまできること（計装が無くても）
+
+- **ログの保持期間を設定する**（下記）。Transaction Search は既に有効なので、ロググループはもう存在する
+
+### 計装を入れたあとにやること
+
+1. **サービスが計装済みになるまで待つ** — 一覧の `InstrumentationType` が `UNINSTRUMENTED` から変わる。デプロイ直後はデータが空で、反映まで数分から十数分かかる
+2. **トレースを確認する** — 実際に画像をアップロードし、OCR を走らせてから「Transaction search」を見る。Bedrock / S3 への呼び出しがスパンとして分かれていれば通っている。分かれていなければ ESM バンドルを疑う（下記の注意点）
 3. **ソムリエのトレースを確認する** — GenAI Observability にソムリエ Runtime のトレースが出るか見る
-4. **ログの保持期間を設定する**（下記）
-5. **トレースに利用者の識別子が入っていないか確認する**（下記）
-6. **1週間後にコストを見る** — Cost Explorer で CloudWatch の増分を確認する
+4. **トレースに利用者の識別子が入っていないか確認する**（下記）
+5. **1週間後にコストを見る** — Cost Explorer で CloudWatch の増分を確認する
 
 出てこないときは、まずサービス検出が有効かを疑う（上記の `get-role`）。次に関数の環境変数とレイヤーが実機に入っているかを見る。
 
@@ -113,6 +135,57 @@ AWS_PROFILE=sakekasu-builder aws logs start-query \
 
 属性の値を一律で切り詰める `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT=0` は使わない。全部の属性が潰れて、下流ごとの内訳という計装の目的そのものが消えるため。
 
+## コンソール（APM observability summary）の見方
+
+このページは**サービスの健全性を表すものではない**。「AWS が推奨する監視項目をどれだけ埋めたか」のチェックリストで、未達の項目が並ぶ。全部埋めるのが正解ではないので、埋めない項目は理由を持っておけばよい。
+
+2026-08-10 時点の表示と、このプロジェクトでの扱い。
+
+| 表示 | Application Signals で解消するか | 扱い |
+|------|--------------------------------|------|
+| Services instrumented（1 / 9 not） | **する** | 計装を入れれば増える。ただし 10/10 にはならない |
+| Services with SLOs（10 without） | しない | SLO はしきい値を人が決めて定義するもの。数個に絞る |
+| Services with AppMonitors（10 without RUM） | **別サービス** | CloudWatch RUM。ブラウザ側の実ユーザー監視で、サーバー側の話ではない |
+| Services with Canaries（10 without） | **別サービス** | CloudWatch Synthetics。自作のカナリアで足りている |
+
+### 「10 services」の内訳
+
+計装する意味のあるサービスは全体の一部でしかない。
+
+| サービス | 扱い |
+|---------|------|
+| `ocr-analyzer` / `presigned-url` | 計装する（この文書の対象） |
+| `sommelier_sommelier.DEFAULT`（AgentCore） | 既に計装済み（GenAI Observability） |
+| `health-check` / `slack-notifier` / `sommelier-canary` / `signup-notifier` | 意図的に対象外 |
+| `LogRetention` × 2 / `CustomAWSCDKOpenIdConnectProv` | CDK が裏で作るカスタムリソース。対象外 |
+
+計装が入ったあとの姿は「4 instrumented / 6 not」あたりになる。
+
+### カナリアと RUM について
+
+`Services with Canaries` が 0 なのは、CloudWatch Synthetics を使っていないため。このプロジェクトは Lambda + EventBridge で外形監視とカナリアを自作していて（`sommelier-canary` / `health-check`）、機能としては足りている。Synthetics に移すと月額が増えるので、いまのところ移す理由がない。
+
+`Services with AppMonitors` は CloudWatch RUM のことで、Application Signals とは別サービス。導入するかは独立した判断になる。
+
+### 表示が実態とずれることがある
+
+サービスの一覧は指定した時間範囲のテレメトリから作られる。計装を外した直後は、外す前のデータが時間ウィンドウに残っているため `INSTRUMENTED` のまま見えることがある。実態は実機で確かめる。
+
+```bash
+AWS_PROFILE=sakekasu-builder aws lambda get-function-configuration \
+  --function-name dev-sakekasu-ocr-analyzer --region ap-northeast-1 \
+  --query '{Layers:Layers,Wrapper:Environment.Variables.AWS_LAMBDA_EXEC_WRAPPER}'
+```
+
+一覧と計装状態はこれで見られる。
+
+```bash
+AWS_PROFILE=sakekasu-builder aws application-signals list-services \
+  --start-time $(( $(date +%s) - 86400 )) --end-time $(date +%s) --region ap-northeast-1 \
+  --query 'ServiceSummaries[].{Name:KeyAttributes.Name,Inst:AttributeMaps[?InstrumentationType].InstrumentationType|[0]}' \
+  --output table
+```
+
 ## SLO をまだ入れていない理由
 
 Issue #86 には SLO の定義とエラーバジェット消費アラームも挙げてあるが、この変更には含めていない。
@@ -140,10 +213,20 @@ AWS_PROFILE=sakekasu-builder aws xray get-indexing-rules --region ap-northeast-1
 
 ## 注意点
 
+- **起動ラッパーの名前はランタイムごとに違う。** Node.js は `/opt/otel-handler`、Python は `/opt/otel-instrument`。取り違えると関数が起動しなくなる。公式ドキュメントの CDK サンプルは Python で書かれているので、そのまま流用しない
+- **レイヤーは中身を確かめてから使う。** ARN が実在することは検証にならない。`Content.Location` の署名付き URL を落として、目的のファイルが入っているかを見る
+
+  ```bash
+  URL=$(AWS_PROFILE=sakekasu-builder aws lambda get-layer-version-by-arn \
+    --arn <レイヤーARN> --region ap-northeast-1 --query 'Content.Location' --output text)
+  curl -s "$URL" -o layer.zip && unzip -l layer.zip | grep otel-handler
+  ```
+
+- **ESM バンドルとの相性は未検証。** 対象の2関数は esbuild で ESM の単一ファイルにバンドルしている。自動計装はモジュールの読み込みをフックする仕組みなので、AWS SDK がバンドルに取り込まれているとフックが刺さらない。レイヤー側には ESM 用の仕組み（`--import /opt/init.mjs`）があり、CDK は `@aws-sdk/*` を既定で external にするため通る見込みだが、公式は Node.js の ESM を「limited support」としている。効かなければ対象関数だけ CJS バンドルに変える
 - **コールドスタートが数百ms 悪化する。** ADOT のレイヤーを読み込むぶん。OCR は待つ前提の操作なので許容範囲とみているが、体感が悪くなったらメモリ増量で緩和する
-- **レイヤーの ARN にはランタイムのバージョンが埋まっている**（`aws-otel-nodejs-amd64-ver-1-30-2`）。上げるときは `api-stack.ts` の `ADOT_NODEJS_LAYER_ARN` を差し替える。実在は `aws lambda get-layer-version-by-arn` で確認できる。自動で追随する仕組みは入れていないので、[ADOT のリリース](https://github.com/aws-observability/aws-otel-lambda/releases)をたまに見る
+- **レイヤーの ARN にはランタイムのバージョンが埋まっている**（`aws-otel-nodejs-amd64-ver-1-30-2`）。上げるときは ARN ごと差し替える。自動で追随する仕組みは入れていないので、[ADOT のリリース](https://github.com/aws-observability/aws-otel-lambda/releases)をたまに見る
 - **アーキテクチャを x86_64 で明示している。** レイヤーが amd64 版なので、既定に任せて arm64 に変わると起動時に噛み合わなくなる
-- **リージョンを変えるならレイヤーの ARN も差し替える。** レイヤーは同じリージョンのものしか付けられない。合成の時点で止まるようにしてあるので、忘れて気づかないままデプロイされることはない
+- **リージョンを変えるならレイヤーの ARN も差し替える。** レイヤーは同じリージョンのものしか付けられない
 - **AppSync（JS リゾルバー）は Application Signals の対象外。** 必要なら AppSync 側の X-Ray トレーシングを別途有効にする（README の「Issue にしていない小さな宿題」）
 
 ## 参考
