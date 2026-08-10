@@ -13,7 +13,7 @@
 const BEDROCK_IMAGE_BASE64_LIMIT = 5 * 1024 * 1024;
 
 /**
- * アップロードするファイルサイズの上限（3.75MB）。
+ * 圧縮の目標サイズ（3.75MB）。
  *
  * OCR は画像を base64 にして Bedrock へ渡す。base64 は元のバイナリの 4/3 倍に
  * なるため、Bedrock の 5MB を満たすには元ファイルを 3/4 に収める必要がある。
@@ -22,6 +22,21 @@ const BEDROCK_IMAGE_BASE64_LIMIT = 5 * 1024 * 1024;
  * OCR だけ失敗していた（Issue #115）。上限は Bedrock 側の制限から逆算する
  */
 const MAX_FILE_SIZE = Math.floor((BEDROCK_IMAGE_BASE64_LIMIT * 3) / 4);
+
+/**
+ * 画像として読めなかったファイルでも保存を許す上限（5MB）。
+ *
+ * Canvas で読めないファイルは縮小のしようがないため、そのまま通すか
+ * 弾くかの二択になる。ここは「OCR に渡せるか」ではなく「保存を許すか」の
+ * 判断なので、圧縮の目標（MAX_FILE_SIZE）とは別に持つ。
+ *
+ * 読めない画像は元から OCR に失敗する。それでも記録に写真を残せる方が
+ * 利用者にとって損が小さいので、保存だけは通す。
+ *
+ * 一度ここを MAX_FILE_SIZE と共用してしまい、4MB 前後の画像が
+ * 保存すらできなくなる退行を出した。2つの上限は目的が違う
+ */
+const MAX_UNREADABLE_UPLOAD_SIZE = 5 * 1024 * 1024;
 
 /** 保存・OCR 用の長辺上限（px）。Claude vision が推奨する上限に合わせる */
 const MAX_LONG_EDGE = 1568;
@@ -172,8 +187,10 @@ export async function compressImage(file: File): Promise<CompressionResult> {
   try {
     img = await loadImage(file);
   } catch (error) {
-    // 読み込めない画像でも上限以下ならそのまま通す（従来挙動の維持）
-    if (originalSize <= MAX_FILE_SIZE) {
+    // Canvas で読めないファイルは縮小できないので、保存を許す上限で判定する。
+    // 圧縮の目標（MAX_FILE_SIZE）で見ると、OCR には渡せないだけの画像まで
+    // 保存できなくなる
+    if (originalSize <= MAX_UNREADABLE_UPLOAD_SIZE) {
       return {
         file,
         originalSize,
