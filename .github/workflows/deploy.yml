@@ -34,21 +34,31 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: infra/package-lock.json
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: arn:aws:iam::232791540685:role/sakekasu-github-actions-deploy
-          aws-region: ap-northeast-1
-      - run: npm ci
+      # 依存の取得とテストは AWS の認証情報を入れる前に済ませる。
+      #
+      # npm のライフサイクルスクリプトはインストール時に任意のコードを実行できる。
+      # 認証後に npm ci を走らせると、依存のどれか1つが乗っ取られただけで、
+      # そのスクリプトが AWS_SESSION_TOKEN を読んで cdk-hnb659fds-* ロールへ
+      # assume できてしまう（このロールは CloudFormation を自由に操作できる）。
+      # 認証前に済ませておけば、スクリプトが走っても掴めるものが無い。
+      # そのうえで --ignore-scripts も付ける（多層で塞ぐ）。
+      - run: npm ci --ignore-scripts
       # AWS SDK は Lambda ごとの package.json 側にある。テストが import するので
-      # 入れておく（詳細は test.yml のコメント）
+      # 入れておく（詳細は test.yml のコメント）。
+      # --ignore-scripts なのは、8つの lock を調べていずれも
+      # hasInstallScript を持たないため。付けても壊れるものが無い
       - name: Lambda ごとの依存を入れる
         run: |
           for dir in lambda/*/; do
             [ -f "${dir}package.json" ] || continue
-            (cd "$dir" && npm ci)
+            (cd "$dir" && npm ci --ignore-scripts)
           done
       # デプロイ直前の最後の関門。test ワークフローと重複するが、そちらは
       # paths 条件やマージの経路によっては走らないことがある。本番へ出す手前で
       # 必ず1回通す（Issue #82 のレビュー指摘）
       - run: npm test
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::232791540685:role/sakekasu-github-actions-deploy
+          aws-region: ap-northeast-1
       - run: npx cdk deploy --all --require-approval never
