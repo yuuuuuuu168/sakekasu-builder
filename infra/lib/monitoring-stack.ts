@@ -14,6 +14,7 @@ import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
+import { LAMBDA_LOG_RETENTION } from './log-retention.js';
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 
@@ -90,6 +91,7 @@ export class MonitoringStack extends cdk.Stack {
     const slackNotifier = new NodejsFunction(this, 'SlackNotifierFunction', {
       functionName: `${prefix}-slack-notifier`,
       runtime: Runtime.NODEJS_22_X,
+      logRetention: LAMBDA_LOG_RETENTION,
       entry: path.join(here, '../lambda/slack-notifier/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(15),
@@ -323,6 +325,7 @@ export class MonitoringStack extends cdk.Stack {
     const healthCheck = new NodejsFunction(this, 'HealthCheckFunction', {
       functionName: `${prefix}-health-check`,
       runtime: Runtime.NODEJS_22_X,
+      logRetention: LAMBDA_LOG_RETENTION,
       entry: path.join(here, '../lambda/health-check/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(60),
@@ -375,6 +378,7 @@ export class MonitoringStack extends cdk.Stack {
     const canary = new NodejsFunction(this, 'SommelierCanaryFunction', {
       functionName: `${prefix}-sommelier-canary`,
       runtime: Runtime.NODEJS_22_X,
+      logRetention: LAMBDA_LOG_RETENTION,
       entry: path.join(here, '../lambda/sommelier-canary/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(90),
