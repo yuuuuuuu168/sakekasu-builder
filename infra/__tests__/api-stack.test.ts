@@ -182,27 +182,73 @@ describe('ApiStack', () => {
       });
     });
 
-    it('起動ラッパーを指定した関数が無い（実機で確認できていないレイヤーを使わない）', () => {
-      // ラッパーだけ指定してレイヤーに実体が無いと、関数は Runtime.ExitError で
-      // 起動しなくなる。実際にこれで画像アップロードを全滅させた。
-      //
-      // 付け直すときは、レイヤーに /opt/otel-handler があることを実機で
-      // 確かめてからこのテストを変える。Node.js のラッパーは otel-handler で、
-      // otel-instrument は Python 用。公式ドキュメントの CDK サンプルが
-      // Python で書かれており、それを流用したのが前回の障害の原因だった
-      const withWrapper = Object.values(template.findResources('AWS::Lambda::Function')).filter(
-        (fn) => fn.Properties?.Environment?.Variables?.AWS_LAMBDA_EXEC_WRAPPER !== undefined,
-      );
-
-      expect(withWrapper).toHaveLength(0);
+    // ラッパーだけ指定してレイヤーに実体が無いと、関数は Runtime.ExitError で
+    // 起動しなくなる。実際にこれで画像アップロードを全滅させた（PR #110）。
+    //
+    // Node.js 向けの AWS 製レイヤーは2種類あり、起動ラッパーの名前が違う。
+    // - AWSOpenTelemetryDistroJs（Application Signals 用）→ /opt/otel-instrument
+    // - aws-otel-nodejs-amd64-ver-*（汎用 ADOT）        → /opt/otel-handler
+    // 前回は後者のレイヤーに前者のラッパー名を組み合わせて落ちた。
+    // ラッパー名だけを見ても正誤は決まらないので、レイヤーとの組み合わせで固定する。
+    it('OCR は Application Signals のレイヤーとラッパーが揃っている', () => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: 'dev-sakekasu-ocr-analyzer',
+        Layers: Match.arrayWith([Match.stringLikeRegexp('AWSOpenTelemetryDistroJs')]),
+        Environment: {
+          Variables: Match.objectLike({
+            AWS_LAMBDA_EXEC_WRAPPER: '/opt/otel-instrument',
+          }),
+        },
+      });
     });
 
-    it('レイヤーを付けた関数が無い', () => {
-      const withLayers = Object.values(template.findResources('AWS::Lambda::Function')).filter(
-        (fn) => (fn.Properties?.Layers ?? []).length > 0,
+    it('OCR の実行ロールに Application Signals の権限が付いている', () => {
+      // レイヤーが起動してもこの権限が無いとテレメトリが送れず、
+      // 「動いているのに何も出ない」状態になる
+      template.hasResourceProperties('AWS::IAM::Role', {
+        ManagedPolicyArns: Match.arrayWith([
+          Match.objectLike({
+            'Fn::Join': Match.arrayWith([
+              Match.arrayWith([
+                Match.stringLikeRegexp(
+                  'CloudWatchLambdaApplicationSignalsExecutionRolePolicy',
+                ),
+              ]),
+            ]),
+          }),
+        ]),
+      });
+    });
+
+    // 前回は2関数へ同時に入れて両方止め、画像アップロードの動線ごと失った。
+    // OCR で様子を見てから広げる。広げるときにこのテストを書き換える
+    it('presigned-url にはまだ計装を入れていない', () => {
+      const functions = template.findResources('AWS::Lambda::Function', {
+        Properties: { FunctionName: 'dev-sakekasu-presigned-url' },
+      });
+      const [fn] = Object.values(functions);
+
+      expect(fn).toBeDefined();
+      expect(fn.Properties?.Environment?.Variables?.AWS_LAMBDA_EXEC_WRAPPER).toBeUndefined();
+      expect(fn.Properties?.Layers ?? []).toHaveLength(0);
+    });
+
+    // ラッパーを指定した関数には必ずレイヤーが要る。片方だけの状態が
+    // 起動不能を招くので、組み合わせが崩れていないかを横断で見る
+    it('起動ラッパーを指定した関数には必ずレイヤーが付いている', () => {
+      const withWrapper = Object.entries(
+        template.findResources('AWS::Lambda::Function'),
+      ).filter(
+        ([, fn]) => fn.Properties?.Environment?.Variables?.AWS_LAMBDA_EXEC_WRAPPER !== undefined,
       );
 
-      expect(withLayers).toHaveLength(0);
+      expect(withWrapper.length).toBeGreaterThan(0);
+      for (const [logicalId, fn] of withWrapper) {
+        expect(
+          fn.Properties?.Layers ?? [],
+          `${logicalId} はラッパーを指定しているのにレイヤーが無い`,
+        ).not.toHaveLength(0);
+      }
     });
   });
 });

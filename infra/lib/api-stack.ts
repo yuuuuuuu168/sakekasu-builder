@@ -6,24 +6,42 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { Architecture, Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
+import { Architecture, LayerVersion, Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
 
-// Application Signals の ADOT 計装（Issue #86）はいったん外した。
-//
-// AWS_LAMBDA_EXEC_WRAPPER に /opt/otel-instrument を指定したが、これは
-// Python 用のラッパー名だった。Node.js 用は /opt/otel-handler。
-// 存在しないパスを指定するとラッパーの解決に失敗した時点で関数が
-// Runtime.ExitError で落ち、画像アップロードが全滅した。
-// レイヤーの「実在」は確認したが「中身」を確認していなかった。
-//
-// X-Ray のアクティブトレースだけは残している。こちらはレイヤーに依存せず、
-// Lambda 単体で動いて害がない。
-//
-// 再挑戦は Issue #86 で、レイヤーの中身を実機で確かめ、1関数だけに入れて
-// 起動を確認してから広げる。
+/**
+ * Application Signals 用の OpenTelemetry レイヤー（Issue #86）。
+ *
+ * Node.js 向けの AWS 製レイヤーは2種類あり、**起動ラッパーの名前が違う**。
+ *
+ * | レイヤー | ラッパー |
+ * |---|---|
+ * | AWSOpenTelemetryDistroJs（Application Signals 用・これ） | /opt/otel-instrument |
+ * | aws-otel-nodejs-amd64-ver-*（汎用 ADOT） | /opt/otel-handler |
+ *
+ * PR #110 で本番を止めたのは、**汎用 ADOT のレイヤーに Application Signals 用の
+ * ラッパー名を組み合わせた**ため。存在しないパスを指定するとラッパーの解決に
+ * 失敗した時点で関数が Runtime.ExitError で落ち、画像アップロードが全滅した。
+ * 当時は「/opt/otel-instrument は Python 用」と結論づけたが、それは誤り。
+ * Application Signals 用レイヤーでは Node.js でもこの名前が正しい。
+ *
+ * v15 の中身は実機で展開して確認済み（2026-08-10）。
+ * - otel-instrument が存在する（otel-handler は無い）
+ * - CompatibleRuntimes に nodejs22.x を含む / x86_64・arm64 の両対応
+ * - ESM 判定に入ると Node 20+ では `--import /opt/wrapper.mjs` を使う。
+ *   これは module.register() による選択的フックで、レイヤー自身のコメントに
+ *   「バンドルされたアプリコードの ESM ライブバインディングを壊す
+ *   --experimental-loader を避けるため」と書かれている。本スタックの関数は
+ *   esbuild で index.mjs を吐くので、この経路に入る
+ *
+ * 更新するときは ARN を差し替えるだけで済ませず、中身を展開して
+ * otel-instrument があることを確かめること。ARN が実在することの確認は
+ * 中身の検証ではない。
+ */
+const APPLICATION_SIGNALS_NODEJS_LAYER_ARN =
+  'arn:aws:lambda:ap-northeast-1:615299751070:layer:AWSOpenTelemetryDistroJs:15';
 
 export interface ApiStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
@@ -160,7 +178,9 @@ export class ApiStack extends cdk.Stack {
           '../lambda/presigned-url/index.ts',
         ),
         handler: 'handler',
-        // ADOT レイヤーが x86_64 版なので明示して合わせる
+        // 既定値の変化でレイヤーと噛み合わなくなるのを防ぐため明示する。
+        // Application Signals のレイヤーは arm64 にも対応しているので、
+        // 費用を詰めるなら両方まとめて arm64 へ寄せる余地がある（別件）
         architecture: Architecture.X86_64,
         // Application Signals と一緒に使うと、リクエスト単位で
         // どこに時間がかかったかまで辿れる
@@ -233,6 +253,28 @@ export class ApiStack extends cdk.Stack {
         banner: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
       },
     });
+
+    // Application Signals の計装（Issue #86）。
+    //
+    // まず OCR にだけ入れる。前回（PR #110）は presigned-url と同時に入れて
+    // 両方止め、画像アップロードの動線ごと失った。OCR が落ちても記録の登録
+    // 自体は通る（解析だけが失敗する）ので、被害が動線を塞がない側から試す。
+    // presigned-url へ広げるのは、OCR で一日ぶん様子を見てから。
+    this.ocrAnalyzerFunction.addLayers(
+      LayerVersion.fromLayerVersionArn(
+        this,
+        'OcrApplicationSignalsLayer',
+        APPLICATION_SIGNALS_NODEJS_LAYER_ARN,
+      ),
+    );
+    // レイヤー v15 に実在するラッパー。汎用 ADOT の /opt/otel-handler ではない
+    this.ocrAnalyzerFunction.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/otel-instrument');
+    // トレースと Application Signals のメトリクスを書くための権限
+    this.ocrAnalyzerFunction.role?.addManagedPolicy(
+      cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
+        'CloudWatchLambdaApplicationSignalsExecutionRolePolicy',
+      ),
+    );
 
     // S3 読み取り権限
     this.imageBucket.grantRead(this.ocrAnalyzerFunction);
