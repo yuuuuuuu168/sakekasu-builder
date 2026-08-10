@@ -212,8 +212,16 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
   // 取得の失敗と混同しないよう catch の外で大きさを見る
   assertImagesFitBedrockLimit(images);
 
-  // Bedrock Claude Haiku でマルチモーダル解析
-  const modelId = process.env.BEDROCK_MODEL_ID ?? 'jp.anthropic.claude-haiku-4-5-20251001-v1:0';
+  // Bedrock Claude Haiku でマルチモーダル解析。
+  //
+  // 既定値を持たないのは、IAM がこのモデルの ARN だけを許可しているため
+  // （Issue #82）。ここに古いモデルIDを書き残すと、環境変数が欠けたときに
+  // 許可されていないモデルを黙って呼びに行き、AccessDeniedException になる。
+  // 設定漏れは設定漏れとして出す。
+  const modelId = process.env.BEDROCK_MODEL_ID;
+  if (!modelId) {
+    throw new Error('BEDROCK_MODEL_ID is not set');
+  }
   const requestBody = {
     anthropic_version: 'bedrock-2023-05-31',
     max_tokens: 1536,
