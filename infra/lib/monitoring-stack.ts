@@ -89,7 +89,7 @@ export class MonitoringStack extends cdk.Stack {
 
     const slackNotifier = new NodejsFunction(this, 'SlackNotifierFunction', {
       functionName: `${prefix}-slack-notifier`,
-      runtime: Runtime.NODEJS_20_X,
+      runtime: Runtime.NODEJS_22_X,
       entry: path.join(here, '../lambda/slack-notifier/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(15),
@@ -322,7 +322,7 @@ export class MonitoringStack extends cdk.Stack {
 
     const healthCheck = new NodejsFunction(this, 'HealthCheckFunction', {
       functionName: `${prefix}-health-check`,
-      runtime: Runtime.NODEJS_20_X,
+      runtime: Runtime.NODEJS_22_X,
       entry: path.join(here, '../lambda/health-check/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(60),
@@ -374,7 +374,7 @@ export class MonitoringStack extends cdk.Stack {
 
     const canary = new NodejsFunction(this, 'SommelierCanaryFunction', {
       functionName: `${prefix}-sommelier-canary`,
-      runtime: Runtime.NODEJS_20_X,
+      runtime: Runtime.NODEJS_22_X,
       entry: path.join(here, '../lambda/sommelier-canary/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(90),

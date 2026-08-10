@@ -92,7 +92,7 @@ export class DevOpsAgentStack extends cdk.Stack {
 
     const webhookForwarder = new NodejsFunction(this, 'WebhookForwarderFunction', {
       functionName: `${prefix}-devops-agent-webhook`,
-      runtime: Runtime.NODEJS_20_X,
+      runtime: Runtime.NODEJS_22_X,
       entry: path.join(here, '../lambda/devops-agent-webhook/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(20),
