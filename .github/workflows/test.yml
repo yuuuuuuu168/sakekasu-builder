@@ -9,16 +9,20 @@
 # 落ちたときに、テストまで一緒に走らなくなるのを避けるため。
 name: test
 
+# paths にワークフロー全体を入れているのは、deploy.yml から npm test の行を
+# 消すだけの PR でもこのワークフローを走らせるため。infra/** と test.yml だけに
+# 絞ると、関門を外す変更そのものが無検査で通る。ブランチ保護が使えない以上、
+# 走ったという事実だけが手がかりになる
 on:
   pull_request:
     paths:
       - 'infra/**'
-      - '.github/workflows/test.yml'
+      - '.github/workflows/**'
   push:
     branches: [main]
     paths:
       - 'infra/**'
-      - '.github/workflows/test.yml'
+      - '.github/workflows/**'
 
 permissions:
   contents: read
