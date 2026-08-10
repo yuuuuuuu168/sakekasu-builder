@@ -4,7 +4,10 @@ import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import { AuthStack } from '../lib/auth-stack.js';
-import { ApiStack } from '../lib/api-stack.js';
+import {
+  ApiStack,
+  assertInferenceProfileMatchesFoundationModel,
+} from '../lib/api-stack.js';
 
 describe('ApiStack', () => {
   let template: Template;
@@ -253,7 +256,11 @@ describe('ApiStack', () => {
 
     // Lambda 側にモデルIDのリテラルが残っていると、CDK の定数だけを書き換えた
     // ときに両者がずれる。ずれても CDK のテストは全部通ってしまうため、
-    // 実装ファイルを直接見て二重管理そのものを禁じる
+    // 実装ファイルを直接見て二重管理そのものを禁じる。
+    //
+    // 「既定値へ落ちないこと」自体はここでは見ない。ソースの文字列検査では
+    // 書き方を変えるだけですり抜けられるため、環境変数を外して実際に呼ぶ
+    // lambda/ocr-analyzer/__tests__/resolveModelId.test.ts のほうで見ている
     it('OCR Lambda のソースにモデルIDのリテラルが残っていない', () => {
       const source = readFileSync(
         path.join(
@@ -264,9 +271,39 @@ describe('ApiStack', () => {
       );
 
       expect(source).not.toContain('anthropic.claude');
-      // 環境変数が無いまま既定値へ落ちると、許可されていないモデルを呼びに行く
-      expect(source).toContain("process.env.BEDROCK_MODEL_ID");
-      expect(source).not.toMatch(/process\.env\.BEDROCK_MODEL_ID\s*(\?\?|\|\|)/);
+    });
+  });
+
+  // 推論プロファイルIDと基盤モデルIDの対応チェック（Issue #82）。
+  // 通ってはいけない組み合わせを並べる。ここが緩いと、実在しない ARN を
+  // 許可した状態でデプロイが成功し、本番の OCR だけが止まる
+  describe('assertInferenceProfileMatchesFoundationModel', () => {
+    it.each([
+      ['jp.anthropic.claude-haiku-4-5-20251001-v1:0', 'anthropic.claude-haiku-4-5-20251001-v1:0'],
+      // 接頭辞は jp. に限らない。どの接頭辞でも1区切りだけ落とす
+      ['us.anthropic.claude-haiku-4-5-20251001-v1:0', 'anthropic.claude-haiku-4-5-20251001-v1:0'],
+      ['global.anthropic.claude-haiku-4-5-20251001-v1:0', 'anthropic.claude-haiku-4-5-20251001-v1:0'],
+    ])('%s と %s は対応している', (profileId, foundationModelId) => {
+      expect(() =>
+        assertInferenceProfileMatchesFoundationModel(profileId, foundationModelId),
+      ).not.toThrow();
+    });
+
+    it.each([
+      // anthropic. まで削りすぎ。後方一致だけで見ると通ってしまう組み合わせ
+      ['jp.anthropic.claude-haiku-4-5-20251001-v1:0', 'claude-haiku-4-5-20251001-v1:0'],
+      // 接頭辞を落とし忘れ
+      ['jp.anthropic.claude-haiku-4-5-20251001-v1:0', 'jp.anthropic.claude-haiku-4-5-20251001-v1:0'],
+      // 別モデル
+      ['jp.anthropic.claude-haiku-4-5-20251001-v1:0', 'anthropic.claude-sonnet-4-5-20250929-v1:0'],
+      // 接頭辞の無い素の基盤モデルID。推論プロファイルではないので ARN の形が違う
+      ['anthropic.claude-haiku-4-5-20251001-v1:0', 'anthropic.claude-haiku-4-5-20251001-v1:0'],
+      // 区切りが無い
+      ['claude-haiku', 'claude-haiku'],
+    ])('%s と %s は対応していない', (profileId, foundationModelId) => {
+      expect(() =>
+        assertInferenceProfileMatchesFoundationModel(profileId, foundationModelId),
+      ).toThrow(/対応していない/);
     });
   });
 
