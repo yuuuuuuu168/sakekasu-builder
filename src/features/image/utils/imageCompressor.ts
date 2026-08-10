@@ -4,13 +4,24 @@
  *
  * - 長辺が MAX_LONG_EDGE を超える画像は縮小して高品質 JPEG で再エンコード
  *   （OCR の精度・トークン効率と保存サイズの改善）
- * - それでも 5MB を超える場合は品質・解像度を段階的に下げる
+ * - それでも上限を超える場合は品質・解像度を段階的に下げる
  *
  * Validates: Requirements 2.4, 2.7, 2.8, 2.9, 2.10
  */
 
-/** 最大ファイルサイズ: 5MB */
-const MAX_FILE_SIZE = 5 * 1024 * 1024;
+/** Bedrock が受け取れる画像の上限。base64 エンコード後の値で判定される */
+const BEDROCK_IMAGE_BASE64_LIMIT = 5 * 1024 * 1024;
+
+/**
+ * アップロードするファイルサイズの上限（3.75MB）。
+ *
+ * OCR は画像を base64 にして Bedrock へ渡す。base64 は元のバイナリの 4/3 倍に
+ * なるため、Bedrock の 5MB を満たすには元ファイルを 3/4 に収める必要がある。
+ *
+ * ここを 5MB にしていたせいで、3.75MB〜5MB の画像がこの検証を通ったのに
+ * OCR だけ失敗していた（Issue #115）。上限は Bedrock 側の制限から逆算する
+ */
+const MAX_FILE_SIZE = Math.floor((BEDROCK_IMAGE_BASE64_LIMIT * 3) / 4);
 
 /** 保存・OCR 用の長辺上限（px）。Claude vision が推奨する上限に合わせる */
 const MAX_LONG_EDGE = 1568;
@@ -101,9 +112,9 @@ function canvasToBlob(
 }
 
 /**
- * 指定の幅・高さで品質を段階的に下げて 5MB 以下の Blob を探す
+ * 指定の幅・高さで品質を段階的に下げて上限以下の Blob を探す
  *
- * @returns 5MB 以下の Blob、見つからなければ null
+ * @returns 上限以下の Blob、見つからなければ null
  */
 async function tryCompressAtResolution(
   img: HTMLImageElement,
@@ -144,11 +155,11 @@ function scaleToLongEdge(
  * 画像の正規化・圧縮
  *
  * 1. 長辺が 1568px を超える画像は 1568px に縮小し JPEG（品質 0.85）で再エンコード
- *    （5MB 超の画像を品質 0.1 まで落とすより OCR の文字が読める状態を保てる）
- * 2. 長辺 1568px 以下かつ 5MB 以下の画像は再エンコードせずそのまま返す
- * 3. 上記でも 5MB を超える場合は品質を 0.9 → 0.1 まで段階的に下げ、
- *    さらに解像度を 75% → 50% → 25% に縮小して 5MB 以下を探す
- * 4. それでも 5MB 以下にならない場合はエラーをスロー
+ *    （上限超の画像を品質 0.1 まで落とすより OCR の文字が読める状態を保てる）
+ * 2. 長辺 1568px 以下かつ上限以下の画像は再エンコードせずそのまま返す
+ * 3. 上記でも上限を超える場合は品質を 0.9 → 0.1 まで段階的に下げ、
+ *    さらに解像度を 75% → 50% → 25% に縮小して上限以下を探す
+ * 4. それでも上限以下にならない場合はエラーをスロー
  *
  * @param file - 対象の画像ファイル
  * @returns 圧縮結果
@@ -161,7 +172,7 @@ export async function compressImage(file: File): Promise<CompressionResult> {
   try {
     img = await loadImage(file);
   } catch (error) {
-    // 読み込めない画像でも 5MB 以下ならそのまま通す（従来挙動の維持）
+    // 読み込めない画像でも上限以下ならそのまま通す（従来挙動の維持）
     if (originalSize <= MAX_FILE_SIZE) {
       return {
         file,
@@ -172,14 +183,14 @@ export async function compressImage(file: File): Promise<CompressionResult> {
     }
     throw error instanceof Error
       ? error
-      : new Error('画像の圧縮に失敗しました。5MB以下の画像を選択してください');
+      : new Error('画像の圧縮に失敗しました。もっと小さい画像を選択してください');
   }
 
   const { width, height } = scaleToLongEdge(img.naturalWidth, img.naturalHeight);
   const needsResize =
     width !== img.naturalWidth || height !== img.naturalHeight;
 
-  // 長辺が上限以下かつ 5MB 以下なら再エンコードしない
+  // 長辺が上限以下かつサイズも上限以下なら再エンコードしない
   if (!needsResize && originalSize <= MAX_FILE_SIZE) {
     return {
       file,
@@ -195,7 +206,7 @@ export async function compressImage(file: File): Promise<CompressionResult> {
       const blob = await canvasToBlob(img, width, height, NORMALIZE_QUALITY);
       if (blob.size <= MAX_FILE_SIZE) {
         // 再エンコードで元よりサイズが増えた場合は元ファイルを使う
-        // （5MB 超だった場合は増えることはないので必ず縮小版が使われる）
+        // （上限超だった場合は増えることはないので必ず縮小版が使われる）
         if (blob.size >= originalSize) {
           return {
             file,
@@ -249,16 +260,16 @@ export async function compressImage(file: File): Promise<CompressionResult> {
       }
     }
 
-    // すべての試行で 5MB 以下にできなかった場合
+    // すべての試行で上限以下にできなかった場合
     throw new Error(
-      '画像の圧縮に失敗しました。5MB以下の画像を選択してください',
+      '画像の圧縮に失敗しました。もっと小さい画像を選択してください',
     );
   } catch (error) {
     if (error instanceof Error) {
       throw error;
     }
     throw new Error(
-      '画像の圧縮に失敗しました。5MB以下の画像を選択してください',
+      '画像の圧縮に失敗しました。もっと小さい画像を選択してください',
     );
   }
 }
@@ -266,7 +277,7 @@ export async function compressImage(file: File): Promise<CompressionResult> {
 /**
  * 一覧表示用のサムネイルを生成する
  *
- * 一覧では 80px 四方の枠にしか使わないのに原画（最大 5MB）を
+ * 一覧では 80px 四方の枠にしか使わないのに原画（最大 3.75MB）を
  * ダウンロードしていたため、長辺 320px・JPEG 品質 0.7 の
  * 小さな画像を別途作って表示に使う。
  *
