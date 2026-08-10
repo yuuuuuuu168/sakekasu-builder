@@ -154,7 +154,7 @@ export class ApiStack extends cdk.Stack {
       'PresignedUrlFunction',
       {
         functionName: `${props.envName}-sakekasu-presigned-url`,
-        runtime: Runtime.NODEJS_20_X,
+        runtime: Runtime.NODEJS_22_X,
         entry: path.join(
           path.dirname(url.fileURLToPath(import.meta.url)),
           '../lambda/presigned-url/index.ts',
@@ -213,7 +213,7 @@ export class ApiStack extends cdk.Stack {
     // OCR Analyzer Lambda 関数
     this.ocrAnalyzerFunction = new NodejsFunction(this, 'OcrAnalyzerFunction', {
       functionName: `${props.envName}-sakekasu-ocr-analyzer`,
-      runtime: Runtime.NODEJS_20_X,
+      runtime: Runtime.NODEJS_22_X,
       entry: path.join(
         path.dirname(url.fileURLToPath(import.meta.url)),
         '../lambda/ocr-analyzer/index.ts',

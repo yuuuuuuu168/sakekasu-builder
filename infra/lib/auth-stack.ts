@@ -120,7 +120,7 @@ export class AuthStack extends cdk.Stack {
 
     const signupNotifier = new NodejsFunction(this, 'SignupNotifierFunction', {
       functionName: `${props.envName}-sakekasu-signup-notifier`,
-      runtime: Runtime.NODEJS_20_X,
+      runtime: Runtime.NODEJS_22_X,
       entry: path.join(here, '../lambda/signup-notifier/index.ts'),
       handler: 'handler',
       // Cognito はトリガーの完了を 5 秒しか待たない。Lambda 側だけ長くしても
