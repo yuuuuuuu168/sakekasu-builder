@@ -112,6 +112,29 @@ describe('ApiStack', () => {
     });
   });
 
+  // 他人のキーを書いた記録を作れると、削除時に他人の画像を消せてしまう
+  it.each(['createPurchaseRecord', 'createDrinkingRecord'])(
+    '%s リゾルバーが imageKey の所有者を検証している',
+    (fieldName) => {
+      template.hasResourceProperties('AWS::AppSync::Resolver', {
+        TypeName: 'Mutation',
+        FieldName: fieldName,
+        Code: Match.stringLikeRegexp('imageKey must belong to the requester'),
+      });
+    },
+  );
+
+  it.each(['createPurchaseRecord', 'createDrinkingRecord'])(
+    '%s リゾルバーが imageKeys の各要素も検証している',
+    (fieldName) => {
+      template.hasResourceProperties('AWS::AppSync::Resolver', {
+        TypeName: 'Mutation',
+        FieldName: fieldName,
+        Code: Match.stringLikeRegexp('imageKeys must belong to the requester'),
+      });
+    },
+  );
+
   // Requirements 3.7: GraphqlApiUrl の CfnOutput が存在する
   it('GraphqlApiUrl の CfnOutput が存在する', () => {
     template.hasOutput('GraphqlApiUrl', {});

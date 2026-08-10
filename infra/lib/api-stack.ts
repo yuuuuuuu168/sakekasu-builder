@@ -348,6 +348,22 @@ export function response(ctx) {
 export function request(ctx) {
   const now = util.time.nowISO8601();
   const input = ctx.args.input;
+
+  // 画像キーは自分のものだけを受け付ける。
+  // 他人のキーを書いた記録を作れると、その記録を削除したときに
+  // 削除パイプラインが他人の画像を消してしまう
+  const prefix = ctx.identity.sub + '/';
+  if (input.imageKey && !input.imageKey.startsWith(prefix)) {
+    util.error('Unauthorized: imageKey must belong to the requester', 'Unauthorized');
+  }
+  if (input.imageKeys) {
+    for (const key of input.imageKeys) {
+      if (!key.startsWith(prefix)) {
+        util.error('Unauthorized: imageKeys must belong to the requester', 'Unauthorized');
+      }
+    }
+  }
+
   const item = {
     ...input,
     id: util.autoId(),
