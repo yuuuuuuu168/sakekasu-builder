@@ -14,17 +14,26 @@
 | サービス検出（Discovery） | 有効（同上） |
 | X-Ray アクティブトレース | 有効（`ocr-analyzer` / `presigned-url`） |
 | アーキテクチャの明示（`x86_64`） | 入っている |
-| ADOT レイヤー・起動ラッパー・IAM ポリシー | **入っていない** |
+| レイヤー・起動ラッパー・IAM ポリシー | `ocr-analyzer` のみ入っている（`presigned-url` はまだ） |
 
-そのため、いま見えるのは Lambda 標準メトリクス由来のエラー率と実行時間、それに X-Ray の呼び出し単位のトレースまで。**下流ごとの内訳（Bedrock に何秒、S3 に何秒）はまだ見えない。**
+そのため、`presigned-url` について見えるのは Lambda 標準メトリクス由来のエラー率と実行時間、それに X-Ray の呼び出し単位のトレースまで。**下流ごとの内訳（Bedrock に何秒、S3 に何秒）は計装した関数でしか見えない。**
 
-なお、この状態でもエラー率は見えるので、それで既存のバグを1件見つけている（Issue #115）。
+なお、計装が無い状態でもエラー率は見えるので、それで既存のバグを1件見つけている（Issue #115）。
 
-### 切り戻した理由
+### 一度切り戻した理由（PR #110 → #114）
 
-環境変数に `AWS_LAMBDA_EXEC_WRAPPER=/opt/otel-instrument` を指定したが、**これは Python 用のラッパー名**だった。Node.js 用は `/opt/otel-handler`。存在しないパスを指定すると、ラッパーの解決に失敗した時点で関数が `Runtime.ExitError` で落ちる。ハンドラに到達しないので 100% 失敗する。
+**Node.js 向けの AWS 製レイヤーは2種類あり、起動ラッパーの名前が違う。** これを取り違えた。
 
-公式ドキュメントの CDK サンプルが Python の例で書かれており、そこから環境変数だけを持ってきたのが原因。レイヤーの ARN が実在することは確認していたが、中身にラッパーがあるかは見ていなかった。
+| レイヤー | 起動ラッパー |
+|---|---|
+| `AWSOpenTelemetryDistroJs`（Application Signals 用） | `/opt/otel-instrument` |
+| `aws-otel-nodejs-amd64-ver-*`（汎用 ADOT） | `/opt/otel-handler` |
+
+前回は**汎用 ADOT のレイヤーに、Application Signals 用のラッパー名を組み合わせた**。存在しないパスを指定すると、ラッパーの解決に失敗した時点で関数が `Runtime.ExitError` で落ちる。ハンドラに到達しないので 100% 失敗する。
+
+当時は「`/opt/otel-instrument` は Python 用の名前だった」と結論づけたが、**これは誤り**だった。Application Signals 用のレイヤーでは Node.js でもこの名前が正しい。ラッパー名だけを見ても正誤は決まらず、**レイヤーとの組み合わせで決まる**。
+
+根本の失敗は変わらない。レイヤーの ARN が実在することは確認していたが、中身にラッパーがあるかは見ていなかった。
 
 ### 計装する対象（再挑戦時も同じ）
 
@@ -35,7 +44,9 @@
 
 監視系（health-check / slack-notifier / sommelier-canary / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増える。
 
-`api-stack.test.ts` に「起動ラッパーを指定した関数が無い」というテストを置いてある。付け直すときは、レイヤーに `/opt/otel-handler` があることを実機で確かめてから、このテストを意図的に書き換えることになる。
+**1関数ずつ入れる。** 前回は2つ同時に入れて両方止め、画像アップロードの動線ごと失った。先に `ocr-analyzer` へ入れてある。OCR が落ちても記録の登録自体は通る（解析だけが失敗する）ので、被害が動線を塞がない側から試している。`presigned-url` へ広げるのは OCR で様子を見てから。
+
+`api-stack.test.ts` にレイヤーとラッパーの組み合わせを固定するテストを置いてある。`presigned-url` に広げるときは「presigned-url にはまだ計装を入れていない」というテストを意図的に書き換えることになるので、変更が目に入る。
 
 ### サービス検出と Transaction Search（アカウント単位・CDK 管理外）
 
@@ -213,19 +224,27 @@ AWS_PROFILE=sakekasu-builder aws xray get-indexing-rules --region ap-northeast-1
 
 ## 注意点
 
-- **起動ラッパーの名前はランタイムごとに違う。** Node.js は `/opt/otel-handler`、Python は `/opt/otel-instrument`。取り違えると関数が起動しなくなる。公式ドキュメントの CDK サンプルは Python で書かれているので、そのまま流用しない
+- **起動ラッパーの名前はレイヤーごとに違う。** ランタイムの言語では決まらない。`AWSOpenTelemetryDistroJs`（Application Signals 用）は `/opt/otel-instrument`、`aws-otel-nodejs-amd64-ver-*`（汎用 ADOT）は `/opt/otel-handler`。取り違えると関数が起動しなくなる
 - **レイヤーは中身を確かめてから使う。** ARN が実在することは検証にならない。`Content.Location` の署名付き URL を落として、目的のファイルが入っているかを見る
 
   ```bash
   URL=$(AWS_PROFILE=sakekasu-builder aws lambda get-layer-version-by-arn \
     --arn <レイヤーARN> --region ap-northeast-1 --query 'Content.Location' --output text)
-  curl -s "$URL" -o layer.zip && unzip -l layer.zip | grep otel-handler
+  curl -s "$URL" -o layer.zip && unzip -l layer.zip | grep -E "otel-instrument|otel-handler"
   ```
 
-- **ESM バンドルとの相性は未検証。** 対象の2関数は esbuild で ESM の単一ファイルにバンドルしている。自動計装はモジュールの読み込みをフックする仕組みなので、AWS SDK がバンドルに取り込まれているとフックが刺さらない。レイヤー側には ESM 用の仕組み（`--import /opt/init.mjs`）があり、CDK は `@aws-sdk/*` を既定で external にするため通る見込みだが、公式は Node.js の ESM を「limited support」としている。効かなければ対象関数だけ CJS バンドルに変える
-- **コールドスタートが数百ms 悪化する。** ADOT のレイヤーを読み込むぶん。OCR は待つ前提の操作なので許容範囲とみているが、体感が悪くなったらメモリ増量で緩和する
-- **レイヤーの ARN にはランタイムのバージョンが埋まっている**（`aws-otel-nodejs-amd64-ver-1-30-2`）。上げるときは ARN ごと差し替える。自動で追随する仕組みは入れていないので、[ADOT のリリース](https://github.com/aws-observability/aws-otel-lambda/releases)をたまに見る
-- **アーキテクチャを x86_64 で明示している。** レイヤーが amd64 版なので、既定に任せて arm64 に変わると起動時に噛み合わなくなる
+- **ESM バンドルは通る見込み（実機確認は計装後）。** 対象の関数は esbuild で ESM の単一ファイル（`index.mjs`）にバンドルしている。レイヤーの `otel-instrument` は `/var/task/*.mjs` の有無で ESM を判定し、Node 20 以上なら `--import /opt/wrapper.mjs` を使う。これは `module.register()` による選択的フックで、レイヤー自身のコメントに「バンドルされたアプリコードの ESM ライブバインディングを壊す `--experimental-loader` を避けるため」と書かれている。加えて CDK は `@aws-sdk/*` を external にするため（合成結果で確認済み。バンドルには import 文しか残っていない）、SDK は実行時に読み込まれフックが刺さる。それでも効かなければ対象関数だけ CJS バンドルに変える
+- **コールドスタートが悪化する。** レイヤーは展開後 9.7MB ある。OCR は待つ前提の操作なので許容範囲とみているが、体感が悪くなったらメモリ増量で緩和する
+- **レイヤーの ARN にはバージョンが埋まっている**（`AWSOpenTelemetryDistroJs:15`）。上げるときは ARN ごと差し替える。自動で追随する仕組みは入れていないので、たまに新しいバージョンが出ていないかを見る。差し替えるときは中身の展開もやり直すこと
+
+  ```bash
+  # 存在するバージョンを探す（list-layer-versions はクロスアカウントでは権限が要る）
+  AWS_PROFILE=sakekasu-builder aws lambda get-layer-version-by-arn \
+    --arn arn:aws:lambda:ap-northeast-1:615299751070:layer:AWSOpenTelemetryDistroJs:16 \
+    --region ap-northeast-1 --query 'CreatedDate' --output text
+  ```
+
+- **アーキテクチャを x86_64 で明示している。** 既定値の変化でレイヤーと噛み合わなくなるのを防ぐため。`AWSOpenTelemetryDistroJs` は arm64 にも対応しているので、費用を詰めるなら arm64 へ寄せる余地がある
 - **リージョンを変えるならレイヤーの ARN も差し替える。** レイヤーは同じリージョンのものしか付けられない
 - **AppSync（JS リゾルバー）は Application Signals の対象外。** 必要なら AppSync 側の X-Ray トレーシングを別途有効にする（README の「Issue にしていない小さな宿題」）
 
