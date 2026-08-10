@@ -1,0 +1,64 @@
+# infra/ のテストを PR とマージ時に走らせる（Issue #82 のレビュー指摘）。
+#
+# これまで infra のテストは CI のどこでも実行していなかった。cdk-diff は diff を
+# 出すだけ、deploy は deploy するだけで、このリポジトリは無料プランのため
+# ブランチ保護も使えない。テストは書いてあるのに、壊れたまま main へ入って
+# デプロイまで通る状態だった。
+#
+# AWS の認証は要らないので cdk-diff とは分けている。認証や AWS 側の都合で
+# 落ちたときに、テストまで一緒に走らなくなるのを避けるため。
+name: test
+
+# paths にワークフロー全体を入れているのは、deploy.yml から npm test の行を
+# 消すだけの PR でもこのワークフローを走らせるため。infra/** と test.yml だけに
+# 絞ると、関門を外す変更そのものが無検査で通る。ブランチ保護が使えない以上、
+# 走ったという事実だけが手がかりになる
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/**'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+      # --ignore-scripts はここにも付ける。PR のブランチをそのまま checkout する
+      # 以上、lock に仕込まれたインストール時スクリプトを走らせない。
+      # esbuild だけが hasInstallScript を持つが、無くても vitest の変換と
+      # NodejsFunction のバンドルは動く（このワークフローが両方を通るので、
+      # 動かなくなればここで落ちる）
+      - run: npm ci --ignore-scripts
+      # Lambda は1つずつ package.json を持ち、AWS SDK はそちらの依存にある。
+      # infra 直下の npm ci だけでは入らないため、テストが SDK を import した
+      # 時点で ERR_MODULE_NOT_FOUND になる（ローカルは過去の npm install が
+      # 残っていて気づけない）。
+      #
+      # --ignore-scripts なのは、PR のブランチをそのまま checkout して入れる以上、
+      # lock に細工されたライフサイクルスクリプトを走らせないため。8つの lock は
+      # いずれも hasInstallScript を持たないので、付けても壊れるものが無い
+      - name: Lambda ごとの依存を入れる
+        run: |
+          for dir in lambda/*/; do
+            [ -f "${dir}package.json" ] || continue
+            (cd "$dir" && npm ci --ignore-scripts)
+          done
+      - run: npx tsc --noEmit
+      - run: npm test
