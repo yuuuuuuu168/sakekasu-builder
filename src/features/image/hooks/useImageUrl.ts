@@ -13,8 +13,11 @@ export interface UseImageUrlReturn {
 /**
  * ダウンロード用 Presigned URL を取得するカスタムフック
  *
- * imageKey を受け取り、getDownloadUrl クエリで Presigned URL を取得する。
+ * imageKey を受け取り、Presigned URL を取得する。
  * imageKey が null / undefined の場合は URL 取得をスキップする。
+ *
+ * 同じタイミングで要求されたキーは downloadUrlCache 側で 1 リクエストに
+ * まとめられるため、カードごとに呼んでも Lambda の呼び出しは増えない。
  *
  * Validates: Requirements 4.1, 4.4, 4.5
  */

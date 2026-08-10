@@ -315,6 +315,12 @@ export class ApiStack extends cdk.Stack {
       fieldName: 'getDownloadUrl',
     });
 
+    // getDownloadUrls クエリリゾルバー（一覧の画像 URL をまとめて取る）
+    presignedUrlDataSource.createResolver('GetDownloadUrlsResolver', {
+      typeName: 'Query',
+      fieldName: 'getDownloadUrls',
+    });
+
     // OCR Analyzer Lambda 関数
     this.ocrAnalyzerFunction = new NodejsFunction(this, 'OcrAnalyzerFunction', {
       functionName: `${props.envName}-sakekasu-ocr-analyzer`,

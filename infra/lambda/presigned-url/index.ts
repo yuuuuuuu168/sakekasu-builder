@@ -9,6 +9,14 @@ const DOWNLOAD_EXPIRY = Number(process.env.DOWNLOAD_EXPIRY || '3600');
 
 const ALLOWED_CONTENT_TYPES = ['image/jpeg', 'image/png'];
 
+/**
+ * getDownloadUrls が 1 回で受け付けるキーの上限。
+ *
+ * 署名の生成自体はローカル計算だが、上限を置かないと巨大なリクエストで
+ * 実行時間とレスポンスサイズが伸びる。フロント側は 50 件ずつに割って送る
+ */
+const MAX_DOWNLOAD_KEYS = 100;
+
 interface AppSyncEvent {
   info: {
     fieldName: string;
@@ -19,6 +27,7 @@ interface AppSyncEvent {
     contentType?: string;
     fileName?: string;
     key?: string;
+    keys?: string[];
     imageKey?: string;
     imageKeys?: string[];
   };
@@ -36,7 +45,7 @@ interface UploadUrlResponse {
   key: string;
 }
 
-export async function handler(event: AppSyncEvent): Promise<UploadUrlResponse | string | { success: boolean }> {
+export async function handler(event: AppSyncEvent): Promise<UploadUrlResponse | string | string[] | { success: boolean }> {
   const { fieldName } = event.info;
 
   switch (fieldName) {
@@ -44,6 +53,8 @@ export async function handler(event: AppSyncEvent): Promise<UploadUrlResponse | 
       return generateUploadUrl(event);
     case 'getDownloadUrl':
       return getDownloadUrl(event);
+    case 'getDownloadUrls':
+      return getDownloadUrls(event);
     case 'deleteImage':
       return deleteImage(event);
     default:
@@ -78,14 +89,8 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
   return { uploadUrl, key };
 }
 
-async function getDownloadUrl(event: AppSyncEvent): Promise<string> {
-  const { key } = event.arguments;
-  const ownerSub = event.identity.sub;
-
-  if (!key) {
-    throw new Error('Missing required argument: key');
-  }
-
+/** 1 件分のダウンロード用 Presigned URL を作る（所有者チェック込み） */
+async function signDownloadUrl(key: string, ownerSub: string): Promise<string> {
   // キーのプレフィックスがリクエストユーザーの sub と一致するか検証
   if (!key.startsWith(`${ownerSub}/`)) {
     throw new Error('Unauthorized: cannot access other user\'s images');
@@ -96,11 +101,46 @@ async function getDownloadUrl(event: AppSyncEvent): Promise<string> {
     Key: key,
   });
 
-  const downloadUrl = await getSignedUrl(s3Client, command, {
+  return getSignedUrl(s3Client, command, {
     expiresIn: DOWNLOAD_EXPIRY,
   });
+}
 
-  return downloadUrl;
+async function getDownloadUrl(event: AppSyncEvent): Promise<string> {
+  const { key } = event.arguments;
+  const ownerSub = event.identity.sub;
+
+  if (!key) {
+    throw new Error('Missing required argument: key');
+  }
+
+  return signDownloadUrl(key, ownerSub);
+}
+
+/**
+ * 複数キーの Presigned URL をまとめて返す。
+ *
+ * 戻り値は keys と同じ並び・同じ件数にする。フロントはインデックスで
+ * 突き合わせるため、途中を詰めたり並べ替えたりしてはいけない。
+ * 1 件でも他人のキーが混ざっていれば全体を失敗させる（getDownloadUrl と同じ扱い）
+ */
+async function getDownloadUrls(event: AppSyncEvent): Promise<string[]> {
+  const { keys } = event.arguments;
+  const ownerSub = event.identity.sub;
+
+  if (!keys) {
+    throw new Error('Missing required argument: keys');
+  }
+
+  if (keys.length === 0) {
+    return [];
+  }
+
+  if (keys.length > MAX_DOWNLOAD_KEYS) {
+    throw new Error(`Too many keys: ${keys.length}. Max: ${MAX_DOWNLOAD_KEYS}`);
+  }
+
+  return Promise.all(keys.map((key) => signDownloadUrl(key, ownerSub)));
 }
 
 
