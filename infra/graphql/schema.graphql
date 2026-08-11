@@ -153,7 +153,9 @@ input CreatePurchaseRecordInput {
   category: SakeCategory!
   memo: String
   imageKey: String
-  imageKeys: [String]
+  # 要素は非 null。[String] だと [null] を受け付けてしまい、
+  # リゾルバーの検証が null を触って実行時エラーになる
+  imageKeys: [String!]
   drinkingStatus: DrinkingStatus
 }
 
@@ -182,7 +184,8 @@ input CreateDrinkingRecordInput {
   rating: Int!
   memo: String
   imageKey: String
-  imageKeys: [String]
+  # 要素は非 null（CreatePurchaseRecordInput と同じ理由）
+  imageKeys: [String!]
   purchaseRecordId: ID
 }
 
