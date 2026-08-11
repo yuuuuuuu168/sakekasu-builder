@@ -228,10 +228,33 @@ async function getDownloadUrls(event: AppSyncEvent): Promise<string[]> {
 }
 
 
-/** コピー先で名前がぶつからないようにする（別フォルダの同名ファイル対策） */
-function uniqueFileName(fileName: string, used: Set<string>): string {
-  if (!used.has(fileName)) {
-    used.add(fileName);
+/**
+ * コピー先で名前がぶつからないように、使う名前を確保する。
+ *
+ * 別フォルダにある同名ファイルを 1 つの記録へまとめるため、2 枚目以降は
+ * 拡張子の前に連番を入れる。
+ *
+ * サムネイルは原画名から導出する決まりで、連番を振って避けることができない。
+ * そのため原画名を決める時点で、その導出先（`thumb_<名前>`）も一緒に押さえる。
+ * `thumb_` を含むファイル名は利用者が普通に付けられるので、押さえておかないと
+ * 「先に入れた画像のサムネイル」と「後から入れた画像の原画」が同じキーになり、
+ * 片方が上書きされる
+ */
+function reserveFileName(fileName: string, used: Set<string>): string {
+  // 既にサムネイルを指す名前なら、そこからさらに導出はしない
+  const namesToTake = (name: string): string[] =>
+    name.startsWith(THUMBNAIL_PREFIX) ? [name] : [name, `${THUMBNAIL_PREFIX}${name}`];
+
+  const take = (candidate: string): boolean => {
+    const names = namesToTake(candidate);
+    if (names.some((name) => used.has(name))) {
+      return false;
+    }
+    names.forEach((name) => used.add(name));
+    return true;
+  };
+
+  if (take(fileName)) {
     return fileName;
   }
 
@@ -241,8 +264,7 @@ function uniqueFileName(fileName: string, used: Set<string>): string {
 
   for (let i = 2; i < 100; i += 1) {
     const candidate = `${stem}-${i}${ext}`;
-    if (!used.has(candidate)) {
-      used.add(candidate);
+    if (take(candidate)) {
       return candidate;
     }
   }
@@ -319,7 +341,7 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
     const sourceFileName = source.slice(source.lastIndexOf('/') + 1);
     assertFileName(sourceFileName);
 
-    const fileName = uniqueFileName(sourceFileName, usedNames);
+    const fileName = reserveFileName(sourceFileName, usedNames);
     const destination = `${ownerSub}/${recordType}/${recordId}/${fileName}`;
 
     await s3Client.send(
@@ -330,6 +352,12 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
       }),
     );
     destinations.push(destination);
+
+    // 元がすでにサムネイルなら、そこからさらに導出はしない。
+    // thumb_thumb_... という在りもしないキーを探しにいくだけになる
+    if (isThumbnailKey(source)) {
+      continue;
+    }
 
     const sourceThumbnail = toThumbnailKey(source);
     if (await objectExists(sourceThumbnail)) {
