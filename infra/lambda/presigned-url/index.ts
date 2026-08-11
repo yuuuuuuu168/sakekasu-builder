@@ -73,11 +73,12 @@ interface UploadUrlResponse {
   uploadUrl: string;
   key: string;
   /**
-   * 一時領域へのアップロードで PUT に付けるべき x-amz-tagging の値。
+   * この URL で付与されるタグ（一時領域以外では null）。
    *
-   * タグは署名の対象なので、クライアントが違う値を送ると 403 になる。
-   * 同じ文字列を両側の定数として持つとドリフトに気づけないため、
-   * 署名した側がそのまま返す（一時領域以外では null）
+   * 参考情報として返すだけで、クライアントはヘッダに載せてはいけない。
+   * SDK はタグを署名済み URL のクエリ（`x-amz-tagging`）に入れるため、
+   * ヘッダでも送ると二重指定になり S3 が 403 を返す（実機で確認済み）。
+   * 値の確認や運用調査のために残している
    */
   taggingHeader: string | null;
 }
@@ -218,8 +219,10 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
     Bucket: BUCKET_NAME,
     Key: key,
     ContentType: contentType,
-    // タグはライフサイクルの削除条件。署名対象に入るため、クライアントは
-    // 同じ値を x-amz-tagging ヘッダで送る必要がある（送らなければ PUT が失敗する）
+    // タグはライフサイクルの削除条件。SDK はこの値を署名済み URL の
+    // クエリ（x-amz-tagging）に入れる。署名対象ヘッダには入らないので、
+    // クライアントは同名のヘッダを送ってはいけない。送ると二重指定になり
+    // S3 が 403 SignatureDoesNotMatch を返す（PR #147 で実機確認）
     ...(temporary ? { Tagging: TEMP_OBJECT_TAGGING } : {}),
   });
 
