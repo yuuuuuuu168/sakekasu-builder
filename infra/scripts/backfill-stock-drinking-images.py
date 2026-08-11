@@ -69,6 +69,15 @@ def dedupe(keys: list[str]) -> list[str]:
     return result
 
 
+def is_valid_file_name(file_name: str) -> bool:
+    """コピー先の末尾に使える名前か（Lambda の assertFileName と同じ規則）。
+
+    記録が持つキーは利用者が指定したファイル名を含む。末尾が `..` や空の
+    キーをそのまま複製先に使うと、実体の無い位置を指すキーが記録に残る。
+    """
+    return bool(file_name) and "/" not in file_name and file_name not in (".", "..")
+
+
 def unique_file_name(file_name: str, used: set[str]) -> str:
     """コピー先で名前がぶつからないようにする。
 
@@ -135,6 +144,7 @@ def main() -> int:
     copied = 0
     skipped_existing = 0
     missing_source = 0
+    skipped_invalid = 0
 
     for record in sorted(drinkings, key=lambda x: x.get("createdAt", {}).get("S", "")):
         record_id = record["id"]["S"]
@@ -187,7 +197,13 @@ def main() -> int:
                 missing_source += 1
                 continue
 
-            file_name = unique_file_name(source.rpartition("/")[2], used_names)
+            source_file_name = source.rpartition("/")[2]
+            if not is_valid_file_name(source_file_name):
+                print(f"  [!] 使えないファイル名なので飛ばす: {source}")
+                skipped_invalid += 1
+                continue
+
+            file_name = unique_file_name(source_file_name, used_names)
             dest = f"{owner}/drinking/{record_id}/{file_name}"
             new_keys.append(dest)
 
@@ -247,6 +263,8 @@ def main() -> int:
         print("--dry-run のため何も書き込んでいない")
     if missing_source:
         print(f"元の画像が見つからなかった: {missing_source} 件")
+    if skipped_invalid:
+        print(f"ファイル名が使えず飛ばした: {skipped_invalid} 件")
 
     return 0
 
