@@ -145,6 +145,60 @@ describe('copyImages', () => {
     ]);
   });
 
+  // サムネイルは原画名から導出する決まりで、連番を振って避けられない。
+  // 原画名を決める時点で導出先も押さえないと、「先に入れた画像のサムネイル」と
+  // 「後から入れた画像の原画」が同じキーになって片方が消える。
+  // `thumb_` を含むファイル名は利用者が普通に付けられるので現実に起こりうる
+  it.each([
+    ['原画→thumb_付きの順', ['photo.jpg', 'thumb_photo.jpg']],
+    ['thumb_付き→原画の順', ['thumb_photo.jpg', 'photo.jpg']],
+  ])('%s でも複製先が重ならない', async (_label, fileNames) => {
+    const result = await callCopyImages({
+      sourceKeys: fileNames.map((name, i) => `${OWNER}/purchase/rec-${i + 1}/${name}`),
+    });
+
+    // 原画の複製先どうしが重ならない
+    expect(new Set(result).size).toBe(result.length);
+
+    // サムネイルを含めても、同じキーへ 2 回書き込まない
+    const written = copies().map(([, destination]) => destination);
+    expect(new Set(written).size).toBe(written.length);
+  });
+
+  // 同じ規則が backfill-stock-drinking-images.py にもある。付け方が食い違うと
+  // 同じ入力から違うキーが生まれるので、決まった名前をここで固定しておく
+  it('名前の付け替え方が決まっている（バックフィルの実装と揃える）', async () => {
+    const result = await callCopyImages({
+      sourceKeys: [
+        `${OWNER}/purchase/rec-1/photo.jpg`,
+        `${OWNER}/purchase/rec-2/thumb_photo.jpg`,
+        `${OWNER}/purchase/rec-3/photo.jpg`,
+      ],
+    });
+
+    // 3枚目が photo-2 ではなく photo-3 になるのは、photo-2 の導出先
+    // （thumb_photo-2）を2枚目が先に取っているため。原画とサムネイルを
+    // 対で確保する規則から出る結果で、両方の実装で同じにならないといけない
+    expect(result).toEqual([
+      `${OWNER}/drinking/${RECORD_ID}/photo.jpg`,
+      `${OWNER}/drinking/${RECORD_ID}/thumb_photo-2.jpg`,
+      `${OWNER}/drinking/${RECORD_ID}/photo-3.jpg`,
+    ]);
+  });
+
+  // 元がすでにサムネイルなら、そこからさらに導出しても在りもしないキーを
+  // 探すだけになる（deleteImage 側と揃える）
+  it('元が thumb_ 始まりなら、サムネイルの複製を試みない', async () => {
+    await callCopyImages({ sourceKeys: [`${OWNER}/purchase/rec-1/thumb_photo.jpg`] });
+
+    const looked = sendMock.mock.calls
+      .map((call) => call[0])
+      .filter((c): c is FakeHeadObjectCommand => c instanceof FakeHeadObjectCommand);
+
+    expect(looked).toEqual([]);
+    expect(copies().some(([, dest]) => dest.includes('thumb_thumb_'))).toBe(false);
+  });
+
   it('空の配列を渡したら何も複製しない', async () => {
     expect(await callCopyImages({ sourceKeys: [] })).toEqual([]);
     expect(copies()).toEqual([]);
