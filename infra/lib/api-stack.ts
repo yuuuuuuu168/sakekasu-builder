@@ -565,6 +565,13 @@ export function response(ctx) {
     util.error('Invalid imageKeys: too many images', 'BadRequest');
   }
 
+  // 空配列は素通りする。中身が無いのでループの検査は 1 度も走らないまま
+  // imageKeys = [] が書き込まれ、記録から画像への参照だけが消えて
+  // S3 の実体が誰からも辿れなくなる。画像を外す操作は今のところ無い
+  if (input.imageKeys && input.imageKeys.length === 0) {
+    util.error('Invalid imageKeys: must not be empty', 'BadRequest');
+  }
+
   const prefix = ctx.identity.sub + '/';
 
   // 自分のキーか。null 要素で落ちないよう、値の有無もここで見る
