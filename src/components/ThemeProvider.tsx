@@ -72,6 +72,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// Provider と対で使うフックなので同じファイルに置く（AuthContext と同じ判断）
+// eslint-disable-next-line react-refresh/only-export-components
 export function useTheme() {
   const context = useContext(ThemeContext);
   if (!context) {
