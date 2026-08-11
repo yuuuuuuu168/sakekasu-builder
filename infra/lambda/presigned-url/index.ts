@@ -67,6 +67,11 @@ interface UploadUrlResponse {
   key: string;
 }
 
+/** そのキーがサムネイルを指しているか */
+function isThumbnailKey(key: string): boolean {
+  return key.slice(key.lastIndexOf('/') + 1).startsWith(THUMBNAIL_PREFIX);
+}
+
 /** 原画キーから、その兄弟であるサムネイルキーを導出する（フロントと同じ規則） */
 function toThumbnailKey(key: string): string {
   const separatorIndex = key.lastIndexOf('/');
@@ -223,10 +228,33 @@ async function getDownloadUrls(event: AppSyncEvent): Promise<string[]> {
 }
 
 
-/** コピー先で名前がぶつからないようにする（別フォルダの同名ファイル対策） */
-function uniqueFileName(fileName: string, used: Set<string>): string {
-  if (!used.has(fileName)) {
-    used.add(fileName);
+/**
+ * コピー先で名前がぶつからないように、使う名前を確保する。
+ *
+ * 別フォルダにある同名ファイルを 1 つの記録へまとめるため、2 枚目以降は
+ * 拡張子の前に連番を入れる。
+ *
+ * サムネイルは原画名から導出する決まりで、連番を振って避けることができない。
+ * そのため原画名を決める時点で、その導出先（`thumb_<名前>`）も一緒に押さえる。
+ * `thumb_` を含むファイル名は利用者が普通に付けられるので、押さえておかないと
+ * 「先に入れた画像のサムネイル」と「後から入れた画像の原画」が同じキーになり、
+ * 片方が上書きされる
+ */
+function reserveFileName(fileName: string, used: Set<string>): string {
+  // 既にサムネイルを指す名前なら、そこからさらに導出はしない
+  const namesToTake = (name: string): string[] =>
+    name.startsWith(THUMBNAIL_PREFIX) ? [name] : [name, `${THUMBNAIL_PREFIX}${name}`];
+
+  const take = (candidate: string): boolean => {
+    const names = namesToTake(candidate);
+    if (names.some((name) => used.has(name))) {
+      return false;
+    }
+    names.forEach((name) => used.add(name));
+    return true;
+  };
+
+  if (take(fileName)) {
     return fileName;
   }
 
@@ -236,8 +264,7 @@ function uniqueFileName(fileName: string, used: Set<string>): string {
 
   for (let i = 2; i < 100; i += 1) {
     const candidate = `${stem}-${i}${ext}`;
-    if (!used.has(candidate)) {
-      used.add(candidate);
+    if (take(candidate)) {
       return candidate;
     }
   }
@@ -314,7 +341,7 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
     const sourceFileName = source.slice(source.lastIndexOf('/') + 1);
     assertFileName(sourceFileName);
 
-    const fileName = uniqueFileName(sourceFileName, usedNames);
+    const fileName = reserveFileName(sourceFileName, usedNames);
     const destination = `${ownerSub}/${recordType}/${recordId}/${fileName}`;
 
     await s3Client.send(
@@ -325,6 +352,12 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
       }),
     );
     destinations.push(destination);
+
+    // 元がすでにサムネイルなら、そこからさらに導出はしない。
+    // thumb_thumb_... という在りもしないキーを探しにいくだけになる
+    if (isThumbnailKey(source)) {
+      continue;
+    }
 
     const sourceThumbnail = toThumbnailKey(source);
     if (await objectExists(sourceThumbnail)) {
@@ -411,28 +444,43 @@ async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; ima
 
   await Promise.all(
     keysToDelete.map(async (key) => {
-      try {
-        const command = new DeleteObjectCommand({
-          Bucket: BUCKET_NAME,
-          Key: key,
-        });
-        await s3Client.send(command);
-        console.log(JSON.stringify({
-          level: 'INFO',
-          action: 'deleteImage',
-          imageKey: withoutOwner(key, ownerSub),
-          result: 'success',
-        }));
-      } catch (error) {
-        hasFailure = true;
-        console.error(JSON.stringify({
-          level: 'ERROR',
-          action: 'deleteImage',
-          imageKey: withoutOwner(key, ownerSub),
-          result: 'failed',
-          error: error instanceof Error ? error.message : String(error),
-        }));
-      }
+      // サムネイルは記録に保存されず原画から導出する兄弟キーなので、
+      // 記録が持つキーだけを消すと消し残る（Issue #132）。
+      // 未生成の記録もあるが、S3 は無いキーの削除もエラーにしないので
+      // 存在を確かめずにまとめて消す。
+      //
+      // 記録が `thumb_` 始まりのキーを直接持っていることもある
+      // （アップロードのファイル名に使うことを禁じていないため）。
+      // そこへさらに導出をかけると thumb_thumb_... という在りもしない
+      // キーを消しにいき、成功ログだけが増える
+      const targets = isThumbnailKey(key) ? [key] : [key, toThumbnailKey(key)];
+
+      await Promise.all(
+        targets.map(async (target) => {
+          try {
+            const command = new DeleteObjectCommand({
+              Bucket: BUCKET_NAME,
+              Key: target,
+            });
+            await s3Client.send(command);
+            console.log(JSON.stringify({
+              level: 'INFO',
+              action: 'deleteImage',
+              imageKey: withoutOwner(target, ownerSub),
+              result: 'success',
+            }));
+          } catch (error) {
+            hasFailure = true;
+            console.error(JSON.stringify({
+              level: 'ERROR',
+              action: 'deleteImage',
+              imageKey: withoutOwner(target, ownerSub),
+              result: 'failed',
+              error: error instanceof Error ? error.message : String(error),
+            }));
+          }
+        })
+      );
     })
   );
 

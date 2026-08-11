@@ -26,6 +26,7 @@ AWS 認証情報は AWS_PROFILE 等の通常の方法で解決される。
 """
 
 import argparse
+import re
 import sys
 
 import boto3
@@ -33,6 +34,15 @@ from botocore.exceptions import ClientError
 
 # フロントエンド（src/features/image/lib/thumbnailKey.ts）と揃える必要がある
 THUMBNAIL_PREFIX = "thumb_"
+
+# Lambda 側の RECORD_ID_PATTERN と揃える
+RECORD_ID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
+
+
+def is_thumbnail(file_name: str) -> bool:
+    return file_name.startswith(THUMBNAIL_PREFIX)
 
 
 def to_thumbnail_key(key: str) -> str:
@@ -78,24 +88,59 @@ def is_valid_file_name(file_name: str) -> bool:
     return bool(file_name) and "/" not in file_name and file_name not in (".", "..")
 
 
-def unique_file_name(file_name: str, used: set[str]) -> str:
-    """コピー先で名前がぶつからないようにする。
+def is_safe_key_segment(value: str) -> bool:
+    """キーの階層に埋めてよい値か。
+
+    Lambda 側は recordType / recordId を厳しく検証してからキーを組み立てる
+    （assertRecordLocation）。こちらは DynamoDB の値をそのまま使うので、
+    区切り文字や `..` が混ざると想定外の位置へ書き込むことになる。
+    """
+    return bool(value) and "/" not in value and value not in (".", "..")
+
+
+def is_owned_by(key: str, owner: str) -> bool:
+    """そのキーが指定の利用者のものか（Lambda の copyImages と同じ規則）。"""
+    return key.startswith(f"{owner}/")
+
+
+def reserve_file_name(file_name: str, used: set[str]) -> str:
+    """コピー先で名前がぶつからないように、使う名前を確保する。
 
     別々のフォルダにある同名ファイル（image.jpg など）を 1 つの記録へ
     まとめるため、2 枚目以降は拡張子の前に連番を入れる。
+
+    サムネイルは原画名から導出する決まりで、連番を振って避けることが
+    できない。そのため原画名を決める時点で、その導出先（`thumb_<名前>`）も
+    一緒に押さえる。`thumb_` を含むファイル名は利用者が普通に付けられるので、
+    押さえておかないと「先に入れた画像のサムネイル」と「後から入れた画像の
+    原画」が同じキーになり、片方が上書きされる。
+
+    Lambda 側の reserveFileName と同じ規則。どちらかだけ直すと、
+    同じ入力で違う結果になる。
     """
-    if file_name not in used:
-        used.add(file_name)
+
+    def names_to_take(name: str) -> list[str]:
+        # 既にサムネイルを指す名前なら、そこからさらに導出はしない
+        if name.startswith(THUMBNAIL_PREFIX):
+            return [name]
+        return [name, f"{THUMBNAIL_PREFIX}{name}"]
+
+    def take(candidate: str) -> bool:
+        names = names_to_take(candidate)
+        if any(name in used for name in names):
+            return False
+        used.update(names)
+        return True
+
+    if take(file_name):
         return file_name
 
     stem, dot, ext = file_name.rpartition(".")
     if not dot:
         stem, ext = file_name, ""
     for i in range(2, 100):
-        candidate = f"{stem}-{i}{dot}{ext}"
-        if candidate not in used:
-            used.add(candidate)
-            return candidate
+        if take(f"{stem}-{i}{dot}{ext}"):
+            return f"{stem}-{i}{dot}{ext}"
     raise RuntimeError(f"コピー先の名前を決められない: {file_name}")
 
 
@@ -155,10 +200,14 @@ def main() -> int:
         if effective_image_keys(record):
             continue
 
-        # owner はキーの先頭に入る。空のまま組み立てると、どの利用者にも
-        # 属さない位置（/drinking/...）へ書き込むことになる
-        if not owner:
-            print(f"[skip] {name}: owner が無い記録")
+        # owner と record_id はコピー先のキーに埋まる。DynamoDB の値を
+        # そのまま使うので、階層を壊す値が入っていたら手を出さない
+        if not is_safe_key_segment(owner):
+            print(f"[skip] {name}: owner がキーに使えない値")
+            continue
+
+        if not RECORD_ID_PATTERN.match(record_id):
+            print(f"[skip] {name}: id が UUID の形をしていない")
             continue
 
         purchase_id = record.get("purchaseRecordId", {}).get("S")
@@ -183,6 +232,14 @@ def main() -> int:
             print(f"[skip] {name}: 紐づく購入記録に画像が無い")
             continue
 
+        # 記録の持ち主が同じでも、記録が持つキー自体が他人のものを
+        # 指していることはある（作成時の検証を通っていない古いデータなど）。
+        # 1 件でも混ざっていたらその記録には手を出さない
+        foreign = [key for key in source_keys if not is_owned_by(key, owner)]
+        if foreign:
+            print(f"[skip] {name}: 持ち主の違う画像キーが混ざっている（{len(foreign)} 件）")
+            continue
+
         planned += 1
         print(f"\n{name}  ({record_id})")
 
@@ -203,7 +260,7 @@ def main() -> int:
                 skipped_invalid += 1
                 continue
 
-            file_name = unique_file_name(source_file_name, used_names)
+            file_name = reserve_file_name(source_file_name, used_names)
             dest = f"{owner}/drinking/{record_id}/{file_name}"
             new_keys.append(dest)
 
@@ -220,6 +277,11 @@ def main() -> int:
                         CopySource={"Bucket": args.bucket, "Key": source},
                     )
                     copied += 1
+
+            # 元がすでにサムネイルなら、そこからさらに導出はしない。
+            # thumb_thumb_... という在りもしないキーを探すだけになる
+            if is_thumbnail(source_file_name):
+                continue
 
             # サムネイルは兄弟キーとして導出する。未生成の記録もあるので、
             # 在るときだけ複製する（無ければ一覧は原画にフォールバックする）
