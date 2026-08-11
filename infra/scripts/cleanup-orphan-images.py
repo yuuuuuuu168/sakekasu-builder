@@ -75,8 +75,12 @@ def without_owner(key: str) -> str:
 
     sub は利用者ごとに固定の識別子で、端末やログに残したくない。
     ただし丸ごと伏せると調査できないので、残りはそのまま出す。
+
+    キーは `{sub}/{種別}/{recordId}/{ファイル名}` の形が前提。区切りが無い
+    想定外の形は、どこまでが sub か判断できないので丸ごと伏せる。
     """
-    return key.split("/", 1)[1] if "/" in key else key
+    owner, sep, rest = key.partition("/")
+    return rest if sep else "(想定外の形のキー)"
 
 
 def scan_all(dynamodb, table_name: str) -> list[dict]:
