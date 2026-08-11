@@ -228,7 +228,7 @@ describe('useImageUpload - 一時領域からの引き取り', () => {
     }
   }
 
-  it('事前アップロードは一時領域を要求し、タグ付きで PUT する', async () => {
+  it('事前アップロードは一時領域を要求し、タグのヘッダは送らない', async () => {
     mockUpload(TEMP_KEY);
 
     const { result } = renderHook(() => useImageUpload());
@@ -246,10 +246,10 @@ describe('useImageUpload - 一時領域からの引き取り', () => {
         variables: expect.objectContaining({ temporary: true }),
       }),
     );
-    // 署名にタグが含まれるため、PUT でも同じ値を送らないと 403 になる。
-    // 値は自前で組み立てず、サーバーが返したものをそのまま使う
+    // タグは署名済み URL のクエリに入っている。ヘッダで送るとクエリとの
+    // 二重指定になり、S3 が 403 を返してアップロードが全部失敗する
     const [, putInit] = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(putInit.headers['x-amz-tagging']).toBe('lifecycle=temporary');
+    expect(putInit.headers['x-amz-tagging']).toBeUndefined();
   });
 
   it('保存時に一時領域のキーを正式な場所へ複製して返す', async () => {

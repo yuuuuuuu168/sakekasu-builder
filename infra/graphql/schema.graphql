@@ -70,9 +70,9 @@ type DrinkingRecordConnection {
 type PresignedUrlResponse {
   uploadUrl: String!
   key: String!
-  # 一時領域へのアップロードで PUT に付ける x-amz-tagging の値。
-  # 署名に含まれるため、クライアントは同じ値を送らないと 403 になる。
-  # 定数を両側に持つとドリフトで全アップロードが止まるので、署名した側が返す
+  # この URL で付与されるタグ（一時領域以外では null）。参考情報。
+  # タグは署名済み URL のクエリに入るため、クライアントはヘッダで送らないこと
+  # （送ると二重指定になり S3 が 403 を返す）
   taggingHeader: String
 }
 

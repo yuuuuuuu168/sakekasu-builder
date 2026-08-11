@@ -201,8 +201,10 @@ export function useImageUpload(): UseImageUploadReturn {
   /**
    * S3 へ1ファイルを PUT してキーを返す。
    *
-   * temporary を立てると記録に紐づく前の一時領域へ置く。サーバー側が署名に
-   * タグを含めるため、同じ値を x-amz-tagging で送らないと 403 になる
+   * temporary を立てると記録に紐づく前の一時領域へ置く。付与するタグは
+   * 署名済み URL のクエリ（`x-amz-tagging`）に入っているので、こちらから
+   * ヘッダで送ってはいけない。送るとクエリとヘッダの二重指定になり、
+   * S3 が 403 SignatureDoesNotMatch を返してアップロードが全部失敗する
    */
   const putToS3 = async (
     file: File,
@@ -231,26 +233,14 @@ export function useImageUpload(): UseImageUploadReturn {
       return null;
     }
 
-    const { uploadUrl, key, taggingHeader } = (
-      result as {
-        data: {
-          generateUploadUrl: {
-            uploadUrl: string;
-            key: string;
-            taggingHeader: string | null;
-          };
-        };
-      }
+    const { uploadUrl, key } = (
+      result as { data: { generateUploadUrl: { uploadUrl: string; key: string } } }
     ).data.generateUploadUrl;
 
+    // タグは uploadUrl のクエリに含まれている。ここでヘッダを足さないこと
     const uploadResponse = await fetch(uploadUrl, {
       method: 'PUT',
-      headers: {
-        'Content-Type': file.type,
-        // タグは署名に含まれる。値を自前で組み立てるとサーバー側と食い違って
-        // 403 になるため、署名した側が返したものをそのまま送る
-        ...(taggingHeader ? { 'x-amz-tagging': taggingHeader } : {}),
-      },
+      headers: { 'Content-Type': file.type },
       body: file,
     });
 
