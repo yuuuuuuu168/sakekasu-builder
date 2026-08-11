@@ -43,14 +43,23 @@ function ratingToValue(rating: RatingFilter): string {
   return String(rating);
 }
 
+function valueToRating(value: string): RatingFilter {
+  return value === 'all' ? 'all' : (Number(value) as RatingFilter);
+}
+
 /**
- * Select の値を評価フィルタへ戻す。
+ * 選択が外れたとき（null）は何もしない。
  *
- * onValueChange は選択が外れたときに null を渡してくる。数値へ変換すると
- * NaN になって絞り込みが空になるため、「すべて」として扱う
+ * base-ui の Select は、選ばれている項目をもう一度押すと解除として null を
+ * 渡してくる。そのまま絞り込みへ入れると、どの条件にも一致しなくなって
+ * 記録が1件も出なくなる。解除は「操作なし」として扱い、今の絞り込みを残す
  */
-function valueToRating(value: string | null): RatingFilter {
-  return value === null || value === 'all' ? 'all' : (Number(value) as RatingFilter);
+function onlyWhenSelected<T>(handler: (value: T) => void) {
+  return (value: string | null) => {
+    if (value !== null) {
+      handler(value as T);
+    }
+  };
 }
 
 export function FilterControls({
@@ -94,7 +103,7 @@ export function FilterControls({
           <label className="text-xs text-muted-foreground">記録種別</label>
           <Select
             value={recordType}
-            onValueChange={(val) => onRecordTypeChange(val as RecordTypeFilter)}
+            onValueChange={onlyWhenSelected<RecordTypeFilter>(onRecordTypeChange)}
           >
             <SelectTrigger
               className="w-full min-h-[44px] text-sm"
@@ -117,7 +126,7 @@ export function FilterControls({
           <label className="text-xs text-muted-foreground">カテゴリ</label>
           <Select
             value={category}
-            onValueChange={(val) => onCategoryChange(val as CategoryFilter)}
+            onValueChange={onlyWhenSelected<CategoryFilter>(onCategoryChange)}
           >
             <SelectTrigger
               className="w-full min-h-[44px] text-sm"
@@ -140,7 +149,7 @@ export function FilterControls({
           <label className="text-xs text-muted-foreground">飲みきり</label>
           <Select
             value={drinkingStatusFilter}
-            onValueChange={(val) => onDrinkingStatusChange(val as DrinkingStatusFilter)}
+            onValueChange={onlyWhenSelected<DrinkingStatusFilter>(onDrinkingStatusChange)}
           >
             <SelectTrigger
               className="w-full min-h-[44px] text-sm"
@@ -163,7 +172,7 @@ export function FilterControls({
           <label className="text-xs text-muted-foreground">評価</label>
           <Select
             value={ratingToValue(ratingFilter)}
-            onValueChange={(val) => onRatingChange(valueToRating(val))}
+            onValueChange={onlyWhenSelected<string>((val) => onRatingChange(valueToRating(val)))}
           >
             <SelectTrigger
               className="w-full min-h-[44px] text-sm"
@@ -186,7 +195,7 @@ export function FilterControls({
           <label className="text-xs text-muted-foreground">並び替え</label>
           <Select
             value={sortOption}
-            onValueChange={(val) => onSortChange(val as SortOption)}
+            onValueChange={onlyWhenSelected<SortOption>(onSortChange)}
           >
             <SelectTrigger
               className="w-full min-h-[44px] text-sm"
