@@ -34,9 +34,30 @@ export function validateImageFile(file: File): ValidationResult {
     };
   }
 
-  // サムネイルは原画と同じ場所に `thumb_` を付けたキーで置く決まりなので、
-  // この名前で始まる画像を一緒に上げると、片方のサムネイルを原画が上書きする。
-  // 一覧が原寸を読み続ける状態になり、しかも見た目には分からない
+  return {
+    valid: true,
+    error: null,
+  };
+}
+
+/**
+ * 記録に添付する画像のバリデーション。
+ *
+ * 形式の判定に加えて、サムネイルのために予約しているファイル名を弾く。
+ * サムネイルは原画と同じ場所に `thumb_` を付けたキーで置くので、この名前で
+ * 始まる画像を一緒に上げると、片方のサムネイルを原画が上書きする。
+ * 一覧が原寸を読み続ける状態になり、しかも見た目には分からない。
+ *
+ * ソムリエの相談に添える画像は S3 のキーにならないため、この検証は通さない。
+ * 共通の validateImageFile に入れると、`thumb_旅行.jpg` のような普通の
+ * ファイル名が相談にも使えなくなる（PR #144 のレビュー指摘）
+ */
+export function validateRecordImageFile(file: File): ValidationResult {
+  const base = validateImageFile(file);
+  if (!base.valid) {
+    return base;
+  }
+
   if (file.name.startsWith(THUMBNAIL_PREFIX)) {
     return {
       valid: false,

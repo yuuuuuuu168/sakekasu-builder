@@ -11,7 +11,7 @@ vi.mock('aws-amplify/api', () => ({
 }));
 
 vi.mock('../utils/imageValidator', () => ({
-  validateImageFile: mockValidate,
+  validateRecordImageFile: mockValidate,
 }));
 
 vi.mock('../utils/imageCompressor', () => ({
@@ -367,6 +367,88 @@ describe('useImageUpload - 品質低下の警告', () => {
 
     // 縮小もサムネイルも無い方が状態が悪いので、そちらを出す
     expect(result.current.warning).toContain('原寸のまま保存される');
+  });
+
+  // 配列の範囲外へ代入すると穴が空き、undefined が警告として画面に出る
+  // （PR #144 の 2 巡目レビュー指摘）
+  it('選択が解除された画像の位置には警告を書かない', async () => {
+    mockCreateThumbnail.mockRejectedValue(new Error('生成できません'));
+    mockGraphql.mockResolvedValueOnce({
+      data: { generateUploadUrl: { uploadUrl: 'https://s3.example/k', key: 'k' } },
+    });
+    (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true });
+
+    const { result } = renderHook(() => useImageUpload());
+
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('a.jpg'));
+    });
+
+    await act(async () => {
+      // アップロードの最中に画像が消えた状況を作る
+      const upload = result.current.uploadImages('purchase', 'rec-1');
+      result.current.clearImage();
+      await upload;
+    });
+
+    // "undefined" が警告として表示されてはいけない
+    expect(result.current.warning).toBeNull();
+  });
+
+  it('setImageFile でも警告の並びを揃える', async () => {
+    mockCompress.mockImplementation(async (file: File) => ({
+      file,
+      originalSize: file.size,
+      compressedSize: file.size,
+      wasCompressed: false,
+      wasReadable: false,
+    }));
+
+    const { result } = renderHook(() => useImageUpload());
+
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('unreadable.jpg'));
+    });
+    expect(result.current.warning).not.toBeNull();
+
+    // 後方互換の入口。ここで揃えないと画像が無いのに警告だけ残る
+    await act(async () => {
+      result.current.setImageFile(null);
+    });
+
+    expect(result.current.imageFiles).toHaveLength(0);
+    expect(result.current.warning).toBeNull();
+  });
+
+  it('アップロード中は画像を外せない（警告の位置がずれるため）', async () => {
+    mockGraphql.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve({
+                data: { generateUploadUrl: { uploadUrl: 'https://s3.example/k', key: 'k' } },
+              }),
+            20,
+          );
+        }),
+    );
+    (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+
+    const { result } = renderHook(() => useImageUpload());
+
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('a.jpg'));
+    });
+
+    await act(async () => {
+      const upload = result.current.uploadImages('purchase', 'rec-1');
+      // アップロード中の削除は無視される
+      result.current.removeImage(0);
+      await upload;
+    });
+
+    expect(result.current.imageFiles).toHaveLength(1);
   });
 
   it('画像をすべて外すと警告も消える', async () => {
