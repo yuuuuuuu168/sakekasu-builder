@@ -20,6 +20,7 @@ import {
 import { clearMessages } from '@/features/sommelier/lib/chatStorage';
 import { resetSommelierSession } from '@/features/sommelier/lib/runtimeSend';
 import { clearFilterState } from '@/features/records/lib/filterStorage';
+import { clearDownloadUrlCache } from '@/features/image/lib/downloadUrlCache';
 
 /** 認証済みユーザーの型 */
 export interface AuthUser {
@@ -134,6 +135,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearFilterState(user.userId);
     }
     resetSommelierSession();
+    // 画像の Presigned URL はメモリ上に最大 50 分残る。リロードを挟まずに
+    // 次の利用者がサインインすると、前の利用者のキーで要求された URL が
+    // キャッシュから返ってしまうため、ここで捨てる
+    clearDownloadUrlCache();
 
     await amplifySignOut();
 

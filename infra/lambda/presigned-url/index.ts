@@ -31,9 +31,11 @@ interface AppSyncEvent {
     imageKey?: string;
     imageKeys?: string[];
   };
-  identity: {
-    sub: string;
-  };
+  // AppSync は USER_POOL 認証を既定にしているが、直接呼び出しや別の認証方式の
+  // 経路では identity が入らないことがある。型でも入らない前提にしておく
+  identity?: {
+    sub?: string;
+  } | null;
   source?: {
     imageKey?: string | null;
     imageKeys?: string[] | null;
@@ -62,9 +64,27 @@ export async function handler(event: AppSyncEvent): Promise<UploadUrlResponse | 
   }
 }
 
+/**
+ * リクエスト元の sub を取り出す。identity が無い呼び出しは弾く。
+ *
+ * キーの所有者チェックは `${ownerSub}/` の前方一致で行うため、sub が
+ * 空文字のまま通ると `/` で始まる任意のキーが一致してしまう。
+ * identity が落ちる経路（直接呼び出しなど）でも素の TypeError にせず、
+ * 認可エラーとして扱う
+ */
+function requireOwnerSub(event: AppSyncEvent): string {
+  const ownerSub = event.identity?.sub;
+
+  if (!ownerSub) {
+    throw new Error('Unauthorized: missing identity');
+  }
+
+  return ownerSub;
+}
+
 async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse> {
   const { recordType, recordId, contentType, fileName } = event.arguments;
-  const ownerSub = event.identity.sub;
+  const ownerSub = requireOwnerSub(event);
 
   if (!recordType || !recordId || !contentType || !fileName) {
     throw new Error('Missing required arguments: recordType, recordId, contentType, fileName');
@@ -108,7 +128,7 @@ async function signDownloadUrl(key: string, ownerSub: string): Promise<string> {
 
 async function getDownloadUrl(event: AppSyncEvent): Promise<string> {
   const { key } = event.arguments;
-  const ownerSub = event.identity.sub;
+  const ownerSub = requireOwnerSub(event);
 
   if (!key) {
     throw new Error('Missing required argument: key');
@@ -126,7 +146,7 @@ async function getDownloadUrl(event: AppSyncEvent): Promise<string> {
  */
 async function getDownloadUrls(event: AppSyncEvent): Promise<string[]> {
   const { keys } = event.arguments;
-  const ownerSub = event.identity.sub;
+  const ownerSub = requireOwnerSub(event);
 
   if (!keys) {
     throw new Error('Missing required argument: keys');

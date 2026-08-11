@@ -44,6 +44,19 @@ async function callGetDownloadUrls(keys: string[], sub = OWNER): Promise<string[
   return result as string[];
 }
 
+/** identity を差し替えて呼ぶ（認証情報が落ちた経路の再現） */
+async function callWithIdentity(
+  fieldName: string,
+  args: Record<string, unknown>,
+  identity: unknown,
+): Promise<unknown> {
+  return handler({
+    info: { fieldName },
+    arguments: args,
+    identity,
+  } as Parameters<typeof handler>[0]);
+}
+
 describe('getDownloadUrls', () => {
   beforeEach(() => {
     getSignedUrlMock.mockReset();
@@ -102,6 +115,44 @@ describe('getDownloadUrls', () => {
     const keys = Array.from({ length: 100 }, (_, i) => `${OWNER}/purchase/rec-1/${i}.jpg`);
 
     expect(await callGetDownloadUrls(keys)).toHaveLength(100);
+  });
+
+  // AppSync は USER_POOL 認証を既定にしているが、直接呼び出しなど identity が
+  // 入らない経路がありうる。素の TypeError にせず認可エラーとして落とす
+  it.each([
+    ['identity が null', null],
+    ['identity が undefined', undefined],
+    ['sub が空', { sub: '' }],
+    ['sub が無い', {}],
+  ])('%s の場合は認可エラーにする', async (_label, identity) => {
+    await expect(
+      callWithIdentity('getDownloadUrls', { keys: [`${OWNER}/purchase/rec-1/a.jpg`] }, identity),
+    ).rejects.toThrow('Unauthorized: missing identity');
+    expect(getSignedUrlMock).not.toHaveBeenCalled();
+  });
+
+  // sub が空文字のまま通ると、所有者チェックが startsWith('/') に落ちて
+  // 「/」で始まる任意のキーに署名できてしまう
+  it('sub が空のとき、スラッシュ始まりのキーで素通りしない', async () => {
+    await expect(
+      callWithIdentity('getDownloadUrls', { keys: ['/purchase/rec-1/a.jpg'] }, { sub: '' }),
+    ).rejects.toThrow('Unauthorized: missing identity');
+    expect(getSignedUrlMock).not.toHaveBeenCalled();
+  });
+
+  // 単体版・アップロード側も同じ経路で落ちる（同じ穴を残さない）
+  it.each([
+    ['getDownloadUrl', { key: '/purchase/rec-1/a.jpg' }],
+    ['generateUploadUrl', {
+      recordType: 'purchase',
+      recordId: 'rec-1',
+      contentType: 'image/jpeg',
+      fileName: 'a.jpg',
+    }],
+  ])('%s も identity が無ければ認可エラーにする', async (fieldName, args) => {
+    await expect(callWithIdentity(fieldName, args, null)).rejects.toThrow(
+      'Unauthorized: missing identity',
+    );
   });
 
   // 単体版も残す（後方互換）。まとめ版と同じ所有者チェックが効くこと
