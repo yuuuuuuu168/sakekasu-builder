@@ -105,8 +105,17 @@ describe('ApiStack', () => {
 
   // Requirements 3.5, 4.6: AppSync リゾルバーが存在する
   it('AppSync リゾルバーが存在する', () => {
-    // CRUD 13本 + markPurchaseOpened
-    template.resourceCountIs('AWS::AppSync::Resolver', 14);
+    // CRUD 13本 + markPurchaseOpened + getDownloadUrls
+    template.resourceCountIs('AWS::AppSync::Resolver', 15);
+  });
+
+  // 一覧は画像の数だけ URL を要求する。1件ずつ Lambda を呼ぶと同時実行枠を
+  // 使い切ってスロットリングされ、URL を取れなかった記録の画像が出なくなる
+  it('画像 URL をまとめて取る getDownloadUrls リゾルバーがある', () => {
+    template.hasResourceProperties('AWS::AppSync::Resolver', {
+      TypeName: 'Query',
+      FieldName: 'getDownloadUrls',
+    });
   });
 
   // 在庫からの開封は未開封のときだけ更新する（openedAt の上書き防止）

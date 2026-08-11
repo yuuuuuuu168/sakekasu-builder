@@ -98,7 +98,13 @@ type Query {
   listPurchaseRecords(limit: Int, nextToken: String): PurchaseRecordConnection!
   getDrinkingRecord(id: ID!): DrinkingRecord
   listDrinkingRecords(limit: Int, nextToken: String): DrinkingRecordConnection!
+  # 単体版。フロントは getDownloadUrls を使うが、デプロイ前後で古い
+  # フロントが動くため残してある
   getDownloadUrl(key: String!): String!
+  # 一覧表示では画像の数だけ getDownloadUrl を呼ぶことになり、Lambda の
+  # 同時実行枠を使い切って大半がスロットリングされていた。まとめて署名して
+  # 1 回の呼び出しで返す。戻りの順序は keys と一対一で対応する
+  getDownloadUrls(keys: [String!]!): [String!]!
 }
 
 # ミューテーション

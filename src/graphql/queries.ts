@@ -92,8 +92,11 @@ export const listDrinkingRecords = /* GraphQL */ `
   }
 `;
 
-export const getDownloadUrl = /* GraphQL */ `
-  query GetDownloadUrl($key: String!) {
-    getDownloadUrl(key: $key)
+// 画像 URL は 1 件ずつではなくまとめて取る。1 件ずつ投げると一覧で画像の数だけ
+// Lambda を呼ぶことになり、同時実行枠を使い切ってスロットリングされる。
+// 単体版（getDownloadUrl）はサーバー側に残してあるが、フロントからは使わない
+export const getDownloadUrls = /* GraphQL */ `
+  query GetDownloadUrls($keys: [String!]!) {
+    getDownloadUrls(keys: $keys)
   }
 `;

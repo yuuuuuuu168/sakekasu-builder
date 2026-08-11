@@ -20,6 +20,7 @@ import {
 import { clearMessages } from '@/features/sommelier/lib/chatStorage';
 import { resetSommelierSession } from '@/features/sommelier/lib/runtimeSend';
 import { clearFilterState } from '@/features/records/lib/filterStorage';
+import { clearDownloadUrlCache } from '@/features/image/lib/downloadUrlCache';
 
 /** 認証済みユーザーの型 */
 export interface AuthUser {
@@ -134,15 +135,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearFilterState(user.userId);
     }
     resetSommelierSession();
+    // 画像の Presigned URL はメモリ上に最大 50 分残る。リロードを挟まずに
+    // 次の利用者がサインインすると、前の利用者のキーで要求された URL が
+    // キャッシュから返ってしまうため、ここで捨てる
+    clearDownloadUrlCache();
 
-    await amplifySignOut();
-
-    // 絞り込み条件は画面側が effect で保存し続けるため、上の通信を待つ間に
-    // 書き戻されることがある。画面を落とす直前にもう一度消す（削除は冪等）
-    if (user) {
-      clearFilterState(user.userId);
+    try {
+      await amplifySignOut();
+    } finally {
+      // 上の通信を待つ間に書き戻されたものを、画面を落とす直前にもう一度消す。
+      // 絞り込み条件は画面側の effect が、相談履歴は進行中の応答が確定時に、
+      // 画像 URL は表示中のカードが、それぞれ書き戻しうる（いずれも冪等）。
+      //
+      // finally に置くのは、サインアウトの通信が失敗しても端末にデータを
+      // 残さないため。ここを飛ばすと、利用者はサインアウトしたつもりなのに
+      // 画面はサインイン状態のまま、データも残るという最悪の形になる
+      if (user) {
+        clearMessages(user.userId);
+        clearFilterState(user.userId);
+      }
+      clearDownloadUrlCache();
+      // セッション ID は次のリクエストが来た時点で作り直されて残るため、
+      // 通信を待つ間に相談が走ると次の利用者へ引き継がれてしまう。
+      // Runtime 側の会話文脈が混ざらないよう、ここでも切り替える
+      resetSommelierSession();
+      setUser(null);
     }
-    setUser(null);
   }, [user]);
 
   const value: AuthContextValue = {
