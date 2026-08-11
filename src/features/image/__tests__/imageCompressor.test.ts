@@ -181,6 +181,9 @@ describe('compressImage', () => {
 
       expect(result.wasCompressed).toBe(false);
       expect(result.file).toBe(file);
+      // 保存は通すが、読めなかったことは呼び出し側に伝える。
+      // 黙って通すとサムネイルも作れないまま原画が一覧で読まれ続ける（Issue #137）
+      expect(result.wasReadable).toBe(false);
     },
   );
 
@@ -189,6 +192,26 @@ describe('compressImage', () => {
     const file = createDummyFile(5 * MB + 1);
 
     await expect(compressImage(file)).rejects.toThrow('画像の読み込みに失敗しました');
+  });
+
+  it('読み込めた画像は wasReadable: true を返す', async () => {
+    setupBrowserMocks({ blobSize: 1 * MB });
+    const file = createDummyFile(1 * MB);
+
+    const result = await compressImage(file);
+
+    expect(result.wasReadable).toBe(true);
+  });
+
+  it('縮小して返す場合も wasReadable: true を返す', async () => {
+    // 再エンコード後が元より小さくならないと元ファイルが使われるので、差を付ける
+    setupBrowserMocks({ blobSize: 0.5 * MB, imgWidth: 4000, imgHeight: 3000 });
+    const file = createDummyFile(3 * MB);
+
+    const result = await compressImage(file);
+
+    expect(result.wasCompressed).toBe(true);
+    expect(result.wasReadable).toBe(true);
   });
 });
 

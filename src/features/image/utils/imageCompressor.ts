@@ -67,6 +67,14 @@ export interface CompressionResult {
   originalSize: number;
   compressedSize: number;
   wasCompressed: boolean;
+  /**
+   * 画像として読み込めたか。
+   *
+   * 読めなかったファイルは縮小もサムネイル生成もできないまま原本が保存される。
+   * 表示は原画へのフォールバックで成立してしまうため、呼び出し側が伝えないと
+   * 誰も気づけない。実際に Issue #137 では、この状態が 4 ヶ月続いていた
+   */
+  wasReadable: boolean;
 }
 
 /** 読み込んだ画像。描画元と実寸を、読み込み方法によらず同じ形で扱う */
@@ -235,6 +243,7 @@ export async function compressImage(file: File): Promise<CompressionResult> {
         originalSize,
         compressedSize: originalSize,
         wasCompressed: false,
+        wasReadable: false,
       };
     }
     throw error instanceof Error
@@ -252,6 +261,7 @@ export async function compressImage(file: File): Promise<CompressionResult> {
       originalSize,
       compressedSize: originalSize,
       wasCompressed: false,
+      wasReadable: true,
     };
   }
 
@@ -268,6 +278,7 @@ export async function compressImage(file: File): Promise<CompressionResult> {
             originalSize,
             compressedSize: originalSize,
             wasCompressed: false,
+            wasReadable: true,
           };
         }
         const compressedFile = new File([blob], file.name, {
@@ -278,6 +289,7 @@ export async function compressImage(file: File): Promise<CompressionResult> {
           originalSize,
           compressedSize: compressedFile.size,
           wasCompressed: true,
+          wasReadable: true,
         };
       }
     }
@@ -293,6 +305,7 @@ export async function compressImage(file: File): Promise<CompressionResult> {
         originalSize,
         compressedSize: compressedFile.size,
         wasCompressed: true,
+        wasReadable: true,
       };
     }
 
@@ -311,6 +324,7 @@ export async function compressImage(file: File): Promise<CompressionResult> {
           originalSize,
           compressedSize: compressedFile.size,
           wasCompressed: true,
+          wasReadable: true,
         };
       }
     }
