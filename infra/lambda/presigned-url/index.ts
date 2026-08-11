@@ -50,6 +50,8 @@ interface AppSyncEvent {
     contentType?: string;
     fileName?: string;
     temporary?: boolean;
+    /** 原画ではなくその一覧用サムネイルを置く。キーは fileName から導出する */
+    thumbnail?: boolean;
     key?: string;
     keys?: string[];
     sourceKeys?: string[];
@@ -158,8 +160,27 @@ function assertFileName(fileName: string): void {
   }
 }
 
+/**
+ * これから新しく置く原画のファイル名を検証する。
+ *
+ * `thumb_` は原画から導出するサムネイルのために予約している。この名前で
+ * 原画を上げられると、同じ記録にある別の画像のサムネイルを原寸で上書きでき、
+ * 一覧が静かに重くなる。サムネイル自身のキーはサーバー側で組み立てる。
+ *
+ * 複製（copyImages）には適用しない。既にこの名前で保存されている画像が
+ * あり、そちらは引き継げないと記録から写真が消える
+ */
+function assertNewUploadFileName(fileName: string): void {
+  assertFileName(fileName);
+
+  if (fileName.startsWith(THUMBNAIL_PREFIX)) {
+    throw new Error(`Invalid fileName: must not start with ${THUMBNAIL_PREFIX}`);
+  }
+}
+
 async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse> {
-  const { recordType, recordId, contentType, fileName, temporary } = event.arguments;
+  const { recordType, recordId, contentType, fileName, temporary, thumbnail } =
+    event.arguments;
   const ownerSub = requireOwnerSub(event);
 
   if (!recordType || !recordId || !contentType || !fileName) {
@@ -177,10 +198,13 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
   } else {
     assertRecordLocation(recordType, recordId);
   }
-  assertFileName(fileName);
+  assertNewUploadFileName(fileName);
 
   const location = temporary ? TEMP_LOCATION : recordType;
-  const key = `${ownerSub}/${location}/${recordId}/${fileName}`;
+  // サムネイルのキーはサーバー側で導出する。クライアントに `thumb_` 付きの
+  // 名前を組み立てさせると、原画の名前として送られたときに区別できない
+  const storedFileName = thumbnail ? `${THUMBNAIL_PREFIX}${fileName}` : fileName;
+  const key = `${ownerSub}/${location}/${recordId}/${storedFileName}`;
 
   const command = new PutObjectCommand({
     Bucket: BUCKET_NAME,

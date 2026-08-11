@@ -127,6 +127,9 @@ type Mutation {
     contentType: String!
     fileName: String!
     temporary: Boolean
+    # true なら一覧用サムネイルとして置く。キーは fileName から導出するため、
+    # 呼び出し側は原画と同じ名前を渡す（`thumb_` 付きの名前は原画として拒否される）
+    thumbnail: Boolean
   ): PresignedUrlResponse!
   # 複数画像（表・裏ラベルなど）を渡すと全画像を見て判定する。
   # additionalImageKeys は後方互換のための追加引数（省略時は imageKey のみ解析）

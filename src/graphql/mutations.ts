@@ -114,6 +114,7 @@ export const generateUploadUrl = /* GraphQL */ `
     $contentType: String!
     $fileName: String!
     $temporary: Boolean
+    $thumbnail: Boolean
   ) {
     generateUploadUrl(
       recordType: $recordType
@@ -121,6 +122,7 @@ export const generateUploadUrl = /* GraphQL */ `
       contentType: $contentType
       fileName: $fileName
       temporary: $temporary
+      thumbnail: $thumbnail
     ) {
       uploadUrl
       key

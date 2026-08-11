@@ -209,6 +209,8 @@ export function useImageUpload(): UseImageUploadReturn {
     recordType: string,
     recordId: string,
     temporary = false,
+    /** サムネイルとして置く場合の元画像のファイル名。キーはサーバー側が導出する */
+    thumbnailOf?: string,
   ): Promise<string | null> => {
     const result = await client.graphql({
       query: generateUploadUrl,
@@ -216,8 +218,11 @@ export function useImageUpload(): UseImageUploadReturn {
         recordType,
         recordId,
         contentType: file.type,
-        fileName: file.name,
+        // サムネイルでも原画の名前を送る。`thumb_` 付きの名前を送れる状態だと、
+        // サーバー側で原画とサムネイルを区別できない
+        fileName: thumbnailOf ?? file.name,
         temporary,
+        thumbnail: thumbnailOf !== undefined,
       },
     });
 
@@ -268,7 +273,9 @@ export function useImageUpload(): UseImageUploadReturn {
         file,
         toThumbnailFileName(file.name),
       );
-      return (await putToS3(thumbnail, recordType, recordId, temporary)) !== null;
+      return (
+        (await putToS3(thumbnail, recordType, recordId, temporary, file.name)) !== null
+      );
     } catch (err) {
       console.error('サムネイルの生成・アップロードに失敗しました:', err);
       return false;
