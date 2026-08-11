@@ -126,7 +126,8 @@ export const generateUploadUrl = /* GraphQL */ `
     ) {
       uploadUrl
       key
-      taggingHeader
+      # taggingHeader は要求しない。タグは署名済み URL のクエリに入っており、
+      # クライアントがヘッダで送ると二重指定で 403 になる（PR #147）
     }
   }
 `;
