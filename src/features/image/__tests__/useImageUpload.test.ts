@@ -267,6 +267,108 @@ describe('useImageUpload - 品質低下の警告', () => {
     expect(result.current.warning).toContain('縮小画像を作れませんでした');
   });
 
+  // 以下は PR #144 の Security Agent レビューで挙がった、警告が実態とずれる経路。
+  // 警告を 1 つの箱で上書きしていると、外した画像の警告が残ったり、
+  // 残っている画像の問題が消えたりする
+  it('警告を出した画像だけを外すと警告も消える', async () => {
+    mockCompress.mockImplementation(async (file: File) => ({
+      file,
+      originalSize: file.size,
+      compressedSize: file.size,
+      wasCompressed: false,
+      wasReadable: false,
+    }));
+
+    const { result } = renderHook(() => useImageUpload());
+
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('unreadable.jpg'));
+    });
+    expect(result.current.warning).not.toBeNull();
+
+    await act(async () => {
+      result.current.removeImage(0);
+    });
+
+    expect(result.current.warning).toBeNull();
+  });
+
+  it('読めない画像を残したまま別の画像を足しても警告は消えない', async () => {
+    mockCompress.mockImplementationOnce(async (file: File) => ({
+      file,
+      originalSize: file.size,
+      compressedSize: file.size,
+      wasCompressed: false,
+      wasReadable: false,
+    }));
+
+    const { result } = renderHook(() => useImageUpload());
+
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('unreadable.jpg'));
+    });
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('good.jpg'));
+    });
+
+    // 1 枚目が読めない事実は、2 枚目を足しても変わらない
+    expect(result.current.warning).toContain('原寸のまま保存される');
+  });
+
+  it('2 枚のうち片方だけ読めない場合、その画像を外せば警告が消える', async () => {
+    mockCompress.mockImplementationOnce(async (file: File) => ({
+      file,
+      originalSize: file.size,
+      compressedSize: file.size,
+      wasCompressed: false,
+      wasReadable: false,
+    }));
+
+    const { result } = renderHook(() => useImageUpload());
+
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('unreadable.jpg'));
+    });
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('good.jpg'));
+    });
+
+    await act(async () => {
+      result.current.removeImage(0);
+    });
+
+    expect(result.current.imageFiles).toHaveLength(1);
+    expect(result.current.warning).toBeNull();
+  });
+
+  it('読み込み失敗の警告はサムネイル失敗の警告に上書きされない', async () => {
+    mockCompress.mockImplementation(async (file: File) => ({
+      file,
+      originalSize: file.size,
+      compressedSize: file.size,
+      wasCompressed: false,
+      wasReadable: false,
+    }));
+    // 読めない画像はサムネイルも作れないので、両方の失敗が同時に起きる
+    mockCreateThumbnail.mockRejectedValue(new Error('読み込めません'));
+    mockGraphql.mockResolvedValueOnce({
+      data: { generateUploadUrl: { uploadUrl: 'https://s3.example/k', key: 'k' } },
+    });
+    (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true });
+
+    const { result } = renderHook(() => useImageUpload());
+
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('a.jpg'));
+    });
+    await act(async () => {
+      await result.current.uploadImages('purchase', 'rec-1');
+    });
+
+    // 縮小もサムネイルも無い方が状態が悪いので、そちらを出す
+    expect(result.current.warning).toContain('原寸のまま保存される');
+  });
+
   it('画像をすべて外すと警告も消える', async () => {
     mockCompress.mockImplementation(async (file: File) => ({
       file,

@@ -3,6 +3,8 @@
  * アップロード可能なファイル形式を JPEG / PNG に限定する
  */
 
+import { THUMBNAIL_PREFIX } from '../lib/thumbnailKey';
+
 export interface ValidationResult {
   valid: boolean;
   error: string | null;
@@ -29,6 +31,16 @@ export function validateImageFile(file: File): ValidationResult {
     return {
       valid: false,
       error: 'JPEG または PNG 形式の画像を選択してください',
+    };
+  }
+
+  // サムネイルは原画と同じ場所に `thumb_` を付けたキーで置く決まりなので、
+  // この名前で始まる画像を一緒に上げると、片方のサムネイルを原画が上書きする。
+  // 一覧が原寸を読み続ける状態になり、しかも見た目には分からない
+  if (file.name.startsWith(THUMBNAIL_PREFIX)) {
+    return {
+      valid: false,
+      error: `「${THUMBNAIL_PREFIX}」で始まるファイル名は使えません。名前を変えて選び直してください`,
     };
   }
 

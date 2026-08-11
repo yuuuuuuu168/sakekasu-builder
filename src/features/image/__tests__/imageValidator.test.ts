@@ -43,4 +43,26 @@ describe('validateImageFile', () => {
     expect(result.valid).toBe(false);
     expect(result.error).toBe('JPEG または PNG 形式の画像を選択してください');
   });
+
+  // サムネイルは原画と同じ場所に thumb_ を付けたキーで置く。同じ記録に
+  // photo.jpg と thumb_photo.jpg を入れると、後者の原画が前者のサムネイルを
+  // 上書きし、一覧が静かに原寸を読み続ける（PR #144 のレビュー指摘）
+  describe('サムネイルの予約プレフィックス', () => {
+    it('thumb_ で始まるファイル名を拒否する', () => {
+      const file = new File(['dummy'], 'thumb_photo.jpg', { type: 'image/jpeg' });
+      const result = validateImageFile(file);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('thumb_');
+    });
+
+    it('名前の途中に thumb_ があるだけなら通す', () => {
+      const file = new File(['dummy'], 'my_thumb_photo.jpg', { type: 'image/jpeg' });
+      expect(validateImageFile(file).valid).toBe(true);
+    });
+
+    it('thumb（アンダースコア無し）で始まる名前は通す', () => {
+      const file = new File(['dummy'], 'thumbnail.jpg', { type: 'image/jpeg' });
+      expect(validateImageFile(file).valid).toBe(true);
+    });
+  });
 });
