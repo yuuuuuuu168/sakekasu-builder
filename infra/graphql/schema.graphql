@@ -70,6 +70,10 @@ type DrinkingRecordConnection {
 type PresignedUrlResponse {
   uploadUrl: String!
   key: String!
+  # 一時領域へのアップロードで PUT に付ける x-amz-tagging の値。
+  # 署名に含まれるため、クライアントは同じ値を送らないと 403 になる。
+  # 定数を両側に持つとドリフトで全アップロードが止まるので、署名した側が返す
+  taggingHeader: String
 }
 
 # OCR 項目ごとの確信度（0.0〜1.0）。低確信の項目はフォーム側で「要確認」表示に使う
@@ -118,11 +122,18 @@ type Mutation {
   createDrinkingRecord(input: CreateDrinkingRecordInput!): DrinkingRecord
   updateDrinkingRecord(input: UpdateDrinkingRecordInput!): DrinkingRecord
   deleteDrinkingRecord(id: ID!): DrinkingRecord
+  # temporary: true は OCR の事前アップロード用。記録がまだ存在しない段階の
+  # 置き場（{sub}/tmp/{uploadId}/）へ保存し、S3 のライフサイクルで自動削除する。
+  # 保存時に copyImages で正式な場所へ複製するまでが一連の流れ
   generateUploadUrl(
     recordType: String!
     recordId: String!
     contentType: String!
     fileName: String!
+    temporary: Boolean
+    # true なら一覧用サムネイルとして置く。キーは fileName から導出するため、
+    # 呼び出し側は原画と同じ名前を渡す（`thumb_` 付きの名前は原画として拒否される）
+    thumbnail: Boolean
   ): PresignedUrlResponse!
   # 複数画像（表・裏ラベルなど）を渡すと全画像を見て判定する。
   # additionalImageKeys は後方互換のための追加引数（省略時は imageKey のみ解析）
@@ -146,7 +157,9 @@ input CreatePurchaseRecordInput {
   category: SakeCategory!
   memo: String
   imageKey: String
-  imageKeys: [String]
+  # 要素は非 null。[String] だと [null] を受け付けてしまい、
+  # リゾルバーの検証が null を触って実行時エラーになる
+  imageKeys: [String!]
   drinkingStatus: DrinkingStatus
 }
 
@@ -175,7 +188,8 @@ input CreateDrinkingRecordInput {
   rating: Int!
   memo: String
   imageKey: String
-  imageKeys: [String]
+  # 要素は非 null（CreatePurchaseRecordInput と同じ理由）
+  imageKeys: [String!]
   purchaseRecordId: ID
 }
 

@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
 import { LAMBDA_LOG_RETENTION } from './log-retention.js';
+import { TEMP_LOCATION, TEMP_TAG_KEY, TEMP_TAG_VALUE } from './image-constants.js';
 
 /**
  * Application Signals 用の OpenTelemetry レイヤー（Issue #86）。
@@ -249,6 +250,22 @@ export class ApiStack extends cdk.Stack {
       removalPolicy,
       // 画像の誤削除・誤上書きから復旧できるようにする
       versioned: true,
+      lifecycleRules: [
+        {
+          // OCR の事前アップロードは記録の作成前に走るため、フォームを保存せずに
+          // 離れたキーがどこからも参照されないまま残る。タブを閉じる経路まで
+          // 確実に捕まえるのは無理なので、置き場ごと期限付きにする（Issue #140）
+          id: 'expire-temporary-uploads',
+          enabled: true,
+          // プレフィックスは前方一致しか使えず、`{sub}` が利用者ごとに変わるため
+          // タグで対象を絞る。付与は presigned-url Lambda 側
+          tagFilters: { [TEMP_TAG_KEY]: TEMP_TAG_VALUE },
+          expiration: cdk.Duration.days(1),
+          // バージョニングが有効なので、現行バージョンを消しても旧版が残る。
+          // 併せて消さないと容量が減らない
+          noncurrentVersionExpiration: cdk.Duration.days(1),
+        },
+      ],
       cors: [
         {
           allowedOrigins: [
@@ -535,16 +552,36 @@ export function request(ctx) {
 
   // 画像キーは自分のものだけを受け付ける。
   // 他人のキーを書いた記録を作れると、その記録を削除したときに
-  // 削除パイプラインが他人の画像を消してしまう
+  // 削除パイプラインが他人の画像を消してしまう。
+  //
+  // あわせて一時領域（{sub}/tmp/...）のキーも拒否する。あちらは
+  // ライフサイクルで 1 日後に消えるため、記録に持たせると実体だけが
+  // 消えて画像の出ない記録が残る。フロントは保存前に正式な場所へ
+  // 複製しているが、API を直接叩けばその手順を飛ばせる（Issue #140）
   const prefix = ctx.identity.sub + '/';
-  if (input.imageKey && !input.imageKey.startsWith(prefix)) {
-    util.error('Unauthorized: imageKey must belong to the requester', 'Unauthorized');
+
+  // 自分のキーか。null 要素で落ちないよう、値の有無もここで見る
+  const isOwned = (key) => !!key && key.startsWith(prefix);
+
+  // 一時領域のキーはそのまま記録に入れられない
+  const rejectTemporary = (key) => {
+    if (key.split('/')[1] === '${TEMP_LOCATION}') {
+      util.error('Invalid imageKey: temporary keys cannot be stored in records', 'BadRequest');
+    }
+  };
+
+  if (input.imageKey) {
+    if (!isOwned(input.imageKey)) {
+      util.error('Unauthorized: imageKey must belong to the requester', 'Unauthorized');
+    }
+    rejectTemporary(input.imageKey);
   }
   if (input.imageKeys) {
     for (const key of input.imageKeys) {
-      if (!key.startsWith(prefix)) {
+      if (!isOwned(key)) {
         util.error('Unauthorized: imageKeys must belong to the requester', 'Unauthorized');
       }
+      rejectTemporary(key);
     }
   }
 

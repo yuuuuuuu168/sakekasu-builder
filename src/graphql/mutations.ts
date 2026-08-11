@@ -113,15 +113,20 @@ export const generateUploadUrl = /* GraphQL */ `
     $recordId: String!
     $contentType: String!
     $fileName: String!
+    $temporary: Boolean
+    $thumbnail: Boolean
   ) {
     generateUploadUrl(
       recordType: $recordType
       recordId: $recordId
       contentType: $contentType
       fileName: $fileName
+      temporary: $temporary
+      thumbnail: $thumbnail
     ) {
       uploadUrl
       key
+      taggingHeader
     }
   }
 `;

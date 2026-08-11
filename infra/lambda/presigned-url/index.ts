@@ -7,6 +7,10 @@ import {
   HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import {
+  TEMP_LOCATION,
+  TEMP_OBJECT_TAGGING,
+} from '../../lib/image-constants';
 
 const s3Client = new S3Client({});
 
@@ -45,6 +49,9 @@ interface AppSyncEvent {
     recordId?: string;
     contentType?: string;
     fileName?: string;
+    temporary?: boolean;
+    /** 原画ではなくその一覧用サムネイルを置く。キーは fileName から導出する */
+    thumbnail?: boolean;
     key?: string;
     keys?: string[];
     sourceKeys?: string[];
@@ -65,6 +72,14 @@ interface AppSyncEvent {
 interface UploadUrlResponse {
   uploadUrl: string;
   key: string;
+  /**
+   * 一時領域へのアップロードで PUT に付けるべき x-amz-tagging の値。
+   *
+   * タグは署名の対象なので、クライアントが違う値を送ると 403 になる。
+   * 同じ文字列を両側の定数として持つとドリフトに気づけないため、
+   * 署名した側がそのまま返す（一時領域以外では null）
+   */
+  taggingHeader: string | null;
 }
 
 /** そのキーがサムネイルを指しているか */
@@ -131,6 +146,16 @@ function assertRecordLocation(recordType: string, recordId: string): void {
     throw new Error(`Invalid recordType: ${recordType}`);
   }
 
+  assertRecordId(recordId);
+}
+
+/**
+ * キーの階層に使う ID を検証する。
+ *
+ * 一時領域は記録種別を持たない（まだどの記録のものか決まっていない）が、
+ * ID は同じくキーの階層に入るため検証は要る
+ */
+function assertRecordId(recordId: string): void {
   if (!RECORD_ID_PATTERN.test(recordId)) {
     throw new Error('Invalid recordId');
   }
@@ -143,8 +168,27 @@ function assertFileName(fileName: string): void {
   }
 }
 
+/**
+ * これから新しく置く原画のファイル名を検証する。
+ *
+ * `thumb_` は原画から導出するサムネイルのために予約している。この名前で
+ * 原画を上げられると、同じ記録にある別の画像のサムネイルを原寸で上書きでき、
+ * 一覧が静かに重くなる。サムネイル自身のキーはサーバー側で組み立てる。
+ *
+ * 複製（copyImages）には適用しない。既にこの名前で保存されている画像が
+ * あり、そちらは引き継げないと記録から写真が消える
+ */
+function assertNewUploadFileName(fileName: string): void {
+  assertFileName(fileName);
+
+  if (fileName.startsWith(THUMBNAIL_PREFIX)) {
+    throw new Error(`Invalid fileName: must not start with ${THUMBNAIL_PREFIX}`);
+  }
+}
+
 async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse> {
-  const { recordType, recordId, contentType, fileName } = event.arguments;
+  const { recordType, recordId, contentType, fileName, temporary, thumbnail } =
+    event.arguments;
   const ownerSub = requireOwnerSub(event);
 
   if (!recordType || !recordId || !contentType || !fileName) {
@@ -155,22 +199,35 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
     throw new Error(`Invalid contentType: ${contentType}. Allowed: ${ALLOWED_CONTENT_TYPES.join(', ')}`);
   }
 
-  assertRecordLocation(recordType, recordId);
-  assertFileName(fileName);
+  // 一時領域は記録がまだ無い段階の置き場なので、記録種別ではなく固定の区画に置く。
+  // 種別は呼び出し側の都合で渡ってくるが、キーには使わない
+  if (temporary) {
+    assertRecordId(recordId);
+  } else {
+    assertRecordLocation(recordType, recordId);
+  }
+  assertNewUploadFileName(fileName);
 
-  const key = `${ownerSub}/${recordType}/${recordId}/${fileName}`;
+  const location = temporary ? TEMP_LOCATION : recordType;
+  // サムネイルのキーはサーバー側で導出する。クライアントに `thumb_` 付きの
+  // 名前を組み立てさせると、原画の名前として送られたときに区別できない
+  const storedFileName = thumbnail ? `${THUMBNAIL_PREFIX}${fileName}` : fileName;
+  const key = `${ownerSub}/${location}/${recordId}/${storedFileName}`;
 
   const command = new PutObjectCommand({
     Bucket: BUCKET_NAME,
     Key: key,
     ContentType: contentType,
+    // タグはライフサイクルの削除条件。署名対象に入るため、クライアントは
+    // 同じ値を x-amz-tagging ヘッダで送る必要がある（送らなければ PUT が失敗する）
+    ...(temporary ? { Tagging: TEMP_OBJECT_TAGGING } : {}),
   });
 
   const uploadUrl = await getSignedUrl(s3Client, command, {
     expiresIn: UPLOAD_EXPIRY,
   });
 
-  return { uploadUrl, key };
+  return { uploadUrl, key, taggingHeader: temporary ? TEMP_OBJECT_TAGGING : null };
 }
 
 /** 1 件分のダウンロード用 Presigned URL を作る（所有者チェック込み） */
@@ -349,6 +406,10 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
         Bucket: BUCKET_NAME,
         Key: destination,
         CopySource: `${BUCKET_NAME}/${source}`,
+        // CopyObject の既定はタグの引き継ぎ。一時領域から複製すると
+        // 自動削除タグまで付いてきて、記録に紐づいた画像が 1 日で消える
+        TaggingDirective: 'REPLACE',
+        Tagging: '',
       }),
     );
     destinations.push(destination);
@@ -366,6 +427,10 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
           Bucket: BUCKET_NAME,
           Key: toThumbnailKey(destination),
           CopySource: `${BUCKET_NAME}/${sourceThumbnail}`,
+          // 原画と同じ理由でタグを落とす（サムネイルだけ 1 日で消えると
+          // 一覧が原画へフォールバックし、静かに重くなる）
+          TaggingDirective: 'REPLACE',
+          Tagging: '',
         }),
       );
     }
