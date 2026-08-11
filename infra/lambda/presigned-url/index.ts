@@ -67,6 +67,11 @@ interface UploadUrlResponse {
   key: string;
 }
 
+/** そのキーがサムネイルを指しているか */
+function isThumbnailKey(key: string): boolean {
+  return key.slice(key.lastIndexOf('/') + 1).startsWith(THUMBNAIL_PREFIX);
+}
+
 /** 原画キーから、その兄弟であるサムネイルキーを導出する（フロントと同じ規則） */
 function toThumbnailKey(key: string): string {
   const separatorIndex = key.lastIndexOf('/');
@@ -414,8 +419,13 @@ async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; ima
       // サムネイルは記録に保存されず原画から導出する兄弟キーなので、
       // 記録が持つキーだけを消すと消し残る（Issue #132）。
       // 未生成の記録もあるが、S3 は無いキーの削除もエラーにしないので
-      // 存在を確かめずにまとめて消す
-      const targets = [key, toThumbnailKey(key)];
+      // 存在を確かめずにまとめて消す。
+      //
+      // 記録が `thumb_` 始まりのキーを直接持っていることもある
+      // （アップロードのファイル名に使うことを禁じていないため）。
+      // そこへさらに導出をかけると thumb_thumb_... という在りもしない
+      // キーを消しにいき、成功ログだけが増える
+      const targets = isThumbnailKey(key) ? [key] : [key, toThumbnailKey(key)];
 
       await Promise.all(
         targets.map(async (target) => {
