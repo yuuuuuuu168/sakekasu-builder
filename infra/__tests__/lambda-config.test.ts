@@ -42,6 +42,15 @@ const EXPECTED_CDK_ENUM = 'NODEJS_22_X';
  */
 const EXPECTED_RETENTION_DAYS = 30;
 
+/**
+ * アカウントの Lambda 同時実行上限（2026-08-11 に 10 から引き上げ済み）。
+ * `aws lambda get-account-settings` の ConcurrentExecutions と揃える。
+ */
+const ACCOUNT_CONCURRENCY_LIMIT = 1000;
+
+/** AWS が要求する未予約枠の下限。予約の合計はこれを侵せない */
+const MIN_UNRESERVED_CONCURRENCY = 100;
+
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 const libDir = path.join(here, '../lib');
 
@@ -273,5 +282,34 @@ describe('Lambda のランタイム', () => {
     expect(functions, 'NodejsFunction が1つも見つからない（走査の誤りを疑う）').toBeGreaterThan(0);
     expect(files, `保持期間の指定が足りていない:\n${files.join('\n')}`).toEqual([]);
     expect(withRetention).toBe(functions);
+  });
+
+  // 予約済み同時実行数はアカウント単位で効く。1 スタックの中だけを見ても
+  // 全体は分からないので、ここで横断して合計する。
+  //
+  // AWS は未予約枠を 100 以上残すことを要求するため、合計が上限 −100 を
+  // 超えると apply で落ちる。別のスタックに予約を足したときに CI で気づける
+  // ようにしておく（予約の効果と付ける基準は api-stack.ts のコメントを参照）
+  it('全スタックの予約済み同時実行数の合計が未予約枠を 100 以上残す', () => {
+    const reservations: string[] = [];
+    let total = 0;
+
+    for (const [name, template] of Object.entries(templates)) {
+      const functions = template.findResources('AWS::Lambda::Function');
+      for (const [logicalId, fn] of Object.entries(functions)) {
+        const reserved = fn.Properties?.ReservedConcurrentExecutions;
+        if (typeof reserved === 'number') {
+          total += reserved;
+          reservations.push(`${name}/${logicalId}: ${reserved}`);
+        }
+      }
+    }
+
+    // 予約が全部消えても気づけるように、下限も見る
+    expect(reservations.length, '予約が1つも無い（設定漏れを疑う）').toBeGreaterThan(0);
+    expect(
+      total,
+      `予約の合計が多すぎる（アカウント上限 ${ACCOUNT_CONCURRENCY_LIMIT}）:\n${reservations.join('\n')}`,
+    ).toBeLessThanOrEqual(ACCOUNT_CONCURRENCY_LIMIT - MIN_UNRESERVED_CONCURRENCY);
   });
 });
