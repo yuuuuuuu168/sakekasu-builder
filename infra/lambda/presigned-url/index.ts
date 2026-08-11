@@ -411,28 +411,38 @@ async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; ima
 
   await Promise.all(
     keysToDelete.map(async (key) => {
-      try {
-        const command = new DeleteObjectCommand({
-          Bucket: BUCKET_NAME,
-          Key: key,
-        });
-        await s3Client.send(command);
-        console.log(JSON.stringify({
-          level: 'INFO',
-          action: 'deleteImage',
-          imageKey: withoutOwner(key, ownerSub),
-          result: 'success',
-        }));
-      } catch (error) {
-        hasFailure = true;
-        console.error(JSON.stringify({
-          level: 'ERROR',
-          action: 'deleteImage',
-          imageKey: withoutOwner(key, ownerSub),
-          result: 'failed',
-          error: error instanceof Error ? error.message : String(error),
-        }));
-      }
+      // サムネイルは記録に保存されず原画から導出する兄弟キーなので、
+      // 記録が持つキーだけを消すと消し残る（Issue #132）。
+      // 未生成の記録もあるが、S3 は無いキーの削除もエラーにしないので
+      // 存在を確かめずにまとめて消す
+      const targets = [key, toThumbnailKey(key)];
+
+      await Promise.all(
+        targets.map(async (target) => {
+          try {
+            const command = new DeleteObjectCommand({
+              Bucket: BUCKET_NAME,
+              Key: target,
+            });
+            await s3Client.send(command);
+            console.log(JSON.stringify({
+              level: 'INFO',
+              action: 'deleteImage',
+              imageKey: withoutOwner(target, ownerSub),
+              result: 'success',
+            }));
+          } catch (error) {
+            hasFailure = true;
+            console.error(JSON.stringify({
+              level: 'ERROR',
+              action: 'deleteImage',
+              imageKey: withoutOwner(target, ownerSub),
+              result: 'failed',
+              error: error instanceof Error ? error.message : String(error),
+            }));
+          }
+        })
+      );
     })
   );
 
