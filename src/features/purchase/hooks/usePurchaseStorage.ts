@@ -85,7 +85,9 @@ export function usePurchaseStorage(): UsePurchaseStorageReturn {
             memo: data.memo || null,
             // 画像を触らない更新では送らない。undefined を送ると
             // 既存のキーを消してしまう（更新式は渡されたフィールドだけを SET する）
-            ...(options?.imageKeys
+            // 空配列は送らない。サーバー側で弾かれるうえ、意味としても
+            // 「画像を触らない更新」と区別が付かない（create 側と揃える）
+            ...(options?.imageKeys?.length
               ? { imageKey: options.imageKey ?? null, imageKeys: options.imageKeys }
               : {}),
           },

@@ -5,6 +5,7 @@ import {
   DeleteObjectCommand,
   CopyObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
@@ -402,7 +403,22 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
     }
   }
 
+  // 複製先に既にあるファイル名を先に押さえる。押さえないと、同じ名前の画像を
+  // 後から追加したときに既存の実体を上書きしてしまう。記録は同じキーを指した
+  // まま中身だけ入れ替わるので、画面上は気づけない（Issue #142 で編集からの
+  // 追加ができるようになり、現実に起こりうる経路になった）
   const usedNames = new Set<string>();
+  const destinationPrefix = `${ownerSub}/${recordType}/${recordId}/`;
+  const existing = await s3Client.send(
+    new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: destinationPrefix }),
+  );
+  for (const object of existing.Contents ?? []) {
+    const name = object.Key?.slice(destinationPrefix.length);
+    if (name) {
+      usedNames.add(name);
+    }
+  }
+
   const destinations: string[] = [];
 
   for (const source of uniqueSources) {

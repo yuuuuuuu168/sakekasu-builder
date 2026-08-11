@@ -117,6 +117,20 @@ describe('ApiStack', () => {
         Code: Match.stringLikeRegexp('input.imageKeys.length > 5'),
       });
     });
+
+    // 空配列は truthy なのでループの検査を 1 度も通らないまま書き込まれ、
+    // 記録から画像への参照だけが消える（PR #146 の 3 巡目レビュー指摘）
+    it.each([
+      'createPurchaseRecord',
+      'createDrinkingRecord',
+      'updatePurchaseRecord',
+      'updateDrinkingRecord',
+    ])('%s リゾルバーが空の imageKeys を拒否する', (fieldName) => {
+      template.hasResourceProperties('AWS::AppSync::Resolver', {
+        FieldName: fieldName,
+        Code: Match.stringLikeRegexp('input.imageKeys.length === 0'),
+      });
+    });
   });
 
   // Issue #140: OCR の事前アップロードは記録の作成前に走るため、保存せず離れた
