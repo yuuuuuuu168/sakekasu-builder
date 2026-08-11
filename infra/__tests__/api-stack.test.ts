@@ -347,6 +347,29 @@ describe('ApiStack', () => {
     // ラッパーだけ指定してレイヤーに実体が無いと、関数は Runtime.ExitError で
     // 起動しなくなる。実際にこれで画像アップロードを全滅させた（PR #110）。
     //
+    // 1 回の呼び出しが Bedrock の課金につながるので、暴走したときの費用に
+    // 天井を置く。アカウント上限を上げたことで設定できるようになった（Issue #82 の続き）
+    it('OCR だけ同時実行の上限を切っている', () => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: 'dev-sakekasu-ocr-analyzer',
+        ReservedConcurrentExecutions: 20,
+      });
+    });
+
+    // 予約は上限と下限を兼ねる。伸びてほしい関数に付けると、
+    // 未予約プールを使えなくなって逆に頭打ちになる
+    it('画像 URL の発行には上限を切らない', () => {
+      const functions = template.findResources('AWS::Lambda::Function', {
+        Properties: { FunctionName: 'dev-sakekasu-presigned-url' },
+      });
+      const [presigned] = Object.values(functions);
+
+      expect(presigned.Properties.ReservedConcurrentExecutions).toBeUndefined();
+    });
+
+    // 予約の合計はアカウント単位で効くため、1 スタックだけ見ても足りない。
+    // 全スタックを合成する lambda-config.test.ts 側で見張っている
+
     // Node.js 向けの AWS 製レイヤーは2種類あり、起動ラッパーの名前が違う。
     // - AWSOpenTelemetryDistroJs（Application Signals 用）→ /opt/otel-instrument
     // - aws-otel-nodejs-amd64-ver-*（汎用 ADOT）        → /opt/otel-handler
