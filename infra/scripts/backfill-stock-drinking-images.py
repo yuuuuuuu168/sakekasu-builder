@@ -145,6 +145,12 @@ def main() -> int:
         if effective_image_keys(record):
             continue
 
+        # owner はキーの先頭に入る。空のまま組み立てると、どの利用者にも
+        # 属さない位置（/drinking/...）へ書き込むことになる
+        if not owner:
+            print(f"[skip] {name}: owner が無い記録")
+            continue
+
         purchase_id = record.get("purchaseRecordId", {}).get("S")
         if not purchase_id:
             continue
@@ -152,6 +158,14 @@ def main() -> int:
         purchase = purchases.get(purchase_id)
         if purchase is None:
             print(f"[skip] {name}: 紐づく購入記録 {purchase_id} が見つからない")
+            continue
+
+        # このスクリプトは全利用者のデータを読み書きできる権限で動く。
+        # purchaseRecordId が他人の記録を指していた場合に、他人の画像を
+        # コピーして別の利用者へ配ってしまわないよう持ち主を確かめる
+        purchase_owner = purchase.get("owner", {}).get("S")
+        if purchase_owner != owner:
+            print(f"[skip] {name}: 購入記録の持ち主が違う")
             continue
 
         source_keys = dedupe(effective_image_keys(purchase))
@@ -166,14 +180,16 @@ def main() -> int:
         new_keys: list[str] = []
 
         for source in source_keys:
-            file_name = unique_file_name(source.rpartition("/")[2], used_names)
-            dest = f"{owner}/drinking/{record_id}/{file_name}"
-            new_keys.append(dest)
-
+            # 複製できなかったキーを記録に書くと、実体の無い画像を
+            # 指したまま残る。存在を確かめてから採用する
             if not object_exists(s3, args.bucket, source):
                 print(f"  [!] 原画が S3 に無い: {source}")
                 missing_source += 1
                 continue
+
+            file_name = unique_file_name(source.rpartition("/")[2], used_names)
+            dest = f"{owner}/drinking/{record_id}/{file_name}"
+            new_keys.append(dest)
 
             print(f"  原画 {source.split('/', 2)[2]}")
             print(f"    → {dest.split('/', 2)[2]}")
@@ -204,6 +220,10 @@ def main() -> int:
                     copied += 1
             else:
                 print("  サムネイルは元に無いので作らない（原画で表示される）")
+
+        if not new_keys:
+            print("  複製できた画像が無いので記録は更新しない")
+            continue
 
         if args.apply:
             dynamodb.update_item(
