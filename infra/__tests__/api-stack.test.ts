@@ -105,6 +105,32 @@ describe('ApiStack', () => {
     });
   });
 
+  // SDL の `#` コメントは introspection に出ないため、AppSync コンソールや
+  // codegen からは見えない。名前が「ヘッダで送れ」と読める項目なので、
+  // 機械可読な警告を付けておく（PR #147 のレビュー指摘）
+  describe('taggingHeader の誤用防止', () => {
+    it('スキーマで非推奨として印を付けている', () => {
+      template.hasResourceProperties('AWS::AppSync::GraphQLSchema', {
+        Definition: Match.stringLikeRegexp('@deprecated'),
+      });
+    });
+
+    it('introspection に出る説明でヘッダ送信を禁じている', () => {
+      // `#` コメントではなく `"""` の説明として書かれていること。
+      // 前者は introspection に含まれず、読む機会のある場所に届かない
+      const schema = Object.values(
+        template.findResources('AWS::AppSync::GraphQLSchema'),
+      )
+        .map((r) => String(r.Properties?.Definition ?? ''))
+        .join('\n');
+
+      const descriptionBlocks = schema.match(/"""[\s\S]*?"""/g) ?? [];
+      expect(
+        descriptionBlocks.some((b) => b.includes('ヘッダとして送ってはいけない')),
+      ).toBe(true);
+    });
+  });
+
   // Requirements 4.1: PurchaseRecord テーブルのパーティションキー
   it('PurchaseRecord テーブルが id (S) をパーティションキーとして持つ', () => {
     template.hasResourceProperties('AWS::DynamoDB::Table', {
