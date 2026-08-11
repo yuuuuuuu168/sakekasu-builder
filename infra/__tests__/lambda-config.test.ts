@@ -101,7 +101,11 @@ const STACKS_WITH_LAMBDA: Record<string, string> = {
 };
 
 /** アプリ本体・課金通知・DevOps Agent のすべてを合成する */
-function synthAllTemplates(): Record<string, Template> {
+function synthAllTemplates(): {
+  templates: Record<string, Template>;
+  /** スタックのキー → デプロイ先アカウント ID */
+  accounts: Record<string, string>;
+} {
   const app = new cdk.App();
 
   const authStack = new AuthStack(app, 'TestAuth', { envName: SYNTH_ENV_NAME, env });
@@ -142,18 +146,30 @@ function synthAllTemplates(): Record<string, Template> {
     env: { account: '111111111111', region: 'ap-northeast-1' },
   });
 
+  const stacks = {
+    auth: authStack,
+    api: apiStack,
+    monitoring: monitoringStack,
+    devopsAgent: devopsAgentStack,
+    billing: billingStack,
+  };
+
   return {
-    auth: Template.fromStack(authStack),
-    api: Template.fromStack(apiStack),
-    monitoring: Template.fromStack(monitoringStack),
-    devopsAgent: Template.fromStack(devopsAgentStack),
-    billing: Template.fromStack(billingStack),
+    templates: Object.fromEntries(
+      Object.entries(stacks).map(([name, stack]) => [name, Template.fromStack(stack)]),
+    ),
+    // 同時実行の枠はアカウント単位で効く。どのスタックがどのアカウントへ
+    // 行くかは合成時の env で決まるので、そこから機械的に拾う。
+    // 手で一覧を持つと、スタックを足したときの書き漏れに気づけない
+    accounts: Object.fromEntries(
+      Object.entries(stacks).map(([name, stack]) => [name, stack.account]),
+    ),
   };
 }
 
 describe('Lambda のランタイム', () => {
   // 合成に esbuild が走るため、既定の 5 秒では足りない
-  const templates = synthAllTemplates();
+  const { templates, accounts } = synthAllTemplates();
 
   // 自前で定義した関数は functionName を必ず指定している。CDK が内部で作る
   // LogRetention や カスタムリソースのプロバイダーは指定しないので、
@@ -299,11 +315,14 @@ describe('Lambda のランタイム', () => {
   // アプリ本体の合計に混ぜると、どちらのアカウントも余裕があるのに合計だけが
   // 超えて落ちたり、逆に管理アカウント側の超過を見逃したりする。
   //
-  // 対象は除外で書く。スタックを増やしたときに自動で見張りに入るようにして、
-  // 「一覧への追加を忘れて予約が数えられない」を起こさないため
-  const OTHER_ACCOUNT_STACKS = ['billing'];
-  const APP_ACCOUNT_STACKS = Object.values(STACKS_WITH_LAMBDA).filter(
-    (name) => !OTHER_ACCOUNT_STACKS.includes(name),
+  // 振り分けは合成時のアカウントから決める。一覧を手で持つと、スタックを
+  // 足したときにどちらかへ書き漏らして、予約が数えられなかったり
+  // 別アカウント分が混ざったりする
+  const APP_ACCOUNT_STACKS = Object.keys(accounts).filter(
+    (name) => accounts[name] === env.account,
+  );
+  const OTHER_ACCOUNT_STACKS = Object.keys(accounts).filter(
+    (name) => accounts[name] !== env.account,
   );
 
   /** そのスタックに置かれた予約を「関数名 → 予約数」で集める */
@@ -342,6 +361,18 @@ describe('Lambda のランタイム', () => {
     [`${SYNTH_ENV_NAME}-sakekasu-ocr-analyzer`]: 20,
     [`${SYNTH_ENV_NAME}-sakekasu-devops-agent-webhook`]: 2,
   };
+
+  // 振り分けが壊れると、以降の検査が「対象ゼロ」で素通りしてしまう。
+  // 両側に中身があることを先に固定しておく
+  it('スタックがアカウントごとに振り分けられている', () => {
+    expect(APP_ACCOUNT_STACKS, 'アプリ本体側のスタックが1つも無い').not.toEqual([]);
+    expect(OTHER_ACCOUNT_STACKS, '別アカウント側のスタックが1つも無い').not.toEqual([]);
+
+    // 合成したスタックはどちらかに必ず入る（取りこぼしが無い）
+    expect([...APP_ACCOUNT_STACKS, ...OTHER_ACCOUNT_STACKS].sort()).toEqual(
+      Object.keys(templates).sort(),
+    );
+  });
 
   it('予約を入れている関数と数が想定どおり', () => {
     expect(collectReservations(APP_ACCOUNT_STACKS)).toEqual(EXPECTED_RESERVATIONS);
