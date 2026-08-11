@@ -26,6 +26,7 @@ AWS 認証情報は AWS_PROFILE 等の通常の方法で解決される。
 """
 
 import argparse
+import re
 import sys
 
 import boto3
@@ -33,6 +34,11 @@ from botocore.exceptions import ClientError
 
 # フロントエンド（src/features/image/lib/thumbnailKey.ts）と揃える必要がある
 THUMBNAIL_PREFIX = "thumb_"
+
+# Lambda 側の RECORD_ID_PATTERN と揃える
+RECORD_ID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
 
 
 def is_thumbnail(file_name: str) -> bool:
@@ -80,6 +86,21 @@ def is_valid_file_name(file_name: str) -> bool:
     キーをそのまま複製先に使うと、実体の無い位置を指すキーが記録に残る。
     """
     return bool(file_name) and "/" not in file_name and file_name not in (".", "..")
+
+
+def is_safe_key_segment(value: str) -> bool:
+    """キーの階層に埋めてよい値か。
+
+    Lambda 側は recordType / recordId を厳しく検証してからキーを組み立てる
+    （assertRecordLocation）。こちらは DynamoDB の値をそのまま使うので、
+    区切り文字や `..` が混ざると想定外の位置へ書き込むことになる。
+    """
+    return bool(value) and "/" not in value and value not in (".", "..")
+
+
+def is_owned_by(key: str, owner: str) -> bool:
+    """そのキーが指定の利用者のものか（Lambda の copyImages と同じ規則）。"""
+    return key.startswith(f"{owner}/")
 
 
 def reserve_file_name(file_name: str, used: set[str]) -> str:
@@ -179,10 +200,14 @@ def main() -> int:
         if effective_image_keys(record):
             continue
 
-        # owner はキーの先頭に入る。空のまま組み立てると、どの利用者にも
-        # 属さない位置（/drinking/...）へ書き込むことになる
-        if not owner:
-            print(f"[skip] {name}: owner が無い記録")
+        # owner と record_id はコピー先のキーに埋まる。DynamoDB の値を
+        # そのまま使うので、階層を壊す値が入っていたら手を出さない
+        if not is_safe_key_segment(owner):
+            print(f"[skip] {name}: owner がキーに使えない値")
+            continue
+
+        if not RECORD_ID_PATTERN.match(record_id):
+            print(f"[skip] {name}: id が UUID の形をしていない")
             continue
 
         purchase_id = record.get("purchaseRecordId", {}).get("S")
@@ -205,6 +230,14 @@ def main() -> int:
         source_keys = dedupe(effective_image_keys(purchase))
         if not source_keys:
             print(f"[skip] {name}: 紐づく購入記録に画像が無い")
+            continue
+
+        # 記録の持ち主が同じでも、記録が持つキー自体が他人のものを
+        # 指していることはある（作成時の検証を通っていない古いデータなど）。
+        # 1 件でも混ざっていたらその記録には手を出さない
+        foreign = [key for key in source_keys if not is_owned_by(key, owner)]
+        if foreign:
+            print(f"[skip] {name}: 持ち主の違う画像キーが混ざっている（{len(foreign)} 件）")
             continue
 
         planned += 1
