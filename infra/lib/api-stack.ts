@@ -321,6 +321,12 @@ export class ApiStack extends cdk.Stack {
       fieldName: 'getDownloadUrls',
     });
 
+    // copyImages ミューテーションリゾルバー（在庫から飲むときの画像引き継ぎ）
+    presignedUrlDataSource.createResolver('CopyImagesResolver', {
+      typeName: 'Mutation',
+      fieldName: 'copyImages',
+    });
+
     // OCR Analyzer Lambda 関数
     this.ocrAnalyzerFunction = new NodejsFunction(this, 'OcrAnalyzerFunction', {
       functionName: `${props.envName}-sakekasu-ocr-analyzer`,

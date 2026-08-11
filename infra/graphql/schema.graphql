@@ -127,6 +127,13 @@ type Mutation {
   # 複数画像（表・裏ラベルなど）を渡すと全画像を見て判定する。
   # additionalImageKeys は後方互換のための追加引数（省略時は imageKey のみ解析）
   analyzeSakeLabel(imageKey: String!, additionalImageKeys: [String!]): OcrResult!
+  # 別の記録の画像を、指定した記録のものとして複製する。
+  # 「在庫から飲む」で購入記録の写真を飲酒記録へ引き継ぐのに使う。
+  #
+  # キーの文字列だけを共有させると、片方の記録を削除したときに deleteImage が
+  # S3 の実体を消して、もう片方の画像まで見えなくなる。実体ごと複製して
+  # それぞれの記録が自分の画像を持つ形にする
+  copyImages(sourceKeys: [String!]!, recordType: String!, recordId: ID!): [String!]!
 }
 
 # 購入記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）
