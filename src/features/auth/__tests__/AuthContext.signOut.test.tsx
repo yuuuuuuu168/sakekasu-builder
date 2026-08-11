@@ -29,9 +29,16 @@ vi.mock('aws-amplify/api', () => ({
   generateClient: () => ({ graphql: (...args: unknown[]) => mockGraphql(...args) }),
 }));
 
-vi.mock('@/features/sommelier/lib/chatStorage', () => ({ clearMessages: vi.fn() }));
+const mockClearMessages = vi.fn();
+const mockClearFilterState = vi.fn();
+
+vi.mock('@/features/sommelier/lib/chatStorage', () => ({
+  clearMessages: (...args: unknown[]) => mockClearMessages(...args),
+}));
 vi.mock('@/features/sommelier/lib/runtimeSend', () => ({ resetSommelierSession: vi.fn() }));
-vi.mock('@/features/records/lib/filterStorage', () => ({ clearFilterState: vi.fn() }));
+vi.mock('@/features/records/lib/filterStorage', () => ({
+  clearFilterState: (...args: unknown[]) => mockClearFilterState(...args),
+}));
 
 import { AuthProvider, useAuth } from '../AuthContext';
 import { fetchDownloadUrl, clearDownloadUrlCache } from '@/features/image/lib/downloadUrlCache';
@@ -75,6 +82,53 @@ describe('AuthProvider の signOut', () => {
     });
 
     // サインアウト後は同じキーでもサーバーに取り直す
+    await fetchDownloadUrl(KEY);
+    expect(mockGraphql).toHaveBeenCalledTimes(2);
+  });
+
+  // 通信の待ち時間に、画面側の effect や進行中の応答がデータを書き戻す。
+  // 通信の後にもう一度消していないと、消したはずのものが残る
+  it('サインアウトの通信の前後で、端末に残るデータを2回消す', async () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isAuthenticated).toBe(true);
+    });
+
+    mockClearMessages.mockClear();
+    mockClearFilterState.mockClear();
+
+    await act(async () => {
+      await result.current.signOut();
+    });
+
+    expect(mockClearMessages).toHaveBeenCalledTimes(2);
+    expect(mockClearFilterState).toHaveBeenCalledTimes(2);
+  });
+
+  // サインアウトが失敗したときが一番まずい。利用者はサインアウトしたつもりで
+  // 端末を離れるのに、画面はサインイン状態でデータも残ることになる
+  it('サインアウトの通信が失敗しても、状態とキャッシュは片付ける', async () => {
+    mockSignOut.mockRejectedValue(new Error('network'));
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isAuthenticated).toBe(true);
+    });
+
+    await fetchDownloadUrl(KEY);
+    expect(mockGraphql).toHaveBeenCalledTimes(1);
+
+    // 失敗は呼び出し元に伝える（利用者に知らせるため握り潰さない）
+    await act(async () => {
+      await expect(result.current.signOut()).rejects.toThrow('network');
+    });
+
+    expect(result.current.user).toBeNull();
+    expect(result.current.isAuthenticated).toBe(false);
+
+    // キャッシュも残らない
     await fetchDownloadUrl(KEY);
     expect(mockGraphql).toHaveBeenCalledTimes(2);
   });
