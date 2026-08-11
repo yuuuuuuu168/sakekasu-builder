@@ -36,20 +36,39 @@ function synthesizeProject(): Template {
  * 数え上げる側に寄せている。数え上げである以上、見る場所が欠けるとそのまま嘘になるので
  * AWS::IAM::Policy だけでなく管理ポリシーとロール埋め込みも辿る。
  */
-function allPolicyStatements(): any[] {
+interface PolicyStatement {
+  Effect?: string;
+  Action?: unknown;
+  NotAction?: unknown;
+  Resource?: unknown;
+  Condition?: Record<string, unknown>;
+}
+
+/** 合成したテンプレートの IAM リソース（ここで見る範囲だけ形を書く） */
+interface IamResource {
+  Properties?: {
+    PolicyDocument?: { Statement?: PolicyStatement[] };
+    Policies?: { PolicyDocument?: { Statement?: PolicyStatement[] } }[];
+    ManagedPolicyArns?: unknown[];
+  };
+}
+
+function allPolicyStatements(): PolicyStatement[] {
   const template = synthesizeProject();
   const documentsOf = (type: string) =>
-    Object.values(template.findResources(type)).flatMap(
-      (resource: any) => resource.Properties?.PolicyDocument?.Statement ?? []
+    Object.values(template.findResources(type) as Record<string, IamResource>).flatMap(
+      (resource) => resource.Properties?.PolicyDocument?.Statement ?? []
     );
-  const inlineRoleStatements = Object.values(template.findResources('AWS::IAM::Role'))
-    .flatMap((role: any) => role.Properties?.Policies ?? [])
-    .flatMap((policy: any) => policy.PolicyDocument?.Statement ?? []);
+  const inlineRoleStatements = Object.values(
+    template.findResources('AWS::IAM::Role') as Record<string, IamResource>
+  )
+    .flatMap((role) => role.Properties?.Policies ?? [])
+    .flatMap((policy) => policy.PolicyDocument?.Statement ?? []);
   return [...documentsOf('AWS::IAM::Policy'), ...documentsOf('AWS::IAM::ManagedPolicy'), ...inlineRoleStatements];
 }
 
 /** Statement が許す action を並べる */
-function actionsOf(statement: any): string[] {
+function actionsOf(statement: PolicyStatement): string[] {
   // NotAction は「並べたもの以外すべて」なので、実質のワイルドカードとして扱う
   if (statement.NotAction !== undefined) return ['*'];
   if (statement.Action === undefined) return [];
@@ -78,7 +97,7 @@ function grants(granted: string, action: string): boolean {
 }
 
 /** その action を許可している Statement をすべて拾う（* でまとめて許可しているものも含む） */
-function statementsAllowing(action: string): any[] {
+function statementsAllowing(action: string): PolicyStatement[] {
   return allPolicyStatements().filter(
     statement => statement.Effect === 'Allow' && actionsOf(statement).some(granted => grants(granted, action))
   );
@@ -195,7 +214,9 @@ describe('好み学習用の AgentCore Memory', () => {
   // 権限を並べ切ったつもりのまま取りこぼす
   test('ロールに管理ポリシーを貼らない', () => {
     const roles = synthesizeProject().findResources('AWS::IAM::Role');
-    const attached = Object.values(roles).flatMap((role: any) => role.Properties?.ManagedPolicyArns ?? []);
+    const attached = Object.values(roles as Record<string, IamResource>).flatMap(
+      (role) => role.Properties?.ManagedPolicyArns ?? []
+    );
     expect(attached).toEqual([]);
   });
 });

@@ -8,6 +8,28 @@ import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
 
 /**
+ * 合成したテンプレートの1リソース。
+ *
+ * `template.toJSON()` の戻りは any なので、ここで見る範囲だけ形を書く。
+ * DeletionPolicy はリソースの直下に出るため、Properties と並ぶ位置にある。
+ */
+interface SynthesizedResource {
+  Type: string;
+  DeletionPolicy?: string;
+  UpdateReplacePolicy?: string;
+  Properties?: {
+    DeletionProtectionEnabled?: boolean;
+    PointInTimeRecoverySpecification?: { PointInTimeRecoveryEnabled?: boolean };
+    VersioningConfiguration?: { Status?: string };
+  };
+}
+
+/** テンプレートのリソース一覧を、型の付いた組の配列にする */
+function resourceEntries(resources: unknown): [string, SynthesizedResource][] {
+  return Object.entries(resources as Record<string, SynthesizedResource>);
+}
+
+/**
  * **Validates: Requirements 4.5**
  *
  * Property 4: 利用者データの保護
@@ -38,16 +60,14 @@ describe('Property 4: 利用者データの保護', () => {
         const resources = template.toJSON().Resources;
 
         // DynamoDB テーブルリソースをすべて検査
-        const dynamoTables = Object.entries(resources).filter(
-          ([_, resource]: [string, any]) =>
-            resource.Type === 'AWS::DynamoDB::Table',
+        const dynamoTables = resourceEntries(resources).filter(
+          ([, resource]) => resource.Type === 'AWS::DynamoDB::Table',
         );
 
         // テーブルが2つ存在すること（PurchaseRecord, DrinkingRecord）
         expect(dynamoTables.length).toBe(2);
 
-        for (const [logicalId, resource] of dynamoTables) {
-          const table = resource as any;
+        for (const [logicalId, table] of dynamoTables) {
 
           expect(
             table.DeletionPolicy,
@@ -85,12 +105,12 @@ describe('Property 4: 利用者データの保護', () => {
     });
     const resources = Template.fromStack(apiStack).toJSON().Resources;
 
-    const buckets = Object.entries(resources).filter(
-      ([_, resource]: [string, any]) => resource.Type === 'AWS::S3::Bucket',
+    const buckets = resourceEntries(resources).filter(
+      ([, resource]) => resource.Type === 'AWS::S3::Bucket',
     );
     expect(buckets.length).toBe(1);
 
-    const [, bucket] = buckets[0] as [string, any];
+    const [, bucket] = buckets[0];
     expect(bucket.DeletionPolicy).toBe('Retain');
     expect(bucket.Properties?.VersioningConfiguration?.Status).toBe('Enabled');
   });

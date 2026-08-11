@@ -57,4 +57,7 @@ function Button({
   )
 }
 
+// buttonVariants は Button と同じ定義から作るスタイルの組み立て関数。
+// shadcn/ui の生成物がこの形なので、分けずに揃えておく
+// eslint-disable-next-line react-refresh/only-export-components
 export { Button, buttonVariants }
