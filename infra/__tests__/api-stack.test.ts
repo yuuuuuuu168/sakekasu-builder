@@ -31,6 +31,41 @@ describe('ApiStack', () => {
     });
   });
 
+  // Issue #140: OCR の事前アップロードは記録の作成前に走るため、保存せず離れた
+  // 画像が孤児として残る。一時領域はタグ付きで置き、ライフサイクルで自動削除する
+  describe('一時アップロードのライフサイクル', () => {
+    it('画像バケットが一時オブジェクトを 1 日で削除する', () => {
+      template.hasResourceProperties('AWS::S3::Bucket', {
+        BucketName: 'dev-sakekasu-images',
+        LifecycleConfiguration: {
+          Rules: Match.arrayWith([
+            Match.objectLike({
+              Status: 'Enabled',
+              ExpirationInDays: 1,
+              // プレフィックスは前方一致しか使えず {sub} が可変のため、タグで絞る
+              TagFilters: [{ Key: 'lifecycle', Value: 'temporary' }],
+            }),
+          ]),
+        },
+      });
+    });
+
+    it('バージョニング有効なので旧バージョンも併せて削除する', () => {
+      // 現行バージョンだけ消しても旧版が残り、容量が減らない
+      template.hasResourceProperties('AWS::S3::Bucket', {
+        BucketName: 'dev-sakekasu-images',
+        VersioningConfiguration: { Status: 'Enabled' },
+        LifecycleConfiguration: {
+          Rules: Match.arrayWith([
+            Match.objectLike({
+              NoncurrentVersionExpiration: { NoncurrentDays: 1 },
+            }),
+          ]),
+        },
+      });
+    });
+  });
+
   // Requirements 4.1: PurchaseRecord テーブルのパーティションキー
   it('PurchaseRecord テーブルが id (S) をパーティションキーとして持つ', () => {
     template.hasResourceProperties('AWS::DynamoDB::Table', {

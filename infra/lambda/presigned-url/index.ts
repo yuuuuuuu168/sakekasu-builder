@@ -7,6 +7,10 @@ import {
   HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import {
+  TEMP_LOCATION,
+  TEMP_OBJECT_TAGGING,
+} from '../../lib/image-constants';
 
 const s3Client = new S3Client({});
 
@@ -45,6 +49,7 @@ interface AppSyncEvent {
     recordId?: string;
     contentType?: string;
     fileName?: string;
+    temporary?: boolean;
     key?: string;
     keys?: string[];
     sourceKeys?: string[];
@@ -131,6 +136,16 @@ function assertRecordLocation(recordType: string, recordId: string): void {
     throw new Error(`Invalid recordType: ${recordType}`);
   }
 
+  assertRecordId(recordId);
+}
+
+/**
+ * キーの階層に使う ID を検証する。
+ *
+ * 一時領域は記録種別を持たない（まだどの記録のものか決まっていない）が、
+ * ID は同じくキーの階層に入るため検証は要る
+ */
+function assertRecordId(recordId: string): void {
   if (!RECORD_ID_PATTERN.test(recordId)) {
     throw new Error('Invalid recordId');
   }
@@ -144,7 +159,7 @@ function assertFileName(fileName: string): void {
 }
 
 async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse> {
-  const { recordType, recordId, contentType, fileName } = event.arguments;
+  const { recordType, recordId, contentType, fileName, temporary } = event.arguments;
   const ownerSub = requireOwnerSub(event);
 
   if (!recordType || !recordId || !contentType || !fileName) {
@@ -155,15 +170,25 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
     throw new Error(`Invalid contentType: ${contentType}. Allowed: ${ALLOWED_CONTENT_TYPES.join(', ')}`);
   }
 
-  assertRecordLocation(recordType, recordId);
+  // 一時領域は記録がまだ無い段階の置き場なので、記録種別ではなく固定の区画に置く。
+  // 種別は呼び出し側の都合で渡ってくるが、キーには使わない
+  if (temporary) {
+    assertRecordId(recordId);
+  } else {
+    assertRecordLocation(recordType, recordId);
+  }
   assertFileName(fileName);
 
-  const key = `${ownerSub}/${recordType}/${recordId}/${fileName}`;
+  const location = temporary ? TEMP_LOCATION : recordType;
+  const key = `${ownerSub}/${location}/${recordId}/${fileName}`;
 
   const command = new PutObjectCommand({
     Bucket: BUCKET_NAME,
     Key: key,
     ContentType: contentType,
+    // タグはライフサイクルの削除条件。署名対象に入るため、クライアントは
+    // 同じ値を x-amz-tagging ヘッダで送る必要がある（送らなければ PUT が失敗する）
+    ...(temporary ? { Tagging: TEMP_OBJECT_TAGGING } : {}),
   });
 
   const uploadUrl = await getSignedUrl(s3Client, command, {
@@ -349,6 +374,10 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
         Bucket: BUCKET_NAME,
         Key: destination,
         CopySource: `${BUCKET_NAME}/${source}`,
+        // CopyObject の既定はタグの引き継ぎ。一時領域から複製すると
+        // 自動削除タグまで付いてきて、記録に紐づいた画像が 1 日で消える
+        TaggingDirective: 'REPLACE',
+        Tagging: '',
       }),
     );
     destinations.push(destination);
@@ -366,6 +395,10 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
           Bucket: BUCKET_NAME,
           Key: toThumbnailKey(destination),
           CopySource: `${BUCKET_NAME}/${sourceThumbnail}`,
+          // 原画と同じ理由でタグを落とす（サムネイルだけ 1 日で消えると
+          // 一覧が原画へフォールバックし、静かに重くなる）
+          TaggingDirective: 'REPLACE',
+          Tagging: '',
         }),
       );
     }
