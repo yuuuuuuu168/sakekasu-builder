@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
 import { LAMBDA_LOG_RETENTION } from './log-retention.js';
+import { TEMP_TAG_KEY, TEMP_TAG_VALUE } from './image-constants.js';
 
 /**
  * Application Signals 用の OpenTelemetry レイヤー（Issue #86）。
@@ -249,6 +250,22 @@ export class ApiStack extends cdk.Stack {
       removalPolicy,
       // 画像の誤削除・誤上書きから復旧できるようにする
       versioned: true,
+      lifecycleRules: [
+        {
+          // OCR の事前アップロードは記録の作成前に走るため、フォームを保存せずに
+          // 離れたキーがどこからも参照されないまま残る。タブを閉じる経路まで
+          // 確実に捕まえるのは無理なので、置き場ごと期限付きにする（Issue #140）
+          id: 'expire-temporary-uploads',
+          enabled: true,
+          // プレフィックスは前方一致しか使えず、`{sub}` が利用者ごとに変わるため
+          // タグで対象を絞る。付与は presigned-url Lambda 側
+          tagFilters: { [TEMP_TAG_KEY]: TEMP_TAG_VALUE },
+          expiration: cdk.Duration.days(1),
+          // バージョニングが有効なので、現行バージョンを消しても旧版が残る。
+          // 併せて消さないと容量が減らない
+          noncurrentVersionExpiration: cdk.Duration.days(1),
+        },
+      ],
       cors: [
         {
           allowedOrigins: [
