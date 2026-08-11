@@ -9,6 +9,14 @@ const DOWNLOAD_EXPIRY = Number(process.env.DOWNLOAD_EXPIRY || '3600');
 
 const ALLOWED_CONTENT_TYPES = ['image/jpeg', 'image/png'];
 
+/**
+ * getDownloadUrls が 1 回で受け付けるキーの上限。
+ *
+ * 署名の生成自体はローカル計算だが、上限を置かないと巨大なリクエストで
+ * 実行時間とレスポンスサイズが伸びる。フロント側は 50 件ずつに割って送る
+ */
+const MAX_DOWNLOAD_KEYS = 100;
+
 interface AppSyncEvent {
   info: {
     fieldName: string;
@@ -19,12 +27,15 @@ interface AppSyncEvent {
     contentType?: string;
     fileName?: string;
     key?: string;
+    keys?: string[];
     imageKey?: string;
     imageKeys?: string[];
   };
-  identity: {
-    sub: string;
-  };
+  // AppSync は USER_POOL 認証を既定にしているが、直接呼び出しや別の認証方式の
+  // 経路では identity が入らないことがある。型でも入らない前提にしておく
+  identity?: {
+    sub?: string;
+  } | null;
   source?: {
     imageKey?: string | null;
     imageKeys?: string[] | null;
@@ -36,7 +47,7 @@ interface UploadUrlResponse {
   key: string;
 }
 
-export async function handler(event: AppSyncEvent): Promise<UploadUrlResponse | string | { success: boolean }> {
+export async function handler(event: AppSyncEvent): Promise<UploadUrlResponse | string | string[] | { success: boolean }> {
   const { fieldName } = event.info;
 
   switch (fieldName) {
@@ -44,6 +55,8 @@ export async function handler(event: AppSyncEvent): Promise<UploadUrlResponse | 
       return generateUploadUrl(event);
     case 'getDownloadUrl':
       return getDownloadUrl(event);
+    case 'getDownloadUrls':
+      return getDownloadUrls(event);
     case 'deleteImage':
       return deleteImage(event);
     default:
@@ -51,9 +64,27 @@ export async function handler(event: AppSyncEvent): Promise<UploadUrlResponse | 
   }
 }
 
+/**
+ * リクエスト元の sub を取り出す。identity が無い呼び出しは弾く。
+ *
+ * キーの所有者チェックは `${ownerSub}/` の前方一致で行うため、sub が
+ * 空文字のまま通ると `/` で始まる任意のキーが一致してしまう。
+ * identity が落ちる経路（直接呼び出しなど）でも素の TypeError にせず、
+ * 認可エラーとして扱う
+ */
+function requireOwnerSub(event: AppSyncEvent): string {
+  const ownerSub = event.identity?.sub;
+
+  if (!ownerSub) {
+    throw new Error('Unauthorized: missing identity');
+  }
+
+  return ownerSub;
+}
+
 async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse> {
   const { recordType, recordId, contentType, fileName } = event.arguments;
-  const ownerSub = event.identity.sub;
+  const ownerSub = requireOwnerSub(event);
 
   if (!recordType || !recordId || !contentType || !fileName) {
     throw new Error('Missing required arguments: recordType, recordId, contentType, fileName');
@@ -78,14 +109,8 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
   return { uploadUrl, key };
 }
 
-async function getDownloadUrl(event: AppSyncEvent): Promise<string> {
-  const { key } = event.arguments;
-  const ownerSub = event.identity.sub;
-
-  if (!key) {
-    throw new Error('Missing required argument: key');
-  }
-
+/** 1 件分のダウンロード用 Presigned URL を作る（所有者チェック込み） */
+async function signDownloadUrl(key: string, ownerSub: string): Promise<string> {
   // キーのプレフィックスがリクエストユーザーの sub と一致するか検証
   if (!key.startsWith(`${ownerSub}/`)) {
     throw new Error('Unauthorized: cannot access other user\'s images');
@@ -96,19 +121,58 @@ async function getDownloadUrl(event: AppSyncEvent): Promise<string> {
     Key: key,
   });
 
-  const downloadUrl = await getSignedUrl(s3Client, command, {
+  return getSignedUrl(s3Client, command, {
     expiresIn: DOWNLOAD_EXPIRY,
   });
+}
 
-  return downloadUrl;
+async function getDownloadUrl(event: AppSyncEvent): Promise<string> {
+  const { key } = event.arguments;
+  const ownerSub = requireOwnerSub(event);
+
+  if (!key) {
+    throw new Error('Missing required argument: key');
+  }
+
+  return signDownloadUrl(key, ownerSub);
+}
+
+/**
+ * 複数キーの Presigned URL をまとめて返す。
+ *
+ * 戻り値は keys と同じ並び・同じ件数にする。フロントはインデックスで
+ * 突き合わせるため、途中を詰めたり並べ替えたりしてはいけない。
+ * 1 件でも他人のキーが混ざっていれば全体を失敗させる（getDownloadUrl と同じ扱い）
+ */
+async function getDownloadUrls(event: AppSyncEvent): Promise<string[]> {
+  const { keys } = event.arguments;
+  const ownerSub = requireOwnerSub(event);
+
+  if (!keys) {
+    throw new Error('Missing required argument: keys');
+  }
+
+  if (keys.length === 0) {
+    return [];
+  }
+
+  if (keys.length > MAX_DOWNLOAD_KEYS) {
+    throw new Error(`Too many keys: ${keys.length}. Max: ${MAX_DOWNLOAD_KEYS}`);
+  }
+
+  return Promise.all(keys.map((key) => signDownloadUrl(key, ownerSub)));
 }
 
 
 async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; imageDeleteFailed?: boolean }> {
+  // 認可は引数を見る前に済ませる。削除パイプラインは画像を持たない記録でも
+  // arguments を空にして呼ぶため、後ろに置くと identity の無い呼び出しに
+  // success を返してしまう。他のハンドラと同じ順序に揃える
+  const ownerSub = requireOwnerSub(event);
+
   // Pipeline リゾルバーから imageKey(単一) と imageKeys(複数) の両方を処理
   const imageKey = event.arguments?.imageKey || event.source?.imageKey;
   const imageKeys = event.arguments?.imageKeys || event.source?.imageKeys;
-  const ownerSub = event.identity?.sub;
 
   // 削除対象のキーを統合
   const requestedKeys: string[] = [];
@@ -120,10 +184,6 @@ async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; ima
 
   if (requestedKeys.length === 0) {
     return { success: true };
-  }
-
-  if (!ownerSub) {
-    throw new Error('Unauthorized: missing identity');
   }
 
   let hasFailure = false;

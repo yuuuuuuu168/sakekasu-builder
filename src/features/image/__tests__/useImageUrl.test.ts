@@ -42,7 +42,7 @@ describe('useImageUrl', () => {
   it('imageKey が指定された場合に Presigned URL を取得する', async () => {
     const mockUrl = 'https://s3.example.com/presigned-url';
     mockGraphql.mockResolvedValueOnce({
-      data: { getDownloadUrl: mockUrl },
+      data: { getDownloadUrls: [mockUrl] },
     });
 
     const { result } = renderHook(() => useImageUrl('user123/purchase/rec1/label.jpg'));
@@ -58,7 +58,7 @@ describe('useImageUrl', () => {
     expect(result.current.hasError).toBe(false);
     expect(mockGraphql).toHaveBeenCalledWith({
       query: expect.any(String),
-      variables: { key: 'user123/purchase/rec1/label.jpg' },
+      variables: { keys: ['user123/purchase/rec1/label.jpg'] },
     });
   });
 
@@ -79,8 +79,8 @@ describe('useImageUrl', () => {
     const mockUrl1 = 'https://s3.example.com/url1';
     const mockUrl2 = 'https://s3.example.com/url2';
     mockGraphql
-      .mockResolvedValueOnce({ data: { getDownloadUrl: mockUrl1 } })
-      .mockResolvedValueOnce({ data: { getDownloadUrl: mockUrl2 } });
+      .mockResolvedValueOnce({ data: { getDownloadUrls: [mockUrl1] } })
+      .mockResolvedValueOnce({ data: { getDownloadUrls: [mockUrl2] } });
 
     const { result, rerender } = renderHook(
       ({ key }) => useImageUrl(key),
@@ -103,7 +103,7 @@ describe('useImageUrl', () => {
   it('imageKey が null に変更されたら状態をリセットする', async () => {
     const mockUrl = 'https://s3.example.com/presigned-url';
     mockGraphql.mockResolvedValueOnce({
-      data: { getDownloadUrl: mockUrl },
+      data: { getDownloadUrls: [mockUrl] },
     });
 
     const { result, rerender } = renderHook(
