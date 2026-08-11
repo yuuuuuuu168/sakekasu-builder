@@ -140,17 +140,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // キャッシュから返ってしまうため、ここで捨てる
     clearDownloadUrlCache();
 
-    await amplifySignOut();
-
-    // 絞り込み条件は画面側が effect で保存し続けるため、上の通信を待つ間に
-    // 書き戻されることがある。画面を落とす直前にもう一度消す（削除は冪等）
-    if (user) {
-      clearFilterState(user.userId);
+    try {
+      await amplifySignOut();
+    } finally {
+      // 上の通信を待つ間に書き戻されたものを、画面を落とす直前にもう一度消す。
+      // 絞り込み条件は画面側の effect が、相談履歴は進行中の応答が確定時に、
+      // 画像 URL は表示中のカードが、それぞれ書き戻しうる（いずれも冪等）。
+      //
+      // finally に置くのは、サインアウトの通信が失敗しても端末にデータを
+      // 残さないため。ここを飛ばすと、利用者はサインアウトしたつもりなのに
+      // 画面はサインイン状態のまま、データも残るという最悪の形になる
+      if (user) {
+        clearMessages(user.userId);
+        clearFilterState(user.userId);
+      }
+      clearDownloadUrlCache();
+      setUser(null);
     }
-    // 画像 URL も同じで、サインアウトの通信を待つ間に画面から新しく
-    // 要求されることがある。ここでもう一度捨てる
-    clearDownloadUrlCache();
-    setUser(null);
   }, [user]);
 
   const value: AuthContextValue = {
