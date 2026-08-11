@@ -12,6 +12,13 @@ export interface StockDrinkDraft {
   purchaseRecordId: string;
   sakeName: string;
   category: SakeCategory;
+  /**
+   * 購入記録が持っている画像キー。
+   *
+   * 飲酒登録で写真を選ばなかった場合、これを複製して引き継ぐ。
+   * 同じ酒なのに買った記録にだけ写真が出る状態を避ける
+   */
+  imageKeys?: string[];
 }
 
 /** 在庫から飲む場合の「飲んだ場所」の初期値 */

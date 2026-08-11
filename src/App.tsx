@@ -104,6 +104,8 @@ function AppContent() {
       purchaseRecordId: record.id,
       sakeName: record.sakeName,
       category: record.category,
+      // 写真を選ばなかったときに、購入記録の写真を複製して引き継ぐ
+      imageKeys: record.imageKeys,
     });
     setStockDraftKey((key) => key + 1);
     setCurrentPage('drinking');

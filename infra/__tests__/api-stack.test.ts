@@ -105,8 +105,16 @@ describe('ApiStack', () => {
 
   // Requirements 3.5, 4.6: AppSync リゾルバーが存在する
   it('AppSync リゾルバーが存在する', () => {
-    // CRUD 13本 + markPurchaseOpened + getDownloadUrls
-    template.resourceCountIs('AWS::AppSync::Resolver', 15);
+    // CRUD 13本 + markPurchaseOpened + getDownloadUrls + copyImages
+    template.resourceCountIs('AWS::AppSync::Resolver', 16);
+  });
+
+  // 在庫から飲むときに購入記録の写真を引き継ぐ経路
+  it('画像を複製する copyImages リゾルバーがある', () => {
+    template.hasResourceProperties('AWS::AppSync::Resolver', {
+      TypeName: 'Mutation',
+      FieldName: 'copyImages',
+    });
   });
 
   // 一覧は画像の数だけ URL を要求する。1件ずつ Lambda を呼ぶと同時実行枠を
