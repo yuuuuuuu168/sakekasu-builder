@@ -52,6 +52,7 @@ async function callGenerateUploadUrl(args: {
   contentType?: string;
   fileName?: string;
   temporary?: boolean;
+  thumbnail?: boolean;
 }): Promise<{ uploadUrl: string; key: string }> {
   const result = await handler({
     info: { fieldName: 'generateUploadUrl' },
@@ -61,6 +62,7 @@ async function callGenerateUploadUrl(args: {
       contentType: args.contentType ?? 'image/jpeg',
       fileName: args.fileName ?? 'a.jpg',
       ...(args.temporary === undefined ? {} : { temporary: args.temporary }),
+      ...(args.thumbnail === undefined ? {} : { thumbnail: args.thumbnail }),
     },
     identity: { sub: OWNER },
   } as Parameters<typeof handler>[0]);
@@ -131,6 +133,55 @@ describe('generateUploadUrl', () => {
     await expect(callGenerateUploadUrl({ recordType: 'tmp' })).rejects.toThrow(
       'Invalid recordType',
     );
+  });
+
+  // `thumb_` は原画から導出するサムネイルのために予約している。
+  // 原画としてこの名前を使えると、同じ記録にある別の画像のサムネイルを
+  // 原寸で上書きできてしまう（PR #144 の Security Agent レビュー指摘）
+  describe('サムネイルの予約プレフィックス', () => {
+    it('原画のファイル名が thumb_ で始まる場合は弾く', async () => {
+      await expect(
+        callGenerateUploadUrl({ fileName: 'thumb_photo.jpg' }),
+      ).rejects.toThrow('must not start with thumb_');
+    });
+
+    it('一時領域でも同じく弾く', async () => {
+      await expect(
+        callGenerateUploadUrl({ fileName: 'thumb_photo.jpg', temporary: true }),
+      ).rejects.toThrow('must not start with thumb_');
+    });
+
+    it('サムネイルのキーはサーバー側で導出する', async () => {
+      const { key } = await callGenerateUploadUrl({
+        fileName: 'photo.jpg',
+        thumbnail: true,
+      });
+
+      expect(key).toBe(`${OWNER}/purchase/${RECORD_ID}/thumb_photo.jpg`);
+    });
+
+    it('一時領域のサムネイルも同じ規則で導出する', async () => {
+      const { key } = await callGenerateUploadUrl({
+        fileName: 'photo.jpg',
+        thumbnail: true,
+        temporary: true,
+      });
+
+      expect(key).toBe(`${OWNER}/tmp/${RECORD_ID}/thumb_photo.jpg`);
+    });
+
+    // クライアントが thumb_ 付きの名前を組み立てて送る余地を残さない
+    it('サムネイル指定でも thumb_ 始まりの名前は受け取らない', async () => {
+      await expect(
+        callGenerateUploadUrl({ fileName: 'thumb_photo.jpg', thumbnail: true }),
+      ).rejects.toThrow('must not start with thumb_');
+    });
+
+    it('名前の途中に thumb_ があるだけなら通す', async () => {
+      const { key } = await callGenerateUploadUrl({ fileName: 'my_thumb_photo.jpg' });
+
+      expect(key).toBe(`${OWNER}/purchase/${RECORD_ID}/my_thumb_photo.jpg`);
+    });
   });
 
   it('identity が無い呼び出しは弾く', async () => {
