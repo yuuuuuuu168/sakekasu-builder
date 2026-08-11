@@ -108,4 +108,52 @@ describe('ImageUploadArea', () => {
     renderUploadArea({ isUploading: true });
     expect(screen.getByText('画像をアップロード中...')).toBeInTheDocument();
   });
+
+  // 保存はできたが表示が重くなる失敗は、エラーとは別に伝える（Issue #137）
+  it('warning が設定されている場合に警告を表示する', () => {
+    renderUploadArea({ warning: '一覧用の縮小画像を作れませんでした' });
+    expect(screen.getByText('一覧用の縮小画像を作れませんでした')).toBeInTheDocument();
+  });
+
+  // 編集時は「今ある写真の続きに足す」形にする（Issue #142）
+  describe('登録済みの画像がある場合', () => {
+    it('登録済みの画像を並べ、ドロップ領域は出さない', () => {
+      renderUploadArea({ existingImageUrls: ['https://example.invalid/a.jpg'] });
+
+      expect(screen.getByTestId('image-existing-0')).toBeInTheDocument();
+      expect(screen.queryByTestId('image-drop-zone')).not.toBeInTheDocument();
+      // 追加はできる
+      expect(screen.getByTestId('image-add-button')).toBeInTheDocument();
+    });
+
+    it('枚数表示に登録済みの分を含める', () => {
+      renderUploadArea({
+        existingImageUrls: ['https://example.invalid/a.jpg', 'https://example.invalid/b.jpg'],
+      });
+
+      expect(screen.getByText('2/5枚')).toBeInTheDocument();
+    });
+
+    it('登録済みと追加分の合計が上限に達したら追加ボタンを出さない', () => {
+      renderUploadArea({
+        existingImageUrls: [
+          'https://example.invalid/a.jpg',
+          'https://example.invalid/b.jpg',
+          'https://example.invalid/c.jpg',
+          'https://example.invalid/d.jpg',
+          'https://example.invalid/e.jpg',
+        ],
+      });
+
+      expect(screen.queryByTestId('image-add-button')).not.toBeInTheDocument();
+      expect(screen.getByText('5/5枚')).toBeInTheDocument();
+    });
+
+    // 削除・差し替えは別 Issue。誤って消せる導線を出さない
+    it('登録済みの画像には削除ボタンを出さない', () => {
+      renderUploadArea({ existingImageUrls: ['https://example.invalid/a.jpg'] });
+
+      expect(screen.queryByTestId('image-delete-button-0')).not.toBeInTheDocument();
+    });
+  });
 });

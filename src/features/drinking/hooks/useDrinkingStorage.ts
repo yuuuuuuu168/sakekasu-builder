@@ -15,8 +15,17 @@ export interface SaveDrinkingOptions {
 
 export interface UseDrinkingStorageReturn {
   saveDrinking: (data: DrinkingFormData, options?: SaveDrinkingOptions) => Promise<SaveResult>;
-  /** 既存の飲酒記録を更新する（画像は対象外・既存を維持） */
-  updateDrinking: (id: string, data: DrinkingFormData) => Promise<SaveResult>;
+  /**
+   * 既存の飲酒記録を更新する。
+   *
+   * options に imageKeys を渡したときだけ画像を書き換える。渡さなければ
+   * 既存のキーはそのまま残る（Issue #142 で追加できるようにした）
+   */
+  updateDrinking: (
+    id: string,
+    data: DrinkingFormData,
+    options?: { imageKey?: string | null; imageKeys?: string[] },
+  ) => Promise<SaveResult>;
   isSaving: boolean;
 }
 
@@ -59,7 +68,11 @@ export function useDrinkingStorage(): UseDrinkingStorageReturn {
     }
   };
 
-  const updateDrinking = async (id: string, data: DrinkingFormData): Promise<SaveResult> => {
+  const updateDrinking = async (
+    id: string,
+    data: DrinkingFormData,
+    options?: { imageKey?: string | null; imageKeys?: string[] },
+  ): Promise<SaveResult> => {
     setIsSaving(true);
     try {
       const result = await client.graphql({
@@ -75,6 +88,11 @@ export function useDrinkingStorage(): UseDrinkingStorageReturn {
             drinkingMethod: data.drinkingMethod,
             rating: data.rating,
             memo: data.memo || null,
+            // 画像を触らない更新では送らない。undefined を送ると
+            // 既存のキーを消してしまう（更新式は渡されたフィールドだけを SET する）
+            ...(options?.imageKeys
+              ? { imageKey: options.imageKey ?? null, imageKeys: options.imageKeys }
+              : {}),
           },
         },
       });

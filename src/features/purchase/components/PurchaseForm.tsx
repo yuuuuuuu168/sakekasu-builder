@@ -18,9 +18,13 @@ import { PastRatingHint } from '@/features/purchase/components/PastRatingHint';
 import type { PurchaseFormData } from '@/features/purchase/types';
 import { ImageUploadArea } from '@/features/image/components/ImageUploadArea';
 import { useOcrTrigger } from '@/features/image/hooks/useOcrTrigger';
+import { useImageUrls } from '@/features/image/hooks/useImageUrls';
 import { appendLabelInfoToMemo } from '@/features/image/lib/ocrLabelInfo';
 
 const MotionButton = motion.create(Button);
+
+/** 毎レンダリングで新しい配列を渡すと URL の再取得が走るため、空配列は使い回す */
+const EMPTY_KEYS: string[] = [];
 
 interface PurchaseFormProps {
   onSubmitSuccess?: () => void;
@@ -28,9 +32,19 @@ interface PurchaseFormProps {
   recordId?: string;
   /** 編集モードでのフォーム初期値 */
   initialData?: PurchaseFormData;
+  /** 編集対象が既に持っている代表画像キー */
+  existingImageKey?: string | null;
+  /** 編集対象が既に持っている画像キー一覧 */
+  existingImageKeys?: string[];
 }
 
-export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: PurchaseFormProps) {
+export function PurchaseForm({
+  onSubmitSuccess,
+  recordId,
+  initialData,
+  existingImageKey,
+  existingImageKeys,
+}: PurchaseFormProps) {
   const isEditMode = recordId !== undefined;
   const {
     formData,
@@ -41,7 +55,10 @@ export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: Purchas
     handleBlur,
     handleSubmit,
     imageUpload,
-  } = usePurchaseForm({ recordId, initialData });
+  } = usePurchaseForm({ recordId, initialData, existingImageKey, existingImageKeys });
+
+  // 編集時は「今ある写真の続きに足す」と分かるよう、登録済みの画像も並べる
+  const { imageUrls: existingImageUrls } = useImageUrls(existingImageKeys ?? EMPTY_KEYS);
 
   // ユーザーが手動でカテゴリを選択したか（自動OCRで選択を上書きしないための追跡）
   const categoryTouchedRef = useRef(false);
@@ -107,33 +124,32 @@ export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: Purchas
       transition={{ duration: 0.4, ease: 'easeOut' }}
     >
     <form onSubmit={onFormSubmit} className="space-y-5" data-testid="purchase-form">
-      {/* 画像添付（編集モードでは画像は変更対象外のため非表示） */}
-      {!isEditMode && (
-        <FormField label="画像（任意）">
-          <ImageUploadArea
-            imageFile={imageUpload.imageFile}
-            imageFiles={imageUpload.imageFiles}
-            onImageChange={(file) => {
-              if (file) {
-                imageUpload.handleImageSelect(file);
-              } else {
-                imageUpload.clearImage();
-                resetOcr();
-              }
-            }}
-            onImageRemove={imageUpload.removeImage}
-            isCompressing={imageUpload.isCompressing}
-            isUploading={imageUpload.isUploading}
-            error={imageUpload.error}
-            warning={imageUpload.warning}
-            disabled={isSubmitting}
-            isOcrAnalyzing={isAnalyzing}
-            onOcrTrigger={handleOcrTrigger}
-            ocrMessage={ocrMessage}
-            hasOcrRun={hasAnalyzed}
-          />
-        </FormField>
-      )}
+      {/* 画像添付（編集時は登録済みの写真の続きに追加する） */}
+      <FormField label={isEditMode ? '画像を追加（任意）' : '画像（任意）'}>
+        <ImageUploadArea
+          imageFile={imageUpload.imageFile}
+          imageFiles={imageUpload.imageFiles}
+          existingImageUrls={existingImageUrls}
+          onImageChange={(file) => {
+            if (file) {
+              imageUpload.handleImageSelect(file);
+            } else {
+              imageUpload.clearImage();
+              resetOcr();
+            }
+          }}
+          onImageRemove={imageUpload.removeImage}
+          isCompressing={imageUpload.isCompressing}
+          isUploading={imageUpload.isUploading}
+          error={imageUpload.error}
+          warning={imageUpload.warning}
+          disabled={isSubmitting}
+          isOcrAnalyzing={isAnalyzing}
+          onOcrTrigger={handleOcrTrigger}
+          ocrMessage={ocrMessage}
+          hasOcrRun={hasAnalyzed}
+        />
+      </FormField>
 
       {/* 銘柄名 */}
       <FormField label="銘柄名" error={errors.sakeName} required>
