@@ -167,6 +167,7 @@ export function DrinkingForm({
               isCompressing={imageUpload.isCompressing}
               isUploading={imageUpload.isUploading}
               error={imageUpload.error}
+              warning={imageUpload.warning}
               disabled={isSubmitting}
               isOcrAnalyzing={isAnalyzing}
               onOcrTrigger={handleOcrTrigger}

@@ -10,6 +10,20 @@ const client = generateClient();
 /** 最大画像数 */
 const MAX_IMAGES = 5;
 
+/**
+ * 画像として読み込めなかったときの警告。
+ *
+ * 保存自体は通す（写真を残せる方が損が小さい）が、縮小もサムネイル生成も
+ * できていないことは伝える。黙って通すと、一覧が原画を読み続ける状態に
+ * 誰も気づけない（Issue #137）
+ */
+const UNREADABLE_WARNING =
+  'この画像は読み取れませんでした。原寸のまま保存されるため、一覧の表示が重くなります';
+
+/** サムネイルを用意できなかったときの警告 */
+const THUMBNAIL_WARNING =
+  '一覧用の縮小画像を作れませんでした。一覧では原寸の画像が読み込まれます';
+
 export interface UseImageUploadReturn {
   /** 選択された画像ファイル（後方互換: 最初の1枚） */
   imageFile: File | null;
@@ -23,6 +37,8 @@ export interface UseImageUploadReturn {
   isUploading: boolean;
   /** エラーメッセージ */
   error: string | null;
+  /** 保存は成立したが品質が落ちている場合の警告（読み込み不可・サムネイル未生成） */
+  warning: string | null;
   /** S3 上の画像キー（事前アップロード後に設定、後方互換: 最初の1枚） */
   imageKey: string | null;
   /** S3 上の画像キー一覧 */
@@ -48,6 +64,7 @@ export function useImageUpload(): UseImageUploadReturn {
   const [isCompressing, setIsCompressing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [imageKeys, setImageKeys] = useState<string[]>([]);
 
   // 後方互換用
@@ -82,6 +99,11 @@ export function useImageUpload(): UseImageUploadReturn {
     setIsCompressing(true);
     try {
       const result = await compressImage(file);
+      // 読めなかった画像はそのまま保存される。縮小もサムネイルも無い状態を
+      // 選んだ時点で伝えないと、一覧が重くなった理由を後から辿れない
+      if (!result.wasReadable) {
+        setWarning(UNREADABLE_WARNING);
+      }
       setImageFiles((prev) => [...prev, result.file]);
     } catch (err) {
       const message =
@@ -141,20 +163,27 @@ export function useImageUpload(): UseImageUploadReturn {
    *
    * 記録に保存するのは原画キーのみで、表示側はそこからサムネイルキーを
    * 導出する。失敗しても原画へフォールバックできるため、登録処理は止めない。
+   *
+   * ただし「止めない」と「黙る」は別。呼び出し側が結果を見て利用者に伝える。
+   * putToS3 は失敗を例外ではなく null で返すため、戻り値を捨てると
+   * アップロードできていないのに成功扱いになる
+   *
+   * @returns サムネイルを保存できたか
    */
   const uploadThumbnail = async (
     file: File,
     recordType: string,
     recordId: string,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     try {
       const thumbnail = await createThumbnail(
         file,
         toThumbnailFileName(file.name),
       );
-      await putToS3(thumbnail, recordType, recordId);
+      return (await putToS3(thumbnail, recordType, recordId)) !== null;
     } catch (err) {
       console.error('サムネイルの生成・アップロードに失敗しました:', err);
+      return false;
     }
   };
 
@@ -167,7 +196,9 @@ export function useImageUpload(): UseImageUploadReturn {
     const key = await putToS3(file, recordType, recordId);
     if (key === null) return null;
 
-    await uploadThumbnail(file, recordType, recordId);
+    if (!(await uploadThumbnail(file, recordType, recordId))) {
+      setWarning(THUMBNAIL_WARNING);
+    }
     return key;
   };
 
@@ -274,6 +305,7 @@ export function useImageUpload(): UseImageUploadReturn {
   const clearImage = useCallback(() => {
     setImageFiles([]);
     setError(null);
+    setWarning(null);
     setImageKeys([]);
   }, []);
 
@@ -284,6 +316,7 @@ export function useImageUpload(): UseImageUploadReturn {
     isCompressing,
     isUploading,
     error,
+    warning,
     imageKey,
     imageKeys,
     handleImageSelect,

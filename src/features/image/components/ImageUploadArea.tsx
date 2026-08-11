@@ -22,6 +22,8 @@ export interface ImageUploadAreaProps {
   isUploading?: boolean;
   /** エラーメッセージ */
   error: string | null;
+  /** 警告メッセージ（保存はできたが縮小・サムネイルが作れなかった場合） */
+  warning?: string | null;
   /** 圧縮完了情報 */
   compressionInfo?: CompressionInfo | null;
   /** 無効化フラグ */
@@ -50,6 +52,7 @@ export function ImageUploadArea({
   isCompressing,
   isUploading = false,
   error,
+  warning = null,
   compressionInfo = null,
   disabled = false,
   isOcrAnalyzing = false,
@@ -235,6 +238,13 @@ export function ImageUploadArea({
         {error && <StatusMessage key="error" icon={<ErrorIcon />} text={error} variant="error" />}
       </AnimatePresence>
 
+      {/* 警告メッセージ（保存はできたが縮小・サムネイルを作れなかった場合） */}
+      <AnimatePresence>
+        {warning && (
+          <StatusMessage key="warning" icon={<WarningIcon />} text={warning} variant="warning" />
+        )}
+      </AnimatePresence>
+
       {/* OCR 結果メッセージ */}
       <AnimatePresence>
         {ocrMessage && (
@@ -380,12 +390,13 @@ function StatusMessage({
 }: {
   icon: React.ReactNode;
   text: string;
-  variant: 'info' | 'success' | 'error';
+  variant: 'info' | 'success' | 'error' | 'warning';
 }) {
   const colorClass = {
     info: 'text-muted-foreground',
     success: 'text-green-600 dark:text-green-400',
     error: 'text-destructive',
+    warning: 'text-amber-600 dark:text-amber-400',
   }[variant];
 
   return (
@@ -454,6 +465,16 @@ function CheckIcon() {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
       <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function WarningIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0">
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
     </svg>
   );
 }
