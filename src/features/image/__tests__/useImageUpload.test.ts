@@ -213,7 +213,14 @@ describe('useImageUpload - 一時領域からの引き取り', () => {
   function mockUpload(key: string) {
     for (const k of [key, `thumb_${key}`]) {
       mockGraphql.mockResolvedValueOnce({
-        data: { generateUploadUrl: { uploadUrl: `https://s3.example/${k}`, key: k } },
+        data: {
+          generateUploadUrl: {
+            uploadUrl: `https://s3.example/${k}`,
+            key: k,
+            // 署名した側が返した値をそのまま送る決まり
+            taggingHeader: 'lifecycle=temporary',
+          },
+        },
       });
       (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
@@ -239,7 +246,8 @@ describe('useImageUpload - 一時領域からの引き取り', () => {
         variables: expect.objectContaining({ temporary: true }),
       }),
     );
-    // 署名にタグが含まれるため、PUT でも同じ値を送らないと 403 になる
+    // 署名にタグが含まれるため、PUT でも同じ値を送らないと 403 になる。
+    // 値は自前で組み立てず、サーバーが返したものをそのまま使う
     const [, putInit] = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(putInit.headers['x-amz-tagging']).toBe('lifecycle=temporary');
   });
@@ -266,6 +274,42 @@ describe('useImageUpload - 一時領域からの引き取り', () => {
     // 一時領域のキーを記録に持たせるとライフサイクルで実体だけが消える
     expect(keys).toEqual([FINAL_KEY]);
     expect(result.current.imageKeys).toEqual([FINAL_KEY]);
+  });
+
+  // 正式な場所にあるキーまで複製に出すと、複製先で名前がぶつかって連番が付き、
+  // 元のオブジェクトが誰からも参照されなくなる（PR #145 のレビュー指摘）
+  it('一時領域のキーだけを複製に出し、並び順は保つ', async () => {
+    mockUpload(TEMP_KEY);
+    mockCopyRecordImages.mockResolvedValue(['sub-1/purchase/rec-1/a.jpg']);
+
+    const { result } = renderHook(() => useImageUpload());
+
+    // 1 枚目は事前アップロード（一時領域）
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('a.jpg'));
+    });
+    await act(async () => {
+      await result.current.preUploadImages('purchase');
+    });
+
+    // 2 枚目は保存時に正式な場所へ直接アップロードされる
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('b.jpg'));
+    });
+    mockUpload('sub-1/purchase/rec-1/b.jpg');
+
+    let keys: string[] = [];
+    await act(async () => {
+      keys = await result.current.uploadImages('purchase', 'rec-1');
+    });
+
+    // 複製に出すのは一時領域のキーだけ
+    expect(mockCopyRecordImages).toHaveBeenCalledWith([TEMP_KEY], 'purchase', 'rec-1');
+    // 並びは元のまま（複製したものを同じ位置へ戻す）
+    expect(keys).toEqual([
+      'sub-1/purchase/rec-1/a.jpg',
+      'sub-1/purchase/rec-1/b.jpg',
+    ]);
   });
 
   it('複製に失敗したら登録を止める（消える画像を記録に紐づけない）', async () => {

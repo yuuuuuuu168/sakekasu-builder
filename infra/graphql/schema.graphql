@@ -70,6 +70,10 @@ type DrinkingRecordConnection {
 type PresignedUrlResponse {
   uploadUrl: String!
   key: String!
+  # 一時領域へのアップロードで PUT に付ける x-amz-tagging の値。
+  # 署名に含まれるため、クライアントは同じ値を送らないと 403 になる。
+  # 定数を両側に持つとドリフトで全アップロードが止まるので、署名した側が返す
+  taggingHeader: String
 }
 
 # OCR 項目ごとの確信度（0.0〜1.0）。低確信の項目はフォーム側で「要確認」表示に使う

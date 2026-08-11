@@ -72,6 +72,14 @@ interface AppSyncEvent {
 interface UploadUrlResponse {
   uploadUrl: string;
   key: string;
+  /**
+   * 一時領域へのアップロードで PUT に付けるべき x-amz-tagging の値。
+   *
+   * タグは署名の対象なので、クライアントが違う値を送ると 403 になる。
+   * 同じ文字列を両側の定数として持つとドリフトに気づけないため、
+   * 署名した側がそのまま返す（一時領域以外では null）
+   */
+  taggingHeader: string | null;
 }
 
 /** そのキーがサムネイルを指しているか */
@@ -219,7 +227,7 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
     expiresIn: UPLOAD_EXPIRY,
   });
 
-  return { uploadUrl, key };
+  return { uploadUrl, key, taggingHeader: temporary ? TEMP_OBJECT_TAGGING : null };
 }
 
 /** 1 件分のダウンロード用 Presigned URL を作る（所有者チェック込み） */
