@@ -43,8 +43,14 @@ function ratingToValue(rating: RatingFilter): string {
   return String(rating);
 }
 
-function valueToRating(value: string): RatingFilter {
-  return value === 'all' ? 'all' : (Number(value) as RatingFilter);
+/**
+ * Select の値を評価フィルタへ戻す。
+ *
+ * onValueChange は選択が外れたときに null を渡してくる。数値へ変換すると
+ * NaN になって絞り込みが空になるため、「すべて」として扱う
+ */
+function valueToRating(value: string | null): RatingFilter {
+  return value === null || value === 'all' ? 'all' : (Number(value) as RatingFilter);
 }
 
 export function FilterControls({
