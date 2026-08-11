@@ -42,6 +42,23 @@ const EXPECTED_CDK_ENUM = 'NODEJS_22_X';
  */
 const EXPECTED_RETENTION_DAYS = 30;
 
+/**
+ * アカウントの Lambda 同時実行上限（2026-08-11 に 10 から引き上げ済み）。
+ * `aws lambda get-account-settings` の ConcurrentExecutions と揃える。
+ */
+const ACCOUNT_CONCURRENCY_LIMIT = 1000;
+
+/** AWS が要求する未予約枠の下限。予約の合計はこれを侵せない */
+const MIN_UNRESERVED_CONCURRENCY = 100;
+
+/**
+ * テストでスタックを合成するときの環境名。
+ *
+ * 関数名は `{envName}-sakekasu-...` で組み立てられるため、期待値を書く側と
+ * 合成する側で揃っていないと、名前が食い違って検査にならない
+ */
+const SYNTH_ENV_NAME = 'dev';
+
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 const libDir = path.join(here, '../lib');
 
@@ -84,17 +101,21 @@ const STACKS_WITH_LAMBDA: Record<string, string> = {
 };
 
 /** アプリ本体・課金通知・DevOps Agent のすべてを合成する */
-function synthAllTemplates(): Record<string, Template> {
+function synthAllTemplates(): {
+  templates: Record<string, Template>;
+  /** スタックのキー → デプロイ先アカウント ID */
+  accounts: Record<string, string>;
+} {
   const app = new cdk.App();
 
-  const authStack = new AuthStack(app, 'TestAuth', { envName: 'dev', env });
+  const authStack = new AuthStack(app, 'TestAuth', { envName: SYNTH_ENV_NAME, env });
   const apiStack = new ApiStack(app, 'TestApi', {
-    envName: 'dev',
+    envName: SYNTH_ENV_NAME,
     userPool: authStack.userPool,
     env,
   });
   const monitoringStack = new MonitoringStack(app, 'TestMonitoring', {
-    envName: 'dev',
+    envName: SYNTH_ENV_NAME,
     graphqlApi: apiStack.graphqlApi,
     tables: [apiStack.purchaseTable, apiStack.drinkingTable],
     functions: [apiStack.presignedUrlFunction, apiStack.ocrAnalyzerFunction],
@@ -110,7 +131,7 @@ function synthAllTemplates(): Record<string, Template> {
   });
 
   const devopsAgentStack = new DevOpsAgentStack(app, 'TestDevOpsAgent', {
-    envName: 'dev',
+    envName: SYNTH_ENV_NAME,
     monitoringAccountId: '<運用アカウント ID>',
     agentSpaceArn: 'arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/abc123',
     alertTopic: monitoringStack.alertTopic,
@@ -125,18 +146,30 @@ function synthAllTemplates(): Record<string, Template> {
     env: { account: '111111111111', region: 'ap-northeast-1' },
   });
 
+  const stacks = {
+    auth: authStack,
+    api: apiStack,
+    monitoring: monitoringStack,
+    devopsAgent: devopsAgentStack,
+    billing: billingStack,
+  };
+
   return {
-    auth: Template.fromStack(authStack),
-    api: Template.fromStack(apiStack),
-    monitoring: Template.fromStack(monitoringStack),
-    devopsAgent: Template.fromStack(devopsAgentStack),
-    billing: Template.fromStack(billingStack),
+    templates: Object.fromEntries(
+      Object.entries(stacks).map(([name, stack]) => [name, Template.fromStack(stack)]),
+    ),
+    // 同時実行の枠はアカウント単位で効く。どのスタックがどのアカウントへ
+    // 行くかは合成時の env で決まるので、そこから機械的に拾う。
+    // 手で一覧を持つと、スタックを足したときの書き漏れに気づけない
+    accounts: Object.fromEntries(
+      Object.entries(stacks).map(([name, stack]) => [name, stack.account]),
+    ),
   };
 }
 
 describe('Lambda のランタイム', () => {
   // 合成に esbuild が走るため、既定の 5 秒では足りない
-  const templates = synthAllTemplates();
+  const { templates, accounts } = synthAllTemplates();
 
   // 自前で定義した関数は functionName を必ず指定している。CDK が内部で作る
   // LogRetention や カスタムリソースのプロバイダーは指定しないので、
@@ -273,5 +306,98 @@ describe('Lambda のランタイム', () => {
     expect(functions, 'NodejsFunction が1つも見つからない（走査の誤りを疑う）').toBeGreaterThan(0);
     expect(files, `保持期間の指定が足りていない:\n${files.join('\n')}`).toEqual([]);
     expect(withRetention).toBe(functions);
+  });
+
+  // 予約済み同時実行数はアカウント単位で効くので、1 スタックの中だけを見ても
+  // 全体は分からない。
+  //
+  // 課金通知は管理アカウント側へ行くスタックで、同時実行の枠も別勘定になる。
+  // アプリ本体の合計に混ぜると、どちらのアカウントも余裕があるのに合計だけが
+  // 超えて落ちたり、逆に管理アカウント側の超過を見逃したりする。
+  //
+  // 振り分けは合成時のアカウントから決める。一覧を手で持つと、スタックを
+  // 足したときにどちらかへ書き漏らして、予約が数えられなかったり
+  // 別アカウント分が混ざったりする
+  const APP_ACCOUNT_STACKS = Object.keys(accounts).filter(
+    (name) => accounts[name] === env.account,
+  );
+  const OTHER_ACCOUNT_STACKS = Object.keys(accounts).filter(
+    (name) => accounts[name] !== env.account,
+  );
+
+  /** そのスタックに置かれた予約を「関数名 → 予約数」で集める */
+  function collectReservations(stackNames: string[]): Record<string, number> {
+    const reservations: Record<string, number> = {};
+
+    for (const name of stackNames) {
+      const functions = templates[name].findResources('AWS::Lambda::Function');
+      for (const fn of Object.values(functions)) {
+        const reserved = fn.Properties?.ReservedConcurrentExecutions;
+        const functionName = fn.Properties?.FunctionName;
+
+        // CDK が内部で作る関数（LogRetention など）は名前を持たない。
+        // 名前で突き合わせるので、こちらの管理下にあるものだけを見る
+        if (typeof reserved !== 'number' || typeof functionName !== 'string') {
+          continue;
+        }
+
+        // 論理 ID は CDK の構成で変わるため、関数名を鍵にする
+        reservations[functionName] = reserved;
+      }
+    }
+
+    return reservations;
+  }
+
+  /**
+   * 予約を入れている関数と、その数。
+   *
+   * 合計だけを見張っても、1 つ消えて別の 1 つが残っていれば気づけない。
+   * どちらも別々の理由で入れている（OCR は Bedrock の費用、DevOps Agent は
+   * 調査が一斉に立ち上がるのを防ぐため）ので、消えたら落ちるようにする。
+   * 予約を足したり外したりするときは、ここも一緒に直すこと
+   */
+  const EXPECTED_RESERVATIONS: Record<string, number> = {
+    [`${SYNTH_ENV_NAME}-sakekasu-ocr-analyzer`]: 20,
+    [`${SYNTH_ENV_NAME}-sakekasu-devops-agent-webhook`]: 2,
+  };
+
+  // 振り分けが壊れると、以降の検査が「対象ゼロ」で素通りしてしまう。
+  // 両側に中身があることを先に固定しておく
+  it('スタックがアカウントごとに振り分けられている', () => {
+    expect(APP_ACCOUNT_STACKS, 'アプリ本体側のスタックが1つも無い').not.toEqual([]);
+    expect(OTHER_ACCOUNT_STACKS, '別アカウント側のスタックが1つも無い').not.toEqual([]);
+
+    // 合成したスタックはどちらかに必ず入る（取りこぼしが無い）
+    expect([...APP_ACCOUNT_STACKS, ...OTHER_ACCOUNT_STACKS].sort()).toEqual(
+      Object.keys(templates).sort(),
+    );
+  });
+
+  it('予約を入れている関数と数が想定どおり', () => {
+    expect(collectReservations(APP_ACCOUNT_STACKS)).toEqual(EXPECTED_RESERVATIONS);
+  });
+
+  // AWS は未予約枠を 100 以上残すことを要求するため、合計が上限 −100 を
+  // 超えると apply で落ちる。別のスタックに予約を足したときに CI で気づける
+  // ようにしておく（予約の効果と付ける基準は api-stack.ts のコメントを参照）
+  it('予約の合計が未予約枠を 100 以上残す', () => {
+    const reservations = collectReservations(APP_ACCOUNT_STACKS);
+    const total = Object.values(reservations).reduce((sum, value) => sum + value, 0);
+    const detail = Object.entries(reservations)
+      .map(([name, value]) => `${name}: ${value}`)
+      .join('\n');
+
+    expect(
+      total,
+      `予約の合計が多すぎる（アカウント上限 ${ACCOUNT_CONCURRENCY_LIMIT}）:\n${detail}`,
+    ).toBeLessThanOrEqual(ACCOUNT_CONCURRENCY_LIMIT - MIN_UNRESERVED_CONCURRENCY);
+  });
+
+  // 管理アカウント側は枠が別勘定で、上限もこちらでは確かめられない。
+  // 予約を入れる時点で向こうの空きを確認してほしいので、
+  // 「入れていない」ことを固定しておく（入れたらここが落ちる）
+  it('管理アカウント側のスタックは予約を入れていない', () => {
+    expect(collectReservations(OTHER_ACCOUNT_STACKS)).toEqual({});
   });
 });
