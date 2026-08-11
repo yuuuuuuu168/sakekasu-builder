@@ -49,11 +49,14 @@ function thumbnailsExist(): void {
   sendMock.mockImplementation(async () => ({}));
 }
 
-/** サムネイルが「ない」ものとして振る舞わせる */
+/** サムネイルが「ない」ものとして振る舞わせる（SDK は name に NotFound を入れる） */
 function thumbnailsMissing(): void {
   sendMock.mockImplementation(async (command: unknown) => {
     if (command instanceof FakeHeadObjectCommand) {
-      throw new Error('NotFound');
+      const error = new Error('NotFound');
+      error.name = 'NotFound';
+      Object.assign(error, { $metadata: { httpStatusCode: 404 } });
+      throw error;
     }
     return {};
   });
@@ -191,6 +194,33 @@ describe('copyImages', () => {
     expect(copies()).toEqual([]);
   });
 
+  // `/` で終わるキーだとファイル名が空になり、複製先がフォルダを指すキーになる。
+  // 記録には中身の無いキーが残り、画像が出ないまま気づけない
+  it.each([
+    ['スラッシュで終わるキー', `${OWNER}/purchase/rec-1/`],
+    ['ファイル名が .. のキー', `${OWNER}/purchase/rec-1/..`],
+  ])('%s は複製しない', async (_label, sourceKey) => {
+    await expect(callCopyImages({ sourceKeys: [sourceKey] })).rejects.toThrow('Invalid fileName');
+    expect(copies()).toEqual([]);
+  });
+
+  // すべての例外を「無い」と扱うと、スロットリングや権限エラーでも
+  // サムネイルを黙って飛ばし、原画だけが複製された状態に気づけない
+  it('サムネイルの確認が 404 以外で失敗したら、黙って飛ばさず落とす', async () => {
+    sendMock.mockImplementation(async (command: unknown) => {
+      if (command instanceof FakeHeadObjectCommand) {
+        const error = new Error('SlowDown');
+        error.name = 'SlowDown';
+        throw error;
+      }
+      return {};
+    });
+
+    await expect(
+      callCopyImages({ sourceKeys: [`${OWNER}/purchase/rec-1/a.jpg`] }),
+    ).rejects.toThrow('SlowDown');
+  });
+
   it('購入記録どうしの複製もできる', async () => {
     const result = await callCopyImages({
       sourceKeys: [`${OWNER}/drinking/rec-1/a.jpg`],
@@ -198,5 +228,44 @@ describe('copyImages', () => {
     });
 
     expect(result).toEqual([`${OWNER}/purchase/${RECORD_ID}/a.jpg`]);
+  });
+});
+
+// アップロード側も同じ材料でキーを組み立てる。片方だけ検証しても穴は塞がらない
+describe('generateUploadUrl のキー検証', () => {
+  beforeEach(() => {
+    sendMock.mockReset();
+    thumbnailsExist();
+  });
+
+  async function callGenerateUploadUrl(overrides: Record<string, unknown>) {
+    return handler({
+      info: { fieldName: 'generateUploadUrl' },
+      arguments: {
+        recordType: 'purchase',
+        recordId: RECORD_ID,
+        contentType: 'image/jpeg',
+        fileName: 'a.jpg',
+        ...overrides,
+      },
+      identity: { sub: OWNER },
+    } as Parameters<typeof handler>[0]);
+  }
+
+  it('正しい引数なら発行できる', async () => {
+    const result = await callGenerateUploadUrl({});
+
+    expect(result).toMatchObject({ key: `${OWNER}/purchase/${RECORD_ID}/a.jpg` });
+  });
+
+  it.each([
+    ['recordType が想定外', { recordType: 'admin' }],
+    ['recordType に階層が入る', { recordType: '../drinking' }],
+    ['recordId が UUID でない', { recordId: 'not-a-uuid' }],
+    ['recordId に階層が入る', { recordId: `../../${VICTIM}/purchase/rec-9` }],
+    ['fileName に階層が入る', { fileName: '../../evil.jpg' }],
+    ['fileName が ..', { fileName: '..' }],
+  ])('%s の場合は発行しない', async (_label, override) => {
+    await expect(callGenerateUploadUrl(override)).rejects.toThrow();
   });
 });

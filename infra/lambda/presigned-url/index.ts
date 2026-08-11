@@ -113,6 +113,31 @@ function requireOwnerSub(event: AppSyncEvent): string {
   return ownerSub;
 }
 
+/**
+ * キーの階層に使う値を検証する。
+ *
+ * キーは `{sub}/{recordType}/{recordId}/{fileName}` で組み立てる。
+ * 各要素をそのまま埋めると、区切り文字や `..` を混ぜて階層を細工できる。
+ * 所有者の sub が先頭に付くので他人の領域には届かないが、
+ * 自分の名前空間の中で想定外の位置に書けてしまう
+ */
+function assertRecordLocation(recordType: string, recordId: string): void {
+  if (!ALLOWED_RECORD_TYPES.includes(recordType)) {
+    throw new Error(`Invalid recordType: ${recordType}`);
+  }
+
+  if (!RECORD_ID_PATTERN.test(recordId)) {
+    throw new Error('Invalid recordId');
+  }
+}
+
+/** キーの末尾に使うファイル名を検証する */
+function assertFileName(fileName: string): void {
+  if (!fileName || fileName.includes('/') || fileName === '.' || fileName === '..') {
+    throw new Error(`Invalid fileName: ${fileName}`);
+  }
+}
+
 async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse> {
   const { recordType, recordId, contentType, fileName } = event.arguments;
   const ownerSub = requireOwnerSub(event);
@@ -124,6 +149,9 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
   if (!ALLOWED_CONTENT_TYPES.includes(contentType)) {
     throw new Error(`Invalid contentType: ${contentType}. Allowed: ${ALLOWED_CONTENT_TYPES.join(', ')}`);
   }
+
+  assertRecordLocation(recordType, recordId);
+  assertFileName(fileName);
 
   const key = `${ownerSub}/${recordType}/${recordId}/${fileName}`;
 
@@ -217,13 +245,26 @@ function uniqueFileName(fileName: string, used: Set<string>): string {
   throw new Error(`Cannot resolve a unique file name for: ${fileName}`);
 }
 
-/** S3 にそのキーのオブジェクトがあるか */
+/**
+ * S3 にそのキーのオブジェクトがあるか。
+ *
+ * 「無い」と判定するのは 404 のときだけにする。すべての例外を false にすると、
+ * スロットリングや権限エラーでもサムネイルを黙って飛ばしてしまい、
+ * 原画だけが複製された不揃いな状態に気づけない
+ */
 async function objectExists(key: string): Promise<boolean> {
   try {
     await s3Client.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    const name = (error as { name?: string }).name;
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+
+    if (name === 'NotFound' || name === 'NoSuchKey' || status === 404) {
+      return false;
+    }
+
+    throw error;
   }
 }
 
@@ -244,13 +285,7 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
     throw new Error('Missing required arguments: sourceKeys, recordType, recordId');
   }
 
-  if (!ALLOWED_RECORD_TYPES.includes(recordType)) {
-    throw new Error(`Invalid recordType: ${recordType}`);
-  }
-
-  if (!RECORD_ID_PATTERN.test(recordId)) {
-    throw new Error('Invalid recordId');
-  }
+  assertRecordLocation(recordType, recordId);
 
   // 同じキーが複数入っている記録があり、そのまま複製すると同じ画像が並ぶ
   const uniqueSources = [...new Set(sourceKeys)];
@@ -274,7 +309,12 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
   const destinations: string[] = [];
 
   for (const source of uniqueSources) {
-    const fileName = uniqueFileName(source.slice(source.lastIndexOf('/') + 1), usedNames);
+    // `/` で終わるキーを渡されるとファイル名が空になり、複製先が
+    // フォルダを指すキーになる。記録には中身の無いキーが残る
+    const sourceFileName = source.slice(source.lastIndexOf('/') + 1);
+    assertFileName(sourceFileName);
+
+    const fileName = uniqueFileName(sourceFileName, usedNames);
     const destination = `${ownerSub}/${recordType}/${recordId}/${fileName}`;
 
     await s3Client.send(
