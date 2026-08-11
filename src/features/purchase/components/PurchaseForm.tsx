@@ -125,6 +125,7 @@ export function PurchaseForm({ onSubmitSuccess, recordId, initialData }: Purchas
             isCompressing={imageUpload.isCompressing}
             isUploading={imageUpload.isUploading}
             error={imageUpload.error}
+            warning={imageUpload.warning}
             disabled={isSubmitting}
             isOcrAnalyzing={isAnalyzing}
             onOcrTrigger={handleOcrTrigger}
