@@ -96,6 +96,18 @@ const BEDROCK_FOUNDATION_MODEL_ID = 'anthropic.claude-haiku-4-5-20251001-v1:0';
 const BEDROCK_INFERENCE_REGIONS = ['ap-northeast-1', 'ap-northeast-3'];
 
 /**
+ * OCR 解析 Lambda に取り置く同時実行数。
+ *
+ * 1 回の呼び出しが Bedrock の課金につながるので、暴走したときの費用に
+ * 天井を置く。予約は上限と下限を兼ねるため、絞りすぎると正常な利用まで
+ * 弾いてしまう。1 記録あたり最大 5 枚・実績は週 58 回なので 20 で足りる。
+ *
+ * アカウントの同時実行上限（1000）から予約の合計を引いた残りは 100 以上を
+ * 保つ必要がある。ここを増やすときはその条件を確認すること
+ */
+const OCR_RESERVED_CONCURRENCY = 20;
+
+/**
  * 推論プロファイルIDと基盤モデルIDの対応を検査する。
  *
  * システム定義の推論プロファイルIDは「<接頭辞>.<基盤モデルID>」の形をしていて、
@@ -341,6 +353,13 @@ export class ApiStack extends cdk.Stack {
       memorySize: 512,
       architecture: Architecture.X86_64,
       tracing: Tracing.ACTIVE,
+      // この関数だけ同時実行の上限を切っている。1 回の呼び出しが Bedrock の
+      // 課金につながるため、暴走したときの費用に天井を置く。
+      //
+      // 予約は上限と下限を兼ねる。ここで確保した分は他の関数から使えなくなる
+      // 代わりに、他が枠を食い尽くしても OCR は必ずこの数まで動く。
+      // 実績は週 58 回・1 記録あたり最大 5 枚なので、同時 20 で足りる
+      reservedConcurrentExecutions: OCR_RESERVED_CONCURRENCY,
       environment: {
         BUCKET_NAME: this.imageBucket.bucketName,
         BEDROCK_MODEL_ID,

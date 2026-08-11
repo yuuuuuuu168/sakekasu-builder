@@ -347,6 +347,39 @@ describe('ApiStack', () => {
     // ラッパーだけ指定してレイヤーに実体が無いと、関数は Runtime.ExitError で
     // 起動しなくなる。実際にこれで画像アップロードを全滅させた（PR #110）。
     //
+    // 1 回の呼び出しが Bedrock の課金につながるので、暴走したときの費用に
+    // 天井を置く。アカウント上限を上げたことで設定できるようになった（Issue #82 の続き）
+    it('OCR だけ同時実行の上限を切っている', () => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: 'dev-sakekasu-ocr-analyzer',
+        ReservedConcurrentExecutions: 20,
+      });
+    });
+
+    // 予約は上限と下限を兼ねる。伸びてほしい関数に付けると、
+    // 未予約プールを使えなくなって逆に頭打ちになる
+    it('画像 URL の発行には上限を切らない', () => {
+      const functions = template.findResources('AWS::Lambda::Function', {
+        Properties: { FunctionName: 'dev-sakekasu-presigned-url' },
+      });
+      const [presigned] = Object.values(functions);
+
+      expect(presigned.Properties.ReservedConcurrentExecutions).toBeUndefined();
+    });
+
+    // 予約の合計を引いた残りが 100 を下回るとデプロイが落ちる。
+    // 予約を増やすときに気づけるようにしておく
+    it('予約の合計がアカウント上限に対して無理のない範囲に収まっている', () => {
+      const functions = template.findResources('AWS::Lambda::Function');
+      const reserved = Object.values(functions)
+        .map((fn) => fn.Properties?.ReservedConcurrentExecutions)
+        .filter((value): value is number => typeof value === 'number')
+        .reduce((sum, value) => sum + value, 0);
+
+      // アカウント上限 1000 に対し、未予約は 100 以上を保つ必要がある
+      expect(reserved).toBeLessThanOrEqual(900);
+    });
+
     // Node.js 向けの AWS 製レイヤーは2種類あり、起動ラッパーの名前が違う。
     // - AWSOpenTelemetryDistroJs（Application Signals 用）→ /opt/otel-instrument
     // - aws-otel-nodejs-amd64-ver-*（汎用 ADOT）        → /opt/otel-handler
