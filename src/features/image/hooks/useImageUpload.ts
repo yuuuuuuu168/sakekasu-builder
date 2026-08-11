@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { generateUploadUrl } from '@/graphql/mutations';
 import { validateImageFile } from '../utils/imageValidator';
@@ -64,12 +64,32 @@ export function useImageUpload(): UseImageUploadReturn {
   const [isCompressing, setIsCompressing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
   const [imageKeys, setImageKeys] = useState<string[]>([]);
+
+  /**
+   * 警告は画像ごとに持つ（imageFiles と同じ並び）。
+   *
+   * 1 つの箱に入れて上書きすると、選んだ画像を外しても警告が残り、
+   * 逆に新しい画像を足すと前の画像の問題が消える。どちらも「今ある画像の
+   * 状態」と食い違う。並びを揃えておけば、外したときに一緒に落とせる
+   */
+  const [fileWarnings, setFileWarnings] = useState<(string | null)[]>([]);
 
   // 後方互換用
   const imageFile = imageFiles[0] ?? null;
   const imageKey = imageKeys[0] ?? null;
+
+  /**
+   * 表示する警告。
+   *
+   * 読み込めなかった画像は縮小もサムネイル生成もできていないため、
+   * サムネイルだけ失敗した場合より状態が悪い。両方あるときは前者を出す
+   */
+  const warning = useMemo(() => {
+    const active = fileWarnings.filter((w): w is string => w !== null);
+    if (active.length === 0) return null;
+    return active.includes(UNREADABLE_WARNING) ? UNREADABLE_WARNING : active[0];
+  }, [fileWarnings]);
 
   const setImageFile = useCallback((file: File | null) => {
     if (file) {
@@ -101,10 +121,11 @@ export function useImageUpload(): UseImageUploadReturn {
       const result = await compressImage(file);
       // 読めなかった画像はそのまま保存される。縮小もサムネイルも無い状態を
       // 選んだ時点で伝えないと、一覧が重くなった理由を後から辿れない
-      if (!result.wasReadable) {
-        setWarning(UNREADABLE_WARNING);
-      }
       setImageFiles((prev) => [...prev, result.file]);
+      setFileWarnings((prev) => [
+        ...prev,
+        result.wasReadable ? null : UNREADABLE_WARNING,
+      ]);
     } catch (err) {
       const message =
         err instanceof Error
@@ -119,6 +140,9 @@ export function useImageUpload(): UseImageUploadReturn {
   const removeImage = useCallback((index: number) => {
     setImageFiles((prev) => prev.filter((_, i) => i !== index));
     setImageKeys((prev) => prev.filter((_, i) => i !== index));
+    // 外した画像の警告も一緒に落とす。残すと、もう無い画像について
+    // 警告し続けることになる
+    setFileWarnings((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
   /** S3 へ1ファイルを PUT してキーを返す */
@@ -187,17 +211,28 @@ export function useImageUpload(): UseImageUploadReturn {
     }
   };
 
-  /** 単一ファイルのアップロード処理（原画＋サムネイル） */
+  /**
+   * 単一ファイルのアップロード処理（原画＋サムネイル）。
+   *
+   * index は警告を画像に紐づけるための位置。1 枚失敗しただけで
+   * 全部に警告が付いたり、成功した画像の分まで残ったりしないようにする
+   */
   const uploadSingleFile = async (
     file: File,
     recordType: string,
     recordId: string,
+    index: number,
   ): Promise<string | null> => {
     const key = await putToS3(file, recordType, recordId);
     if (key === null) return null;
 
     if (!(await uploadThumbnail(file, recordType, recordId))) {
-      setWarning(THUMBNAIL_WARNING);
+      setFileWarnings((prev) => {
+        const next = [...prev];
+        // 読み込めていない画像には、より状態の悪い方の警告を残す
+        if (next[index] == null) next[index] = THUMBNAIL_WARNING;
+        return next;
+      });
     }
     return key;
   };
@@ -224,7 +259,7 @@ export function useImageUpload(): UseImageUploadReturn {
             keys.push(existing);
             continue;
           }
-          const key = await uploadSingleFile(imageFiles[i], recordType, recordId);
+          const key = await uploadSingleFile(imageFiles[i], recordType, recordId, i);
           if (key === null) {
             setError('画像のアップロードに失敗しました。もう一度お試しください');
             return [];
@@ -273,7 +308,7 @@ export function useImageUpload(): UseImageUploadReturn {
             keys.push(existing);
             continue;
           }
-          const key = await uploadSingleFile(imageFiles[i], recordType, tempRecordId);
+          const key = await uploadSingleFile(imageFiles[i], recordType, tempRecordId, i);
           if (key === null) {
             setError('画像のアップロードに失敗しました。もう一度お試しください');
             return [];
@@ -305,7 +340,7 @@ export function useImageUpload(): UseImageUploadReturn {
   const clearImage = useCallback(() => {
     setImageFiles([]);
     setError(null);
-    setWarning(null);
+    setFileWarnings([]);
     setImageKeys([]);
   }, []);
 
