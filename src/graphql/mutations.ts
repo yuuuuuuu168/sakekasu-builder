@@ -126,6 +126,7 @@ export const generateUploadUrl = /* GraphQL */ `
     ) {
       uploadUrl
       key
+      taggingHeader
     }
   }
 `;

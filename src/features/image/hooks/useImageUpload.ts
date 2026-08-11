@@ -4,7 +4,7 @@ import { generateUploadUrl } from '@/graphql/mutations';
 import { validateRecordImageFile } from '../utils/imageValidator';
 import { compressImage, createThumbnail } from '../utils/imageCompressor';
 import { toThumbnailFileName } from '../lib/thumbnailKey';
-import { TEMP_OBJECT_TAGGING, isTemporaryKey } from '../lib/tempImageKey';
+import { isTemporaryKey } from '../lib/tempImageKey';
 import { copyRecordImages } from '../lib/copyRecordImages';
 
 const client = generateClient();
@@ -231,13 +231,25 @@ export function useImageUpload(): UseImageUploadReturn {
       return null;
     }
 
-    const { uploadUrl, key } = (result as { data: { generateUploadUrl: { uploadUrl: string; key: string } } }).data.generateUploadUrl;
+    const { uploadUrl, key, taggingHeader } = (
+      result as {
+        data: {
+          generateUploadUrl: {
+            uploadUrl: string;
+            key: string;
+            taggingHeader: string | null;
+          };
+        };
+      }
+    ).data.generateUploadUrl;
 
     const uploadResponse = await fetch(uploadUrl, {
       method: 'PUT',
       headers: {
         'Content-Type': file.type,
-        ...(temporary ? { 'x-amz-tagging': TEMP_OBJECT_TAGGING } : {}),
+        // タグは署名に含まれる。値を自前で組み立てるとサーバー側と食い違って
+        // 403 になるため、署名した側が返したものをそのまま送る
+        ...(taggingHeader ? { 'x-amz-tagging': taggingHeader } : {}),
       },
       body: file,
     });
@@ -350,14 +362,23 @@ export function useImageUpload(): UseImageUploadReturn {
         // 一時領域のキーは記録に持たせられない。ライフサイクルで実体が消えて
         // 記録だけが画像を指したまま残る。正式な場所へ複製してから返す（Issue #140）。
         // 複製できなかった場合は登録を止める。消えると分かっている画像を
-        // 記録に紐づけるより、やり直してもらう方がよい
-        const finalKeys = keys.some(isTemporaryKey)
-          ? await copyRecordImages(
-              keys,
-              recordType as 'purchase' | 'drinking',
-              recordId,
-            )
-          : keys;
+        // 記録に紐づけるより、やり直してもらう方がよい。
+        //
+        // 複製に出すのは一時領域のキーだけ。既に正式な場所にあるキーまで渡すと、
+        // 複製先で名前がぶつかって連番が付き、元のオブジェクトが参照されなくなる
+        const temporaryKeys = keys.filter(isTemporaryKey);
+        let finalKeys = keys;
+
+        if (temporaryKeys.length > 0) {
+          const copied = await copyRecordImages(
+            temporaryKeys,
+            recordType as 'purchase' | 'drinking',
+            recordId,
+          );
+          // 並び順は記録の見え方に効くので、元の位置へ差し戻す
+          let next = 0;
+          finalKeys = keys.map((key) => (isTemporaryKey(key) ? copied[next++] : key));
+        }
 
         setImageKeys(finalKeys);
         return finalKeys;

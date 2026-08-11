@@ -9,14 +9,6 @@
 export const TEMP_LOCATION = 'tmp';
 
 /**
- * S3 の PUT に付けるタグ。
- *
- * presigned URL の署名対象に含まれるため、この値のヘッダを送らないと
- * アップロード自体が失敗する。付け忘れが静かに通り抜けることはない
- */
-export const TEMP_OBJECT_TAGGING = 'lifecycle=temporary';
-
-/**
  * そのキーが一時領域を指しているか。
  *
  * 一時領域のキーをそのまま記録に保存すると、ライフサイクルで画像が消えて
