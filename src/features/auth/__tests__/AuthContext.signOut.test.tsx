@@ -35,7 +35,11 @@ const mockClearFilterState = vi.fn();
 vi.mock('@/features/sommelier/lib/chatStorage', () => ({
   clearMessages: (...args: unknown[]) => mockClearMessages(...args),
 }));
-vi.mock('@/features/sommelier/lib/runtimeSend', () => ({ resetSommelierSession: vi.fn() }));
+const mockResetSommelierSession = vi.fn();
+
+vi.mock('@/features/sommelier/lib/runtimeSend', () => ({
+  resetSommelierSession: (...args: unknown[]) => mockResetSommelierSession(...args),
+}));
 vi.mock('@/features/records/lib/filterStorage', () => ({
   clearFilterState: (...args: unknown[]) => mockClearFilterState(...args),
 }));
@@ -97,6 +101,7 @@ describe('AuthProvider の signOut', () => {
 
     mockClearMessages.mockClear();
     mockClearFilterState.mockClear();
+    mockResetSommelierSession.mockClear();
 
     await act(async () => {
       await result.current.signOut();
@@ -104,6 +109,8 @@ describe('AuthProvider の signOut', () => {
 
     expect(mockClearMessages).toHaveBeenCalledTimes(2);
     expect(mockClearFilterState).toHaveBeenCalledTimes(2);
+    // セッション ID は次のリクエストで作り直されるため、通信の後にも切り替える
+    expect(mockResetSommelierSession).toHaveBeenCalledTimes(2);
   });
 
   // サインアウトが失敗したときが一番まずい。利用者はサインアウトしたつもりで

@@ -155,6 +155,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearFilterState(user.userId);
       }
       clearDownloadUrlCache();
+      // セッション ID は次のリクエストが来た時点で作り直されて残るため、
+      // 通信を待つ間に相談が走ると次の利用者へ引き継がれてしまう。
+      // Runtime 側の会話文脈が混ざらないよう、ここでも切り替える
+      resetSommelierSession();
       setUser(null);
     }
   }, [user]);
