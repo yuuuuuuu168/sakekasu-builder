@@ -284,32 +284,62 @@ describe('Lambda のランタイム', () => {
     expect(withRetention).toBe(functions);
   });
 
-  // 予約済み同時実行数はアカウント単位で効く。1 スタックの中だけを見ても
-  // 全体は分からないので、ここで横断して合計する。
+  // 予約済み同時実行数はアカウント単位で効くので、1 スタックの中だけを見ても
+  // 全体は分からない。アプリ本体のアカウントへ行くスタックを横断して集める。
   //
-  // AWS は未予約枠を 100 以上残すことを要求するため、合計が上限 −100 を
-  // 超えると apply で落ちる。別のスタックに予約を足したときに CI で気づける
-  // ようにしておく（予約の効果と付ける基準は api-stack.ts のコメントを参照）
-  it('全スタックの予約済み同時実行数の合計が未予約枠を 100 以上残す', () => {
-    const reservations: string[] = [];
-    let total = 0;
+  // 課金通知は管理アカウント側の別スタックで、同時実行の枠も別勘定になる。
+  // ここに混ぜると、どちらのアカウントも余裕があるのに合計だけが超えて
+  // 落ちたり、逆に管理アカウント側の超過を見逃したりする
+  const APP_ACCOUNT_STACKS = ['auth', 'api', 'monitoring', 'devopsAgent'] as const;
 
-    for (const [name, template] of Object.entries(templates)) {
-      const functions = template.findResources('AWS::Lambda::Function');
-      for (const [logicalId, fn] of Object.entries(functions)) {
+  /** アプリ本体のアカウントに置かれる予約を「関数名 → 予約数」で集める */
+  function collectAppAccountReservations(): Record<string, number> {
+    const reservations: Record<string, number> = {};
+
+    for (const name of APP_ACCOUNT_STACKS) {
+      const functions = templates[name].findResources('AWS::Lambda::Function');
+      for (const fn of Object.values(functions)) {
         const reserved = fn.Properties?.ReservedConcurrentExecutions;
         if (typeof reserved === 'number') {
-          total += reserved;
-          reservations.push(`${name}/${logicalId}: ${reserved}`);
+          // 論理 ID は CDK の構成で変わる。関数名で突き合わせる
+          reservations[fn.Properties?.FunctionName ?? '(名前なし)'] = reserved;
         }
       }
     }
 
-    // 予約が全部消えても気づけるように、下限も見る
-    expect(reservations.length, '予約が1つも無い（設定漏れを疑う）').toBeGreaterThan(0);
+    return reservations;
+  }
+
+  /**
+   * 予約を入れている関数と、その数。
+   *
+   * 合計だけを見張っても、1 つ消えて別の 1 つが残っていれば気づけない。
+   * どちらも別々の理由で入れている（OCR は Bedrock の費用、DevOps Agent は
+   * 調査が一斉に立ち上がるのを防ぐため）ので、消えたら落ちるようにする。
+   * 予約を足したり外したりするときは、ここも一緒に直すこと
+   */
+  const EXPECTED_RESERVATIONS: Record<string, number> = {
+    'dev-sakekasu-ocr-analyzer': 20,
+    'dev-sakekasu-devops-agent-webhook': 2,
+  };
+
+  it('予約を入れている関数と数が想定どおり', () => {
+    expect(collectAppAccountReservations()).toEqual(EXPECTED_RESERVATIONS);
+  });
+
+  // AWS は未予約枠を 100 以上残すことを要求するため、合計が上限 −100 を
+  // 超えると apply で落ちる。別のスタックに予約を足したときに CI で気づける
+  // ようにしておく（予約の効果と付ける基準は api-stack.ts のコメントを参照）
+  it('予約の合計が未予約枠を 100 以上残す', () => {
+    const reservations = collectAppAccountReservations();
+    const total = Object.values(reservations).reduce((sum, value) => sum + value, 0);
+    const detail = Object.entries(reservations)
+      .map(([name, value]) => `${name}: ${value}`)
+      .join('\n');
+
     expect(
       total,
-      `予約の合計が多すぎる（アカウント上限 ${ACCOUNT_CONCURRENCY_LIMIT}）:\n${reservations.join('\n')}`,
+      `予約の合計が多すぎる（アカウント上限 ${ACCOUNT_CONCURRENCY_LIMIT}）:\n${detail}`,
     ).toBeLessThanOrEqual(ACCOUNT_CONCURRENCY_LIMIT - MIN_UNRESERVED_CONCURRENCY);
   });
 });
