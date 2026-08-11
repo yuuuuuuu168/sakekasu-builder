@@ -35,6 +35,10 @@ from botocore.exceptions import ClientError
 THUMBNAIL_PREFIX = "thumb_"
 
 
+def is_thumbnail(file_name: str) -> bool:
+    return file_name.startswith(THUMBNAIL_PREFIX)
+
+
 def to_thumbnail_key(key: str) -> str:
     """原画キーからサムネイルキーを導出する（フロントエンドと同じ規則）。"""
     head, sep, file_name = key.rpartition("/")
@@ -78,24 +82,44 @@ def is_valid_file_name(file_name: str) -> bool:
     return bool(file_name) and "/" not in file_name and file_name not in (".", "..")
 
 
-def unique_file_name(file_name: str, used: set[str]) -> str:
-    """コピー先で名前がぶつからないようにする。
+def reserve_file_name(file_name: str, used: set[str]) -> str:
+    """コピー先で名前がぶつからないように、使う名前を確保する。
 
     別々のフォルダにある同名ファイル（image.jpg など）を 1 つの記録へ
     まとめるため、2 枚目以降は拡張子の前に連番を入れる。
+
+    サムネイルは原画名から導出する決まりで、連番を振って避けることが
+    できない。そのため原画名を決める時点で、その導出先（`thumb_<名前>`）も
+    一緒に押さえる。`thumb_` を含むファイル名は利用者が普通に付けられるので、
+    押さえておかないと「先に入れた画像のサムネイル」と「後から入れた画像の
+    原画」が同じキーになり、片方が上書きされる。
+
+    Lambda 側の reserveFileName と同じ規則。どちらかだけ直すと、
+    同じ入力で違う結果になる。
     """
-    if file_name not in used:
-        used.add(file_name)
+
+    def names_to_take(name: str) -> list[str]:
+        # 既にサムネイルを指す名前なら、そこからさらに導出はしない
+        if name.startswith(THUMBNAIL_PREFIX):
+            return [name]
+        return [name, f"{THUMBNAIL_PREFIX}{name}"]
+
+    def take(candidate: str) -> bool:
+        names = names_to_take(candidate)
+        if any(name in used for name in names):
+            return False
+        used.update(names)
+        return True
+
+    if take(file_name):
         return file_name
 
     stem, dot, ext = file_name.rpartition(".")
     if not dot:
         stem, ext = file_name, ""
     for i in range(2, 100):
-        candidate = f"{stem}-{i}{dot}{ext}"
-        if candidate not in used:
-            used.add(candidate)
-            return candidate
+        if take(f"{stem}-{i}{dot}{ext}"):
+            return f"{stem}-{i}{dot}{ext}"
     raise RuntimeError(f"コピー先の名前を決められない: {file_name}")
 
 
@@ -203,7 +227,7 @@ def main() -> int:
                 skipped_invalid += 1
                 continue
 
-            file_name = unique_file_name(source_file_name, used_names)
+            file_name = reserve_file_name(source_file_name, used_names)
             dest = f"{owner}/drinking/{record_id}/{file_name}"
             new_keys.append(dest)
 
@@ -220,6 +244,11 @@ def main() -> int:
                         CopySource={"Bucket": args.bucket, "Key": source},
                     )
                     copied += 1
+
+            # 元がすでにサムネイルなら、そこからさらに導出はしない。
+            # thumb_thumb_... という在りもしないキーを探すだけになる
+            if is_thumbnail(source_file_name):
+                continue
 
             # サムネイルは兄弟キーとして導出する。未生成の記録もあるので、
             # 在るときだけ複製する（無ければ一覧は原画にフォールバックする）
