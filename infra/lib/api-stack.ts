@@ -102,8 +102,10 @@ const BEDROCK_INFERENCE_REGIONS = ['ap-northeast-1', 'ap-northeast-3'];
  * 天井を置く。予約は上限と下限を兼ねるため、絞りすぎると正常な利用まで
  * 弾いてしまう。1 記録あたり最大 5 枚・実績は週 58 回なので 20 で足りる。
  *
+ * 予約はアカウント単位で積み上がる。このスタック以外にも
+ * devops-agent-stack.ts が 2 を取っており、現時点の合計は 22。
  * アカウントの同時実行上限（1000）から予約の合計を引いた残りは 100 以上を
- * 保つ必要がある。ここを増やすときはその条件を確認すること
+ * 保つ必要があり、合計は __tests__/lambda-config.test.ts で見張っている
  */
 const OCR_RESERVED_CONCURRENCY = 20;
 
