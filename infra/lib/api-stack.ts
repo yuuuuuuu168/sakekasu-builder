@@ -10,7 +10,12 @@ import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
 import { LAMBDA_LOG_RETENTION } from './log-retention.js';
-import { TEMP_LOCATION, TEMP_TAG_KEY, TEMP_TAG_VALUE } from './image-constants.js';
+import {
+  MAX_IMAGES_PER_RECORD,
+  TEMP_LOCATION,
+  TEMP_TAG_KEY,
+  TEMP_TAG_VALUE,
+} from './image-constants.js';
 
 /**
  * Application Signals 用の OpenTelemetry レイヤー（Issue #86）。
@@ -553,6 +558,13 @@ export function response(ctx) {
      * 複製しているが、API を直接叩けばその手順を飛ばせる（Issue #140）
      */
     const imageOwnershipGuard = `
+  // 添付枚数の上限。copyImages にも同じ上限があるが、あちらは複製経路だけを
+  // 見ている。API を直接叩いて任意の枚数を書き込まれると、getDownloadUrls の
+  // 上限（100件）を超えた記録が開けなくなり、削除時の S3 呼び出しも青天井になる
+  if (input.imageKeys && input.imageKeys.length > ${MAX_IMAGES_PER_RECORD}) {
+    util.error('Invalid imageKeys: too many images', 'BadRequest');
+  }
+
   const prefix = ctx.identity.sub + '/';
 
   // 自分のキーか。null 要素で落ちないよう、値の有無もここで見る

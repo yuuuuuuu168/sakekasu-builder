@@ -102,6 +102,23 @@ describe('ApiStack', () => {
     });
   });
 
+  // copyImages にも同じ上限があるが、あちらは複製経路だけを見ている。
+  // API を直接叩いて任意の枚数を書き込まれると、getDownloadUrls の上限（100件）に
+  // 当たって記録が開けなくなる（PR #146 のレビュー指摘）
+  describe('画像の枚数制限', () => {
+    it.each([
+      'createPurchaseRecord',
+      'createDrinkingRecord',
+      'updatePurchaseRecord',
+      'updateDrinkingRecord',
+    ])('%s リゾルバーが 5 枚を超える imageKeys を拒否する', (fieldName) => {
+      template.hasResourceProperties('AWS::AppSync::Resolver', {
+        FieldName: fieldName,
+        Code: Match.stringLikeRegexp('input.imageKeys.length > 5'),
+      });
+    });
+  });
+
   // Issue #140: OCR の事前アップロードは記録の作成前に走るため、保存せず離れた
   // 画像が孤児として残る。一時領域はタグ付きで置き、ライフサイクルで自動削除する
   describe('一時アップロードのライフサイクル', () => {
