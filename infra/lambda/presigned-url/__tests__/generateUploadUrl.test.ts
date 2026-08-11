@@ -110,9 +110,9 @@ describe('generateUploadUrl', () => {
     expect(signedPut().Tagging).toBe('lifecycle=temporary');
   });
 
-  // 同じ文字列をクライアント側にも定数として持つとドリフトで 403 になる。
-  // 署名した側が返し、クライアントはそれをそのまま送る（PR #145 のレビュー指摘）
-  it('一時領域では PUT に付けるタグを返す', async () => {
+  // 参考情報として返すだけの値。クライアントはヘッダで送ってはいけない
+  // （タグは署名済み URL のクエリに入るため、送ると二重指定で 403。PR #147）
+  it('一時領域では付与されるタグを参考情報として返す', async () => {
     const { taggingHeader } = await callGenerateUploadUrl({ temporary: true });
 
     expect(taggingHeader).toBe('lifecycle=temporary');

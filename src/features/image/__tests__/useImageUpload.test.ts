@@ -214,12 +214,7 @@ describe('useImageUpload - 一時領域からの引き取り', () => {
     for (const k of [key, `thumb_${key}`]) {
       mockGraphql.mockResolvedValueOnce({
         data: {
-          generateUploadUrl: {
-            uploadUrl: `https://s3.example/${k}`,
-            key: k,
-            // 署名した側が返した値をそのまま送る決まり
-            taggingHeader: 'lifecycle=temporary',
-          },
+          generateUploadUrl: { uploadUrl: `https://s3.example/${k}`, key: k },
         },
       });
       (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({

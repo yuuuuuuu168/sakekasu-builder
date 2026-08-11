@@ -219,8 +219,10 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
     Bucket: BUCKET_NAME,
     Key: key,
     ContentType: contentType,
-    // タグはライフサイクルの削除条件。署名対象に入るため、クライアントは
-    // 同じ値を x-amz-tagging ヘッダで送る必要がある（送らなければ PUT が失敗する）
+    // タグはライフサイクルの削除条件。SDK はこの値を署名済み URL の
+    // クエリ（x-amz-tagging）に入れる。署名対象ヘッダには入らないので、
+    // クライアントは同名のヘッダを送ってはいけない。送ると二重指定になり
+    // S3 が 403 SignatureDoesNotMatch を返す（PR #147 で実機確認）
     ...(temporary ? { Tagging: TEMP_OBJECT_TAGGING } : {}),
   });
 
