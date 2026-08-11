@@ -75,6 +75,15 @@ export function useImageUpload(): UseImageUploadReturn {
    */
   const uploadingRef = useRef(false);
 
+  /**
+   * 選択済み＋圧縮中の枚数。
+   *
+   * 上限を state の imageFiles.length で見ると、複数ファイルを一度に選んだとき
+   * すべての呼び出しが同じ描画時点の値を見るため、全部が検査を通ってしまう
+   * （ファイル選択もドラッグ＆ドロップも 1 枚ずつこの関数を呼ぶ）
+   */
+  const selectedCountRef = useRef(0);
+
   const beginUpload = () => {
     uploadingRef.current = true;
     setIsUploading(true);
@@ -113,6 +122,7 @@ export function useImageUpload(): UseImageUploadReturn {
   }, [fileWarnings]);
 
   const setImageFile = useCallback((file: File | null) => {
+    selectedCountRef.current = file ? 1 : 0;
     if (file) {
       setImageFiles([file]);
       // 警告は imageFiles と同じ並びで持つ決まり。ここで揃えないと
@@ -125,8 +135,8 @@ export function useImageUpload(): UseImageUploadReturn {
   }, []);
 
   const handleImageSelect = useCallback(async (file: File) => {
-    // 最大枚数チェック
-    if (imageFiles.length >= MAX_IMAGES) {
+    // 最大枚数チェック。state ではなく控えを見る（同時に複数選んだときの取りこぼし対策）
+    if (selectedCountRef.current >= MAX_IMAGES) {
       setError(`画像は最大${MAX_IMAGES}枚まで添付できます`);
       return;
     }
@@ -139,6 +149,8 @@ export function useImageUpload(): UseImageUploadReturn {
     }
 
     setError(null);
+    // 枠は圧縮の前に押さえる。await の間に別のファイルが同じ枠を取るため
+    selectedCountRef.current += 1;
 
     // 長辺の正規化と 5MB 超の圧縮（必要ない画像はそのまま返る）
     setIsCompressing(true);
@@ -152,6 +164,8 @@ export function useImageUpload(): UseImageUploadReturn {
         result.wasReadable ? null : UNREADABLE_WARNING,
       ]);
     } catch (err) {
+      // 追加できなかったので枠を返す
+      selectedCountRef.current -= 1;
       const message =
         err instanceof Error
           ? err.message
@@ -160,7 +174,7 @@ export function useImageUpload(): UseImageUploadReturn {
     } finally {
       setIsCompressing(false);
     }
-  }, [imageFiles.length]);
+  }, []);
 
   const removeImage = useCallback(
     (index: number) => {
@@ -168,6 +182,10 @@ export function useImageUpload(): UseImageUploadReturn {
       // 完了時にその位置へ警告を書くため、途中で詰めると別の画像に付く。
       // UI もボタンを隠しているが、状態の更新が反映されるまでの隙間がある
       if (uploadingRef.current) return;
+
+      // 控えの更新は更新関数の外で行う。React は開発時に更新関数を
+      // 2 回呼ぶことがあり、中で数を動かすと twice 引かれる
+      selectedCountRef.current = Math.max(0, selectedCountRef.current - 1);
 
       setImageFiles((prev) => prev.filter((_, i) => i !== index));
       setImageKeys((prev) => prev.filter((_, i) => i !== index));
@@ -375,6 +393,7 @@ export function useImageUpload(): UseImageUploadReturn {
   );
 
   const clearImage = useCallback(() => {
+    selectedCountRef.current = 0;
     setImageFiles([]);
     setError(null);
     setFileWarnings([]);

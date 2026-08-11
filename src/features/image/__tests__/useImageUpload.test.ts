@@ -371,6 +371,48 @@ describe('useImageUpload - 品質低下の警告', () => {
 
   // 配列の範囲外へ代入すると穴が空き、undefined が警告として画面に出る
   // （PR #144 の 2 巡目レビュー指摘）
+  // ファイル選択とドラッグ＆ドロップは、選んだ枚数だけ handleImageSelect を
+  // 連続で呼ぶ。state の枚数で上限を見ると、全部が同じ描画時点の値を見て
+  // 検査を通り抜ける（PR #144 の 3 巡目レビュー指摘）
+  it('複数ファイルを一度に選んでも上限を超えない', async () => {
+    const { result } = renderHook(() => useImageUpload());
+
+    // 8 枚をまとめて選んだ状況（await を挟まずに呼ぶ）
+    await act(async () => {
+      await Promise.all(
+        ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((n) =>
+          result.current.handleImageSelect(makeFile(`${n}.jpg`)),
+        ),
+      );
+    });
+
+    expect(result.current.imageFiles).toHaveLength(5);
+    expect(result.current.error).toContain('最大5枚');
+  });
+
+  it('外した分の枠は次の選択で使える', async () => {
+    const { result } = renderHook(() => useImageUpload());
+
+    await act(async () => {
+      await Promise.all(
+        ['a', 'b', 'c', 'd', 'e'].map((n) =>
+          result.current.handleImageSelect(makeFile(`${n}.jpg`)),
+        ),
+      );
+    });
+    expect(result.current.imageFiles).toHaveLength(5);
+
+    await act(async () => {
+      result.current.removeImage(0);
+    });
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('new.jpg'));
+    });
+
+    expect(result.current.imageFiles).toHaveLength(5);
+    expect(result.current.imageFiles.at(-1)?.name).toBe('new.jpg');
+  });
+
   it('選択が解除された画像の位置には警告を書かない', async () => {
     mockCreateThumbnail.mockRejectedValue(new Error('生成できません'));
     mockGraphql.mockResolvedValueOnce({
