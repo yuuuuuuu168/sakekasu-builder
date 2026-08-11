@@ -18,6 +18,9 @@ const URL_TTL_MS = 50 * 60 * 1000;
  */
 const MAX_BATCH_SIZE = 50;
 
+/** キャッシュ破棄をまたいだ結果を捨てるときのエラーメッセージ */
+const CLEARED_ERROR = 'Download URL cache was cleared before the response arrived';
+
 interface CacheEntry {
   url: string;
   expiresAt: number;
@@ -32,6 +35,15 @@ const inflight = new Map<string, Promise<string>>();
 const pending = new Map<string, { resolve: (url: string) => void; reject: (err: unknown) => void }>();
 /** バッチ送信を予約済みか */
 let flushScheduled = false;
+
+/**
+ * キャッシュの世代。clearDownloadUrlCache のたびに進める。
+ *
+ * Map を消しても、送信済みのリクエストは応答が返ってきた時点で結果を
+ * 書き戻そうとする。サインアウト直後に前の利用者の URL が
+ * 復活しないよう、世代が変わっていたら結果を捨てる
+ */
+let cacheGeneration = 0;
 
 interface GetDownloadUrlsResponse {
   getDownloadUrls: string[];
@@ -48,11 +60,20 @@ async function requestDownloadUrls(keys: string[]): Promise<string[]> {
 /** 1 バッチ分を送って、キーごとの待ち手を解決する */
 async function sendBatch(
   entries: [string, { resolve: (url: string) => void; reject: (err: unknown) => void }][],
+  generation: number,
 ): Promise<void> {
   const keys = entries.map(([key]) => key);
 
   try {
     const urls = await requestDownloadUrls(keys);
+
+    // 待っている間にキャッシュが捨てられていたら、この結果は前の利用者のもの。
+    // 書き戻すと消したはずの URL が TTL 付きで復活する。
+    // inflight も作り直されている可能性があるので触らない
+    if (generation !== cacheGeneration) {
+      entries.forEach(([, handlers]) => handlers.reject(new Error(CLEARED_ERROR)));
+      return;
+    }
 
     entries.forEach(([key, handlers], index) => {
       const url = urls[index];
@@ -69,8 +90,12 @@ async function sendBatch(
       handlers.resolve(url);
     });
   } catch (err) {
+    const stale = generation !== cacheGeneration;
+
     entries.forEach(([key, handlers]) => {
-      inflight.delete(key);
+      if (!stale) {
+        inflight.delete(key);
+      }
       handlers.reject(err);
     });
   }
@@ -81,10 +106,11 @@ function flush(): void {
   flushScheduled = false;
 
   const entries = [...pending.entries()];
+  const generation = cacheGeneration;
   pending.clear();
 
   for (let i = 0; i < entries.length; i += MAX_BATCH_SIZE) {
-    void sendBatch(entries.slice(i, i + MAX_BATCH_SIZE));
+    void sendBatch(entries.slice(i, i + MAX_BATCH_SIZE), generation);
   }
 }
 
@@ -126,8 +152,15 @@ export function fetchDownloadUrl(key: string): Promise<string> {
   return request;
 }
 
-/** キャッシュを破棄する（テスト用途） */
+/**
+ * キャッシュを破棄する。
+ *
+ * サインアウト時に呼んで、前の利用者の URL を端末に残さない。
+ * 世代を進めることで、送信済みで応答待ちのリクエストが後から
+ * 結果を書き戻すのも防ぐ
+ */
 export function clearDownloadUrlCache(): void {
+  cacheGeneration += 1;
   urlCache.clear();
   inflight.clear();
   pending.clear();
