@@ -8,6 +8,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
+  MAX_IMAGES_PER_RECORD,
   TEMP_LOCATION,
   TEMP_OBJECT_TAGGING,
 } from '../../lib/image-constants';
@@ -30,9 +31,6 @@ const MAX_DOWNLOAD_KEYS = 100;
 
 /** サムネイルのファイル名に付けるプレフィックス（フロントの thumbnailKey.ts と揃える） */
 const THUMBNAIL_PREFIX = 'thumb_';
-
-/** 記録に添付できる画像の上限（フロントの useImageUpload と揃える） */
-const MAX_IMAGES_PER_RECORD = 5;
 
 /** キーに使える記録種別。任意の文字列を通すとキーの階層を細工できる */
 const ALLOWED_RECORD_TYPES = ['purchase', 'drinking'];
