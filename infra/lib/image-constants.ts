@@ -25,5 +25,15 @@ export const TEMP_LOCATION = 'tmp';
 export const TEMP_TAG_KEY = 'lifecycle';
 export const TEMP_TAG_VALUE = 'temporary';
 
-/** PutObject / presigned URL に渡すタグ表現（`x-amz-tagging` ヘッダと同じ形式） */
+/**
+ * PutObject に渡すタグ表現（`key=value` の形）。
+ *
+ * 署名済み URL では、SDK がこの値を**クエリパラメータ**（`x-amz-tagging`）に
+ * 埋め込む。署名対象ヘッダには入らないため、クライアントが同名の HTTP ヘッダを
+ * 添えると二重指定になり、S3 が 403 SignatureDoesNotMatch を返す。
+ *
+ * ここに「`x-amz-tagging` ヘッダと同じ形式」と書いてあったことが、
+ * ヘッダで送る実装を生んで本番の画像アップロードを止めた（PR #147）。
+ * 形式の説明にヘッダを持ち出さない
+ */
 export const TEMP_OBJECT_TAGGING = `${TEMP_TAG_KEY}=${TEMP_TAG_VALUE}`;
