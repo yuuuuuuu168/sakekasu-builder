@@ -165,10 +165,14 @@ async function getDownloadUrls(event: AppSyncEvent): Promise<string[]> {
 
 
 async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; imageDeleteFailed?: boolean }> {
+  // 認可は引数を見る前に済ませる。削除パイプラインは画像を持たない記録でも
+  // arguments を空にして呼ぶため、後ろに置くと identity の無い呼び出しに
+  // success を返してしまう。他のハンドラと同じ順序に揃える
+  const ownerSub = requireOwnerSub(event);
+
   // Pipeline リゾルバーから imageKey(単一) と imageKeys(複数) の両方を処理
   const imageKey = event.arguments?.imageKey || event.source?.imageKey;
   const imageKeys = event.arguments?.imageKeys || event.source?.imageKeys;
-  const ownerSub = event.identity?.sub;
 
   // 削除対象のキーを統合
   const requestedKeys: string[] = [];
@@ -180,10 +184,6 @@ async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; ima
 
   if (requestedKeys.length === 0) {
     return { success: true };
-  }
-
-  if (!ownerSub) {
-    throw new Error('Unauthorized: missing identity');
   }
 
   let hasFailure = false;

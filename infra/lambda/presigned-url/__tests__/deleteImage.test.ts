@@ -111,6 +111,19 @@ describe('deleteImage の所有者チェック', () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 
+  // 削除パイプラインは画像を持たない記録でも arguments を空にして呼ぶ。
+  // 引数を見る前に認可するので、identity が無ければ success を返さない
+  it('削除対象が無くても identity が無ければ拒否する', async () => {
+    await expect(
+      handler({
+        info: { fieldName: 'deleteImage' },
+        arguments: {},
+      } as Parameters<typeof handler>[0]),
+    ).rejects.toThrow('Unauthorized');
+
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
   it('削除対象が無いときは何もしない', async () => {
     const result = await callDeleteImage({});
 

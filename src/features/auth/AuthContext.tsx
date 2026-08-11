@@ -147,6 +147,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (user) {
       clearFilterState(user.userId);
     }
+    // 画像 URL も同じで、サインアウトの通信を待つ間に画面から新しく
+    // 要求されることがある。ここでもう一度捨てる
+    clearDownloadUrlCache();
     setUser(null);
   }, [user]);
 
