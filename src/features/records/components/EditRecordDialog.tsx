@@ -38,6 +38,8 @@ export function EditRecordDialog({ record, onOpenChange, onUpdated }: EditRecord
               key={record.id}
               recordId={record.id}
               initialData={unifiedToPurchaseFormData(record)}
+              existingImageKey={record.imageKey}
+              existingImageKeys={record.imageKeys}
               onSubmitSuccess={handleSuccess}
             />
           )}
@@ -46,6 +48,8 @@ export function EditRecordDialog({ record, onOpenChange, onUpdated }: EditRecord
               key={record.id}
               recordId={record.id}
               initialData={unifiedToDrinkingFormData(record)}
+              existingImageKey={record.imageKey}
+              existingImageKeys={record.imageKeys}
               onSubmitSuccess={handleSuccess}
             />
           )}

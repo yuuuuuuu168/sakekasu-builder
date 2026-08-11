@@ -13,6 +13,10 @@ export interface UsePurchaseFormOptions {
   recordId?: string;
   /** フォームの初期値（編集モードでのプリフィル用） */
   initialData?: PurchaseFormData;
+  /** 編集対象が既に持っている代表画像キー */
+  existingImageKey?: string | null;
+  /** 編集対象が既に持っている画像キー一覧。追加分はこの後ろに足す */
+  existingImageKeys?: string[];
 }
 
 export interface UsePurchaseFormReturn {
@@ -40,8 +44,16 @@ export function getInitialFormData(): PurchaseFormData {
 }
 
 export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFormReturn {
-  const { recordId, initialData } = options ?? {};
+  const {
+    recordId,
+    initialData,
+    existingImageKey = null,
+    existingImageKeys,
+  } = options ?? {};
   const isEditMode = recordId !== undefined;
+
+  // 記録に添付できる枚数は全体で決まっているので、追加できるのは残り枠だけ
+  const alreadyAttached = existingImageKeys?.length ?? 0;
 
   const [formData, setFormData] = useState<PurchaseFormData>(
     () => initialData ?? getInitialFormData(),
@@ -50,7 +62,7 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
 
   const { errors, validateField, isValid, clearErrors } = useFormValidation();
   const { savePurchase, updatePurchase, isSaving } = usePurchaseStorage();
-  const imageUpload = useImageUpload();
+  const imageUpload = useImageUpload({ alreadyAttached });
 
   const handleChange = useCallback(
     (field: keyof PurchaseFormData, value: string) => {
@@ -73,9 +85,34 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
       return;
     }
 
-    // 編集モード: 画像は対象外。テキスト・メタ情報のみ更新し、フォームはリセットしない
+    // 編集モード: 画像を足していれば既存の後ろに追記する。フォームはリセットしない
     if (isEditMode) {
-      const result = await updatePurchase(recordId, formData);
+      if (imageUpload.imageFiles.length === 0) {
+        // 画像に触っていない更新では画像の項目自体を送らない（既存キーを維持する）
+        const result = await updatePurchase(recordId, formData);
+        setSubmitResult(result);
+        return;
+      }
+
+      const uploaded = await imageUpload.uploadImages('purchase', recordId);
+      if (uploaded.length === 0) {
+        // アップロード失敗 → エラーは useImageUpload 側で設定済み、入力内容を保持
+        return;
+      }
+
+      const base = existingImageKeys ?? [];
+      const merged = [...base, ...uploaded];
+      const result = await updatePurchase(recordId, formData, {
+        // 代表画像は既存を優先する。差し替えではなく追加なので、
+        // 一覧のサムネイルが勝手に入れ替わらないようにする
+        imageKey: existingImageKey ?? uploaded[0] ?? null,
+        imageKeys: merged,
+      });
+
+      if (result.success) {
+        // 追記済みのファイルを残すと、次の保存で二重に足される
+        imageUpload.clearImage();
+      }
       setSubmitResult(result);
       return;
     }
@@ -103,7 +140,18 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
     } else {
       setSubmitResult(result);
     }
-  }, [formData, isValid, isEditMode, recordId, savePurchase, updatePurchase, clearErrors, imageUpload]);
+  }, [
+    formData,
+    isValid,
+    isEditMode,
+    recordId,
+    savePurchase,
+    updatePurchase,
+    clearErrors,
+    imageUpload,
+    existingImageKey,
+    existingImageKeys,
+  ]);
 
   return {
     formData,
