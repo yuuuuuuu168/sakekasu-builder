@@ -143,3 +143,9 @@ export const analyzeSakeLabel = /* GraphQL */ `
     }
   }
 `;
+
+export const copyImages = /* GraphQL */ `
+  mutation CopyImages($sourceKeys: [String!]!, $recordType: String!, $recordId: ID!) {
+    copyImages(sourceKeys: $sourceKeys, recordType: $recordType, recordId: $recordId)
+  }
+`;

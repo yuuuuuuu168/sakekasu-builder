@@ -7,6 +7,7 @@ import { useDrinkingValidation } from './useDrinkingValidation';
 import { useDrinkingStorage } from './useDrinkingStorage';
 import { useImageUpload } from '@/features/image/hooks/useImageUpload';
 import type { UseImageUploadReturn } from '@/features/image/hooks/useImageUpload';
+import { copyRecordImages } from '@/features/image/lib/copyRecordImages';
 import { getTodayString } from '@/lib/dateUtils';
 
 export interface UseDrinkingFormOptions {
@@ -145,6 +146,21 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
           return;
         }
         imageKey = imageKeys[0] ?? null;
+      } else if (stockDraft?.imageKeys?.length) {
+        // 写真を撮り直していない在庫からの登録では、購入記録の写真を引き継ぐ。
+        // キーを共有すると片方の削除で実体が消えるため、実体ごと複製する。
+        //
+        // ここで失敗しても記録は残したいので、画像なしで登録を続ける
+        try {
+          imageKeys = await copyRecordImages(
+            stockDraft.imageKeys,
+            'drinking',
+            crypto.randomUUID(),
+          );
+          imageKey = imageKeys[0] ?? null;
+        } catch (err) {
+          console.error('在庫の画像を引き継げませんでした:', err);
+        }
       }
 
       const result = await saveDrinking(formData, {
