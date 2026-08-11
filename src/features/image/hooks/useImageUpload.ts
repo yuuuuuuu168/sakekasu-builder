@@ -1,7 +1,7 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { generateUploadUrl } from '@/graphql/mutations';
-import { validateImageFile } from '../utils/imageValidator';
+import { validateRecordImageFile } from '../utils/imageValidator';
 import { compressImage, createThumbnail } from '../utils/imageCompressor';
 import { toThumbnailFileName } from '../lib/thumbnailKey';
 
@@ -67,6 +67,25 @@ export function useImageUpload(): UseImageUploadReturn {
   const [imageKeys, setImageKeys] = useState<string[]>([]);
 
   /**
+   * アップロード中かを同期的に見るための控え。
+   *
+   * state は次の描画まで反映されないため、開始直後に届いた削除操作を
+   * 取りこぼす。進行中の処理は自分の位置を覚えているので、そこで詰められると
+   * 別の画像に警告が付く
+   */
+  const uploadingRef = useRef(false);
+
+  const beginUpload = () => {
+    uploadingRef.current = true;
+    setIsUploading(true);
+  };
+
+  const endUpload = () => {
+    uploadingRef.current = false;
+    setIsUploading(false);
+  };
+
+  /**
    * 警告は画像ごとに持つ（imageFiles と同じ並び）。
    *
    * 1 つの箱に入れて上書きすると、選んだ画像を外しても警告が残り、
@@ -86,7 +105,9 @@ export function useImageUpload(): UseImageUploadReturn {
    * サムネイルだけ失敗した場合より状態が悪い。両方あるときは前者を出す
    */
   const warning = useMemo(() => {
-    const active = fileWarnings.filter((w): w is string => w !== null);
+    // `!== null` では判定が足りない。配列に穴が空くと undefined が入り、
+    // それが通り抜けて画面に "undefined" と表示される
+    const active = fileWarnings.filter((w): w is string => typeof w === 'string');
     if (active.length === 0) return null;
     return active.includes(UNREADABLE_WARNING) ? UNREADABLE_WARNING : active[0];
   }, [fileWarnings]);
@@ -94,8 +115,12 @@ export function useImageUpload(): UseImageUploadReturn {
   const setImageFile = useCallback((file: File | null) => {
     if (file) {
       setImageFiles([file]);
+      // 警告は imageFiles と同じ並びで持つ決まり。ここで揃えないと
+      // 前の画像の警告が新しい画像のものとして表示される
+      setFileWarnings([null]);
     } else {
       setImageFiles([]);
+      setFileWarnings([]);
     }
   }, []);
 
@@ -107,7 +132,7 @@ export function useImageUpload(): UseImageUploadReturn {
     }
 
     // バリデーション
-    const validation = validateImageFile(file);
+    const validation = validateRecordImageFile(file);
     if (!validation.valid) {
       setError(validation.error);
       return;
@@ -137,13 +162,21 @@ export function useImageUpload(): UseImageUploadReturn {
     }
   }, [imageFiles.length]);
 
-  const removeImage = useCallback((index: number) => {
-    setImageFiles((prev) => prev.filter((_, i) => i !== index));
-    setImageKeys((prev) => prev.filter((_, i) => i !== index));
-    // 外した画像の警告も一緒に落とす。残すと、もう無い画像について
-    // 警告し続けることになる
-    setFileWarnings((prev) => prev.filter((_, i) => i !== index));
-  }, []);
+  const removeImage = useCallback(
+    (index: number) => {
+      // アップロード中は受け付けない。進行中の処理は自分の位置を覚えていて
+      // 完了時にその位置へ警告を書くため、途中で詰めると別の画像に付く。
+      // UI もボタンを隠しているが、状態の更新が反映されるまでの隙間がある
+      if (uploadingRef.current) return;
+
+      setImageFiles((prev) => prev.filter((_, i) => i !== index));
+      setImageKeys((prev) => prev.filter((_, i) => i !== index));
+      // 外した画像の警告も一緒に落とす。残すと、もう無い画像について
+      // 警告し続けることになる
+      setFileWarnings((prev) => prev.filter((_, i) => i !== index));
+    },
+    [],
+  );
 
   /** S3 へ1ファイルを PUT してキーを返す */
   const putToS3 = async (
@@ -228,6 +261,10 @@ export function useImageUpload(): UseImageUploadReturn {
 
     if (!(await uploadThumbnail(file, recordType, recordId))) {
       setFileWarnings((prev) => {
+        // その画像がもう選ばれていないなら書かない。範囲外へ代入すると
+        // 配列に穴が空き、undefined が警告として表示される
+        if (index >= prev.length) return prev;
+
         const next = [...prev];
         // 読み込めていない画像には、より状態の悪い方の警告を残す
         if (next[index] == null) next[index] = THUMBNAIL_WARNING;
@@ -249,7 +286,7 @@ export function useImageUpload(): UseImageUploadReturn {
         return imageKeys;
       }
 
-      setIsUploading(true);
+      beginUpload();
       try {
         const keys: string[] = [];
         for (let i = 0; i < imageFiles.length; i++) {
@@ -273,7 +310,7 @@ export function useImageUpload(): UseImageUploadReturn {
         setError('画像のアップロードに失敗しました。もう一度お試しください');
         return [];
       } finally {
-        setIsUploading(false);
+        endUpload();
       }
     },
     [imageFiles, imageKeys],
@@ -297,7 +334,7 @@ export function useImageUpload(): UseImageUploadReturn {
         return imageKeys;
       }
 
-      setIsUploading(true);
+      beginUpload();
       try {
         const tempRecordId = crypto.randomUUID();
         const keys: string[] = [];
@@ -322,7 +359,7 @@ export function useImageUpload(): UseImageUploadReturn {
         setError('画像のアップロードに失敗しました。もう一度お試しください');
         return [];
       } finally {
-        setIsUploading(false);
+        endUpload();
       }
     },
     [imageFiles, imageKeys],
