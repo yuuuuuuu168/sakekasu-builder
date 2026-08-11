@@ -64,11 +64,42 @@ describe('deleteImage の所有者チェック', () => {
     vi.restoreAllMocks();
   });
 
-  it('自分のキーは削除する', async () => {
+  // サムネイルは記録に保存されず原画から導出する兄弟キー。記録が持つキーだけを
+  // 消していたため、原画は消えたのにサムネイルが残っていた（Issue #132）
+  it('自分のキーは原画とサムネイルの両方を削除する', async () => {
     const result = await callDeleteImage({ imageKey: `${OWNER}/purchase/rec-1/photo.jpg` });
 
-    expect(deletedKeys()).toEqual([`${OWNER}/purchase/rec-1/photo.jpg`]);
+    expect(deletedKeys().sort()).toEqual([
+      `${OWNER}/purchase/rec-1/photo.jpg`,
+      `${OWNER}/purchase/rec-1/thumb_photo.jpg`,
+    ]);
     expect(result).toMatchObject({ success: true });
+  });
+
+  // サムネイルが未生成の記録もある。S3 は無いキーの削除もエラーにしないので、
+  // 存在を確かめずに消してよい（確認の往復ぶん速い）
+  it('サムネイルの有無を確かめずに消しにいく', async () => {
+    await callDeleteImage({ imageKey: `${OWNER}/purchase/rec-1/photo.jpg` });
+
+    const heads = sendMock.mock.calls.filter(
+      (call) => call[0]?.constructor?.name?.includes('Head'),
+    );
+    expect(heads).toEqual([]);
+  });
+
+  // 消し残しは ImageDeleteFailCount のアラームで拾う。サムネイルだけ失敗した
+  // 場合も「消したはずの画像が残る」ので、同じように失敗として扱う
+  it('サムネイルの削除に失敗したら失敗として返す', async () => {
+    sendMock.mockImplementation(async (command: { input: { Key: string } }) => {
+      if (command.input.Key.includes('thumb_')) {
+        throw new Error('S3 unavailable');
+      }
+      return {};
+    });
+
+    const result = await callDeleteImage({ imageKey: `${OWNER}/purchase/rec-1/photo.jpg` });
+
+    expect(result).toMatchObject({ success: true, imageDeleteFailed: true });
   });
 
   it('他人のキーは削除しない', async () => {
@@ -90,7 +121,11 @@ describe('deleteImage の所有者チェック', () => {
     expect(deletedKeys().sort()).toEqual([
       `${OWNER}/purchase/rec-1/a.jpg`,
       `${OWNER}/purchase/rec-1/c.jpg`,
+      `${OWNER}/purchase/rec-1/thumb_a.jpg`,
+      `${OWNER}/purchase/rec-1/thumb_c.jpg`,
     ]);
+    // 他人のキーはサムネイル側にも手を出さない
+    expect(deletedKeys().some((key) => key.startsWith(VICTIM))).toBe(false);
   });
 
   it('sub の前方一致だけで通さない（別人の sub が自分の sub で始まる場合）', async () => {
