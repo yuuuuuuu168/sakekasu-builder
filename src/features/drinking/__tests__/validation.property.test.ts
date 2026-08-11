@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import * as fc from 'fast-check';
 import { SAKE_CATEGORIES } from '@/features/purchase/types';
-import type { SakeCategory } from '@/features/purchase/types';
 import type { DrinkingFormData } from '../types';
 import { DRINKING_METHODS_MAP } from '../types';
 import { useDrinkingValidation, clampRating } from '../hooks/useDrinkingValidation';
@@ -79,7 +78,6 @@ const REQUIRED_FIELDS = [
   'drinkingMethod',
   'rating',
 ] as const;
-type RequiredField = (typeof REQUIRED_FIELDS)[number];
 
 /**
  * Property 2: 必須フィールド空欄バリデーション

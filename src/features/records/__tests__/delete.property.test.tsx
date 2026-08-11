@@ -5,7 +5,7 @@ import { renderHook, act } from '@testing-library/react';
 import * as fc from 'fast-check';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { deletePurchaseRecord, deleteDrinkingRecord } from '@/graphql/mutations';
-import type { UnifiedRecord, RecordType } from '../types';
+import type { UnifiedRecord } from '../types';
 import type { SakeCategory } from '../../purchase/types';
 
 // --- Arbitrary generators ---

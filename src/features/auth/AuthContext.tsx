@@ -179,7 +179,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-/** 認証コンテキストを利用するカスタムフック */
+/**
+ * 認証コンテキストを利用するカスタムフック
+ *
+ * Provider と対で使うものなので同じファイルに置く。開発時の Fast Refresh は
+ * このファイルを触ったときだけ効かなくなるが、分けると読む側が2ファイルを
+ * 行き来することになるため、そちらを優先する
+ */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
   if (context === undefined) {
