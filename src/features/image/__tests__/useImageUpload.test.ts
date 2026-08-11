@@ -5,6 +5,7 @@ const mockGraphql = vi.hoisted(() => vi.fn());
 const mockValidate = vi.hoisted(() => vi.fn());
 const mockCompress = vi.hoisted(() => vi.fn());
 const mockCreateThumbnail = vi.hoisted(() => vi.fn());
+const mockCopyRecordImages = vi.hoisted(() => vi.fn());
 
 vi.mock('aws-amplify/api', () => ({
   generateClient: () => ({ graphql: mockGraphql }),
@@ -17,6 +18,10 @@ vi.mock('../utils/imageValidator', () => ({
 vi.mock('../utils/imageCompressor', () => ({
   compressImage: mockCompress,
   createThumbnail: mockCreateThumbnail,
+}));
+
+vi.mock('../lib/copyRecordImages', () => ({
+  copyRecordImages: mockCopyRecordImages,
 }));
 
 import { useImageUpload } from '../hooks/useImageUpload';
@@ -174,6 +179,177 @@ describe('useImageUpload - uploadImages', () => {
 
     expect(keys).toEqual([]);
     expect(mockGraphql).not.toHaveBeenCalled();
+  });
+});
+
+// OCR の事前アップロードは記録の作成前に走るため、保存せず離れたキーが
+// 孤児として残る。置き場を一時領域に分けてライフサイクルで消す（Issue #140）
+describe('useImageUpload - 一時領域からの引き取り', () => {
+  const TEMP_KEY = 'sub-1/tmp/upload-1/a.jpg';
+  const FINAL_KEY = 'sub-1/purchase/rec-1/a.jpg';
+
+  beforeEach(() => {
+    mockGraphql.mockReset();
+    mockValidate.mockReset();
+    mockValidate.mockReturnValue({ valid: true });
+    mockCompress.mockReset();
+    mockCompress.mockImplementation(async (file: File) => ({
+      file,
+      originalSize: file.size,
+      compressedSize: file.size,
+      wasCompressed: false,
+      wasReadable: true,
+    }));
+    mockCreateThumbnail.mockReset();
+    mockCreateThumbnail.mockImplementation(
+      async (_file: File, fileName: string) =>
+        new File(['t'], fileName, { type: 'image/jpeg' }),
+    );
+    mockCopyRecordImages.mockReset();
+    global.fetch = vi.fn();
+  });
+
+  /** 原画 + サムネイルの 2 回分の署名と PUT を積む */
+  function mockUpload(key: string) {
+    for (const k of [key, `thumb_${key}`]) {
+      mockGraphql.mockResolvedValueOnce({
+        data: {
+          generateUploadUrl: {
+            uploadUrl: `https://s3.example/${k}`,
+            key: k,
+            // 署名した側が返した値をそのまま送る決まり
+            taggingHeader: 'lifecycle=temporary',
+          },
+        },
+      });
+      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+      });
+    }
+  }
+
+  it('事前アップロードは一時領域を要求し、タグ付きで PUT する', async () => {
+    mockUpload(TEMP_KEY);
+
+    const { result } = renderHook(() => useImageUpload());
+
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('a.jpg'));
+    });
+    await act(async () => {
+      await result.current.preUploadImages('purchase');
+    });
+
+    // 署名要求に temporary が立っていること
+    expect(mockGraphql).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variables: expect.objectContaining({ temporary: true }),
+      }),
+    );
+    // 署名にタグが含まれるため、PUT でも同じ値を送らないと 403 になる。
+    // 値は自前で組み立てず、サーバーが返したものをそのまま使う
+    const [, putInit] = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(putInit.headers['x-amz-tagging']).toBe('lifecycle=temporary');
+  });
+
+  it('保存時に一時領域のキーを正式な場所へ複製して返す', async () => {
+    mockUpload(TEMP_KEY);
+    mockCopyRecordImages.mockResolvedValue([FINAL_KEY]);
+
+    const { result } = renderHook(() => useImageUpload());
+
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('a.jpg'));
+    });
+    await act(async () => {
+      await result.current.preUploadImages('purchase');
+    });
+
+    let keys: string[] = [];
+    await act(async () => {
+      keys = await result.current.uploadImages('purchase', 'rec-1');
+    });
+
+    expect(mockCopyRecordImages).toHaveBeenCalledWith([TEMP_KEY], 'purchase', 'rec-1');
+    // 一時領域のキーを記録に持たせるとライフサイクルで実体だけが消える
+    expect(keys).toEqual([FINAL_KEY]);
+    expect(result.current.imageKeys).toEqual([FINAL_KEY]);
+  });
+
+  // 正式な場所にあるキーまで複製に出すと、複製先で名前がぶつかって連番が付き、
+  // 元のオブジェクトが誰からも参照されなくなる（PR #145 のレビュー指摘）
+  it('一時領域のキーだけを複製に出し、並び順は保つ', async () => {
+    mockUpload(TEMP_KEY);
+    mockCopyRecordImages.mockResolvedValue(['sub-1/purchase/rec-1/a.jpg']);
+
+    const { result } = renderHook(() => useImageUpload());
+
+    // 1 枚目は事前アップロード（一時領域）
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('a.jpg'));
+    });
+    await act(async () => {
+      await result.current.preUploadImages('purchase');
+    });
+
+    // 2 枚目は保存時に正式な場所へ直接アップロードされる
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('b.jpg'));
+    });
+    mockUpload('sub-1/purchase/rec-1/b.jpg');
+
+    let keys: string[] = [];
+    await act(async () => {
+      keys = await result.current.uploadImages('purchase', 'rec-1');
+    });
+
+    // 複製に出すのは一時領域のキーだけ
+    expect(mockCopyRecordImages).toHaveBeenCalledWith([TEMP_KEY], 'purchase', 'rec-1');
+    // 並びは元のまま（複製したものを同じ位置へ戻す）
+    expect(keys).toEqual([
+      'sub-1/purchase/rec-1/a.jpg',
+      'sub-1/purchase/rec-1/b.jpg',
+    ]);
+  });
+
+  it('複製に失敗したら登録を止める（消える画像を記録に紐づけない）', async () => {
+    mockUpload(TEMP_KEY);
+    mockCopyRecordImages.mockRejectedValue(new Error('copy failed'));
+
+    const { result } = renderHook(() => useImageUpload());
+
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('a.jpg'));
+    });
+    await act(async () => {
+      await result.current.preUploadImages('purchase');
+    });
+
+    let keys: string[] = ['dummy'];
+    await act(async () => {
+      keys = await result.current.uploadImages('purchase', 'rec-1');
+    });
+
+    expect(keys).toEqual([]);
+    expect(result.current.error).not.toBeNull();
+  });
+
+  it('一時領域を経由していないキーは複製しない', async () => {
+    mockUpload(FINAL_KEY);
+
+    const { result } = renderHook(() => useImageUpload());
+
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('a.jpg'));
+    });
+
+    let keys: string[] = [];
+    await act(async () => {
+      keys = await result.current.uploadImages('purchase', 'rec-1');
+    });
+
+    expect(mockCopyRecordImages).not.toHaveBeenCalled();
+    expect(keys).toEqual([FINAL_KEY]);
   });
 });
 

@@ -124,6 +124,35 @@ describe('copyImages', () => {
     ]);
   });
 
+  // 一時領域（{sub}/tmp/...）の画像には自動削除タグが付いている。CopyObject の
+  // 既定はタグの引き継ぎなので、外さないと記録に紐づけた画像が 1 日で消える（Issue #140）
+  it('複製先に自動削除タグを引き継がない', async () => {
+    await callCopyImages({
+      sourceKeys: [`${OWNER}/tmp/upload-1/IMG_3206.jpeg`],
+    });
+
+    const copyInputs = sendMock.mock.calls
+      .map((call) => call[0])
+      .filter((c): c is FakeCopyObjectCommand => c instanceof FakeCopyObjectCommand)
+      .map((c) => c.input as { TaggingDirective?: string; Tagging?: string });
+
+    // 原画とサムネイルの両方
+    expect(copyInputs).toHaveLength(2);
+    for (const input of copyInputs) {
+      expect(input.TaggingDirective).toBe('REPLACE');
+      expect(input.Tagging).toBe('');
+    }
+  });
+
+  // 一時領域からの引き取りが本来の使い道。記録に紐づく場所へ移せること
+  it('一時領域の画像を記録のキーへ複製する', async () => {
+    const result = await callCopyImages({
+      sourceKeys: [`${OWNER}/tmp/upload-1/IMG_3206.jpeg`],
+    });
+
+    expect(result).toEqual([`${OWNER}/drinking/${RECORD_ID}/IMG_3206.jpeg`]);
+  });
+
   // 同じキーが 2 回入っている記録があり、そのまま複製すると同じ画像が並ぶ
   it('同じキーが複数あっても1枚にまとめる', async () => {
     const key = `${OWNER}/purchase/rec-1/image.jpg`;

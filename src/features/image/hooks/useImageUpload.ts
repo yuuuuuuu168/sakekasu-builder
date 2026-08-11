@@ -4,6 +4,8 @@ import { generateUploadUrl } from '@/graphql/mutations';
 import { validateRecordImageFile } from '../utils/imageValidator';
 import { compressImage, createThumbnail } from '../utils/imageCompressor';
 import { toThumbnailFileName } from '../lib/thumbnailKey';
+import { isTemporaryKey } from '../lib/tempImageKey';
+import { copyRecordImages } from '../lib/copyRecordImages';
 
 const client = generateClient();
 
@@ -196,11 +198,19 @@ export function useImageUpload(): UseImageUploadReturn {
     [],
   );
 
-  /** S3 へ1ファイルを PUT してキーを返す */
+  /**
+   * S3 へ1ファイルを PUT してキーを返す。
+   *
+   * temporary を立てると記録に紐づく前の一時領域へ置く。サーバー側が署名に
+   * タグを含めるため、同じ値を x-amz-tagging で送らないと 403 になる
+   */
   const putToS3 = async (
     file: File,
     recordType: string,
     recordId: string,
+    temporary = false,
+    /** サムネイルとして置く場合の元画像のファイル名。キーはサーバー側が導出する */
+    thumbnailOf?: string,
   ): Promise<string | null> => {
     const result = await client.graphql({
       query: generateUploadUrl,
@@ -208,7 +218,11 @@ export function useImageUpload(): UseImageUploadReturn {
         recordType,
         recordId,
         contentType: file.type,
-        fileName: file.name,
+        // サムネイルでも原画の名前を送る。`thumb_` 付きの名前を送れる状態だと、
+        // サーバー側で原画とサムネイルを区別できない
+        fileName: thumbnailOf ?? file.name,
+        temporary,
+        thumbnail: thumbnailOf !== undefined,
       },
     });
 
@@ -217,11 +231,26 @@ export function useImageUpload(): UseImageUploadReturn {
       return null;
     }
 
-    const { uploadUrl, key } = (result as { data: { generateUploadUrl: { uploadUrl: string; key: string } } }).data.generateUploadUrl;
+    const { uploadUrl, key, taggingHeader } = (
+      result as {
+        data: {
+          generateUploadUrl: {
+            uploadUrl: string;
+            key: string;
+            taggingHeader: string | null;
+          };
+        };
+      }
+    ).data.generateUploadUrl;
 
     const uploadResponse = await fetch(uploadUrl, {
       method: 'PUT',
-      headers: { 'Content-Type': file.type },
+      headers: {
+        'Content-Type': file.type,
+        // タグは署名に含まれる。値を自前で組み立てるとサーバー側と食い違って
+        // 403 になるため、署名した側が返したものをそのまま送る
+        ...(taggingHeader ? { 'x-amz-tagging': taggingHeader } : {}),
+      },
       body: file,
     });
 
@@ -249,13 +278,16 @@ export function useImageUpload(): UseImageUploadReturn {
     file: File,
     recordType: string,
     recordId: string,
+    temporary = false,
   ): Promise<boolean> => {
     try {
       const thumbnail = await createThumbnail(
         file,
         toThumbnailFileName(file.name),
       );
-      return (await putToS3(thumbnail, recordType, recordId)) !== null;
+      return (
+        (await putToS3(thumbnail, recordType, recordId, temporary, file.name)) !== null
+      );
     } catch (err) {
       console.error('サムネイルの生成・アップロードに失敗しました:', err);
       return false;
@@ -273,11 +305,14 @@ export function useImageUpload(): UseImageUploadReturn {
     recordType: string,
     recordId: string,
     index: number,
+    temporary = false,
   ): Promise<string | null> => {
-    const key = await putToS3(file, recordType, recordId);
+    const key = await putToS3(file, recordType, recordId, temporary);
     if (key === null) return null;
 
-    if (!(await uploadThumbnail(file, recordType, recordId))) {
+    // サムネイルも原画と同じ置き場に揃える。原画だけ一時領域に置くと、
+    // 複製時にサムネイルが見つからず一覧が原画へフォールバックする
+    if (!(await uploadThumbnail(file, recordType, recordId, temporary))) {
       setFileWarnings((prev) => {
         // その画像がもう選ばれていないなら書かない。範囲外へ代入すると
         // 配列に穴が空き、undefined が警告として表示される
@@ -296,33 +331,57 @@ export function useImageUpload(): UseImageUploadReturn {
     async (recordType: string, recordId: string): Promise<string[]> => {
       if (imageFiles.length === 0) return [];
 
-      // 全ファイル分のキーが揃っている場合はそれを返す
-      if (
-        imageKeys.length === imageFiles.length &&
-        imageKeys.every((k) => k)
-      ) {
-        return imageKeys;
-      }
+      // 全ファイル分のキーが揃っているか（OCR の事前アップロード済みなど）
+      const allUploaded =
+        imageKeys.length === imageFiles.length && imageKeys.every((k) => k);
 
       beginUpload();
       try {
-        const keys: string[] = [];
-        for (let i = 0; i < imageFiles.length; i++) {
-          // OCR 事前アップロード等で既に key がある場合は再利用
-          const existing = imageKeys[i];
-          if (existing) {
-            keys.push(existing);
-            continue;
+        let keys: string[];
+
+        if (allUploaded) {
+          keys = imageKeys;
+        } else {
+          keys = [];
+          for (let i = 0; i < imageFiles.length; i++) {
+            // OCR 事前アップロード等で既に key がある場合は再利用
+            const existing = imageKeys[i];
+            if (existing) {
+              keys.push(existing);
+              continue;
+            }
+            const key = await uploadSingleFile(imageFiles[i], recordType, recordId, i);
+            if (key === null) {
+              setError('画像のアップロードに失敗しました。もう一度お試しください');
+              return [];
+            }
+            keys.push(key);
           }
-          const key = await uploadSingleFile(imageFiles[i], recordType, recordId, i);
-          if (key === null) {
-            setError('画像のアップロードに失敗しました。もう一度お試しください');
-            return [];
-          }
-          keys.push(key);
         }
-        setImageKeys(keys);
-        return keys;
+
+        // 一時領域のキーは記録に持たせられない。ライフサイクルで実体が消えて
+        // 記録だけが画像を指したまま残る。正式な場所へ複製してから返す（Issue #140）。
+        // 複製できなかった場合は登録を止める。消えると分かっている画像を
+        // 記録に紐づけるより、やり直してもらう方がよい。
+        //
+        // 複製に出すのは一時領域のキーだけ。既に正式な場所にあるキーまで渡すと、
+        // 複製先で名前がぶつかって連番が付き、元のオブジェクトが参照されなくなる
+        const temporaryKeys = keys.filter(isTemporaryKey);
+        let finalKeys = keys;
+
+        if (temporaryKeys.length > 0) {
+          const copied = await copyRecordImages(
+            temporaryKeys,
+            recordType as 'purchase' | 'drinking',
+            recordId,
+          );
+          // 並び順は記録の見え方に効くので、元の位置へ差し戻す
+          let next = 0;
+          finalKeys = keys.map((key) => (isTemporaryKey(key) ? copied[next++] : key));
+        }
+
+        setImageKeys(finalKeys);
+        return finalKeys;
       } catch (err) {
         console.error('Image upload failed:', err);
         setError('画像のアップロードに失敗しました。もう一度お試しください');
@@ -363,7 +422,13 @@ export function useImageUpload(): UseImageUploadReturn {
             keys.push(existing);
             continue;
           }
-          const key = await uploadSingleFile(imageFiles[i], recordType, tempRecordId, i);
+          const key = await uploadSingleFile(
+            imageFiles[i],
+            recordType,
+            tempRecordId,
+            i,
+            true,
+          );
           if (key === null) {
             setError('画像のアップロードに失敗しました。もう一度お試しください');
             return [];
