@@ -102,6 +102,17 @@ describe('deleteImage の所有者チェック', () => {
     expect(result).toMatchObject({ success: true, imageDeleteFailed: true });
   });
 
+  // アップロードのファイル名に `thumb_` を使うことは禁じていない
+  // （クライアントはサムネイルをその名前で上げるため）。記録がそれを直接
+  // 持っている場合に導出をかけると、在りもしない二重プレフィックスのキーを
+  // 消しにいって成功ログだけが増える
+  it('記録が thumb_ 始まりのキーを持つ場合、二重に導出しない', async () => {
+    await callDeleteImage({ imageKey: `${OWNER}/purchase/rec-1/thumb_photo.jpg` });
+
+    expect(deletedKeys()).toEqual([`${OWNER}/purchase/rec-1/thumb_photo.jpg`]);
+    expect(deletedKeys().some((key) => key.includes('thumb_thumb_'))).toBe(false);
+  });
+
   it('他人のキーは削除しない', async () => {
     const result = await callDeleteImage({ imageKey: `${VICTIM}/purchase/rec-9/photo.jpg` });
 

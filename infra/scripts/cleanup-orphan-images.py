@@ -10,10 +10,17 @@ A. 記録を削除したときに原画だけを消していて、サムネイ�
 B. OCR 解析のために記録の作成前にアップロードし、保存せず離脱する
    （どの記録からも参照されないまま残る）
 
-判定は「記録が参照する原画キーの集合」を基準に行う。
+判定は「記録が参照するキーの集合」を基準に行う。
 
-- 原画 K   … K が参照されていれば残す。されていなければ孤児
-- thumb_K  … 元の原画 K が参照されていれば残す。されていなければ孤児
+1. そのキー自体が参照されていれば残す（名前の形は問わない）
+2. `thumb_` で始まるキーは、元の原画が参照されていれば残す
+3. どちらでもなければ孤児
+
+1 を先に見るのが要点。アップロードのファイル名に `thumb_` を使うことは
+禁じていない（クライアントはサムネイルをその名前で上げるため、禁じると
+壊れる）ので、記録が `thumb_photo.jpg` を直接指していることがありうる。
+2 から先に見ると、それを「photo.jpg のサムネイル」と誤って読み、
+生きている画像を消してしまう。
 
 使い方:
     uv run --with boto3 python infra/scripts/cleanup-orphan-images.py \\
@@ -61,6 +68,15 @@ def effective_image_keys(item: dict) -> list[str]:
         return keys
     single = item.get("imageKey", {}).get("S")
     return [single] if single else []
+
+
+def without_owner(key: str) -> str:
+    """表示するキーから先頭の sub を落とす。
+
+    sub は利用者ごとに固定の識別子で、端末やログに残したくない。
+    ただし丸ごと伏せると調査できないので、残りはそのまま出す。
+    """
+    return key.split("/", 1)[1] if "/" in key else key
 
 
 def scan_all(dynamodb, table_name: str) -> list[dict]:
@@ -125,6 +141,17 @@ def main() -> int:
 
     for obj in objects:
         key = obj["Key"]
+
+        # 記録が直接指しているキーは、名前の形に関わらず残す。
+        #
+        # アップロードのファイル名に `thumb_` を使うことは禁じていない
+        # （クライアントはサムネイルをその名前で上げるため、禁じると壊れる）。
+        # 先に導出で判定すると、`thumb_photo.jpg` を記録が参照していても
+        # 「photo.jpg のサムネイル」と誤って読み、生きた画像を消してしまう
+        if key in referenced:
+            kept += 1
+            continue
+
         source = to_original_key(key) if is_thumbnail(key) else key
 
         if source in referenced:
@@ -149,9 +176,7 @@ def main() -> int:
         return 0
 
     for obj in sorted(targets, key=lambda o: o["Key"]):
-        # 先頭の sub は伏せる。ログや端末に利用者の識別子を残さない
-        shown = obj["Key"].split("/", 1)[1] if "/" in obj["Key"] else obj["Key"]
-        print(f"  {obj['Size'] / 1024 / 1024:7.2f} MB  {shown}")
+        print(f"  {obj['Size'] / 1024 / 1024:7.2f} MB  {without_owner(obj['Key'])}")
 
     if not args.apply:
         print()
@@ -169,7 +194,8 @@ def main() -> int:
         errors = response.get("Errors", [])
         deleted += len(chunk) - len(errors)
         for error in errors:
-            print(f"  [!] 消せなかった: {error.get('Key')} ({error.get('Message')})")
+            # ここでも sub は伏せる。失敗の調査に要るのは記録の位置なので足りる
+            print(f"  [!] 消せなかった: {without_owner(error.get('Key', ''))} ({error.get('Message')})")
 
     print()
     print(f"削除した: {deleted} 件 / {total_mb(targets):.1f} MB")
