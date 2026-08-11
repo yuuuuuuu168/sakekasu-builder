@@ -31,6 +31,45 @@ describe('ApiStack', () => {
     });
   });
 
+  // 一時領域のキーは 1 日で消える。記録に持たせると実体だけが消えて
+  // 画像の出ない記録が残る。フロントは保存前に正式な場所へ複製しているが、
+  // API を直接叩けばその手順を飛ばせるのでサーバー側でも拒否する（Issue #140）
+  describe('一時領域のキーを記録に保存させない', () => {
+    it.each(['PurchaseRecord', 'DrinkingRecord'])(
+      '%s の create リゾルバーが tmp 区画のキーを拒否する',
+      (typeName) => {
+        template.hasResourceProperties('AWS::AppSync::Resolver', {
+          FieldName: `create${typeName}`,
+          Code: Match.stringLikeRegexp('temporary keys cannot be stored in records'),
+        });
+      },
+    );
+
+    it.each(['PurchaseRecord', 'DrinkingRecord'])(
+      '%s の create リゾルバーが区画の位置で判定する（部分一致にしない）',
+      (typeName) => {
+        // ファイル名や sub に tmp が現れても一時領域とは限らない。
+        // includes で見ると正式な画像まで拒否してしまう
+        template.hasResourceProperties('AWS::AppSync::Resolver', {
+          FieldName: `create${typeName}`,
+          Code: Match.stringLikeRegexp("split\\('/'\\)\\[1\\] === 'tmp'"),
+        });
+      },
+    );
+
+    it.each(['PurchaseRecord', 'DrinkingRecord'])(
+      '%s の create リゾルバーが null 要素で落ちない',
+      (typeName) => {
+        // imageKeys の要素が null だと key.startsWith が実行時エラーになる。
+        // スキーマ側でも [String!] にしてあるが、ガードでも受け止める
+        template.hasResourceProperties('AWS::AppSync::Resolver', {
+          FieldName: `create${typeName}`,
+          Code: Match.stringLikeRegexp('!!key && key.startsWith'),
+        });
+      },
+    );
+  });
+
   // Issue #140: OCR の事前アップロードは記録の作成前に走るため、保存せず離れた
   // 画像が孤児として残る。一時領域はタグ付きで置き、ライフサイクルで自動削除する
   describe('一時アップロードのライフサイクル', () => {
