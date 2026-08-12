@@ -88,6 +88,18 @@ function isThumbnailKey(key: string): boolean {
   return key.slice(key.lastIndexOf('/') + 1).startsWith(THUMBNAIL_PREFIX);
 }
 
+/**
+ * CopyObject の複製元に渡す値を組み立てる。
+ *
+ * `CopySource` は `x-amz-copy-source` ヘッダとして送られるため、URL エンコードが要る。
+ * 素のキーを渡すと、日本語やスペースを含むファイル名で Node.js が
+ * 「Invalid character in header content」を投げてコピーが落ちる。
+ * 区切りの `/` は残す必要があるので、区画ごとにエンコードして繋ぎ直す
+ */
+function toCopySource(key: string): string {
+  return `${BUCKET_NAME}/${key.split('/').map(encodeURIComponent).join('/')}`;
+}
+
 /** 原画キーから、その兄弟であるサムネイルキーを導出する（フロントと同じ規則） */
 function toThumbnailKey(key: string): string {
   const separatorIndex = key.lastIndexOf('/');
@@ -408,7 +420,7 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
       new CopyObjectCommand({
         Bucket: BUCKET_NAME,
         Key: destination,
-        CopySource: `${BUCKET_NAME}/${source}`,
+        CopySource: toCopySource(source),
         // CopyObject の既定はタグの引き継ぎ。一時領域から複製すると
         // 自動削除タグまで付いてきて、記録に紐づいた画像が 1 日で消える
         TaggingDirective: 'REPLACE',
@@ -429,7 +441,7 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
         new CopyObjectCommand({
           Bucket: BUCKET_NAME,
           Key: toThumbnailKey(destination),
-          CopySource: `${BUCKET_NAME}/${sourceThumbnail}`,
+          CopySource: toCopySource(sourceThumbnail),
           // 原画と同じ理由でタグを落とす（サムネイルだけ 1 日で消えると
           // 一覧が原画へフォールバックし、静かに重くなる）
           TaggingDirective: 'REPLACE',
