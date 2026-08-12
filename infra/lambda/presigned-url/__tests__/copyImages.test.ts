@@ -62,12 +62,27 @@ function thumbnailsMissing(): void {
   });
 }
 
-/** 実際にコピーされた (コピー元 → コピー先) の一覧 */
+/**
+ * 実際にコピーされた (コピー元 → コピー先) の一覧。
+ *
+ * CopySource は URL エンコードされて渡るので、比較しやすいよう戻す
+ */
 function copies(): [string, string][] {
   return sendMock.mock.calls
     .map((call) => call[0])
     .filter((c): c is FakeCopyObjectCommand => c instanceof FakeCopyObjectCommand)
-    .map((c) => [c.input.CopySource.replace('dev-sakekasu-images/', ''), c.input.Key]);
+    .map((c) => [
+      decodeURIComponent(c.input.CopySource).replace('dev-sakekasu-images/', ''),
+      c.input.Key,
+    ]);
+}
+
+/** 実際に渡された CopySource（エンコードしたまま） */
+function rawCopySources(): string[] {
+  return sendMock.mock.calls
+    .map((call) => call[0])
+    .filter((c): c is FakeCopyObjectCommand => c instanceof FakeCopyObjectCommand)
+    .map((c) => c.input.CopySource);
 }
 
 async function callCopyImages(args: {
@@ -226,6 +241,47 @@ describe('copyImages', () => {
 
     expect(looked).toEqual([]);
     expect(copies().some(([, dest]) => dest.includes('thumb_thumb_'))).toBe(false);
+  });
+
+  // CopySource は x-amz-copy-source ヘッダとして送られる。素のキーを渡すと
+  // 日本語やスペースを含む名前で Node.js が弾き、コピーが落ちる（PR #149）
+  describe('複製元のエンコード', () => {
+    it('日本語を含むファイル名でもヘッダに載せられる形にする', async () => {
+      await callCopyImages({
+        sourceKeys: [`${OWNER}/tmp/upload-1/アラン　ポートカスク1.jpeg`],
+      });
+
+      for (const source of rawCopySources()) {
+        // ヘッダに入れられるのは ASCII の印字可能文字だけ
+        expect(source).toMatch(/^[\x20-\x7E]*$/);
+      }
+    });
+
+    it('区切りの / は残す（区画ごとにエンコードする）', async () => {
+      await callCopyImages({
+        sourceKeys: [`${OWNER}/tmp/upload-1/写真 1.jpeg`],
+      });
+
+      const [source] = rawCopySources();
+      // バケット名 + キーの区画が / で繋がったまま
+      expect(source.startsWith('dev-sakekasu-images/')).toBe(true);
+      expect(source.split('/')).toHaveLength(5);
+      // 空白はエンコードされている
+      expect(source).not.toContain(' ');
+      expect(decodeURIComponent(source)).toBe(
+        `dev-sakekasu-images/${OWNER}/tmp/upload-1/写真 1.jpeg`,
+      );
+    });
+
+    it('複製先のキーはエンコードしない（SDK が処理する）', async () => {
+      const result = await callCopyImages({
+        sourceKeys: [`${OWNER}/tmp/upload-1/アラン　ポートカスク1.jpeg`],
+      });
+
+      expect(result).toEqual([
+        `${OWNER}/drinking/${RECORD_ID}/アラン　ポートカスク1.jpeg`,
+      ]);
+    });
   });
 
   it('空の配列を渡したら何も複製しない', async () => {
