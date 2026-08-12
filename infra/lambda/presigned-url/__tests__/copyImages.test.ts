@@ -250,9 +250,13 @@ describe('copyImages', () => {
   // CopySource は x-amz-copy-source ヘッダとして送られる。素のキーを渡すと
   // 日本語やスペースを含む名前で Node.js が弾き、コピーが落ちる（PR #149）
   describe('複製元のエンコード', () => {
+    // 全角スペースを含む実際のファイル名。ソースに素で書くと lint の
+    // no-irregular-whitespace に当たるため、エスケープで表す
+    const IDEOGRAPHIC_SPACE = '\u3000';
+    const JP_NAME = `アラン${IDEOGRAPHIC_SPACE}ポートカスク1.jpeg`;
     it('日本語を含むファイル名でもヘッダに載せられる形にする', async () => {
       await callCopyImages({
-        sourceKeys: [`${OWNER}/tmp/upload-1/アラン　ポートカスク1.jpeg`],
+        sourceKeys: [`${OWNER}/tmp/upload-1/${JP_NAME}`],
       });
 
       for (const source of rawCopySources()) {
@@ -279,12 +283,10 @@ describe('copyImages', () => {
 
     it('複製先のキーはエンコードしない（SDK が処理する）', async () => {
       const result = await callCopyImages({
-        sourceKeys: [`${OWNER}/tmp/upload-1/アラン　ポートカスク1.jpeg`],
+        sourceKeys: [`${OWNER}/tmp/upload-1/${JP_NAME}`],
       });
 
-      expect(result).toEqual([
-        `${OWNER}/drinking/${RECORD_ID}/アラン　ポートカスク1.jpeg`,
-      ]);
+      expect(result).toEqual([`${OWNER}/drinking/${RECORD_ID}/${JP_NAME}`]);
     });
   });
 
