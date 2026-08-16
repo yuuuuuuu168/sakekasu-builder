@@ -131,10 +131,13 @@ const OCR_RESERVED_CONCURRENCY = 20;
  * PR #110 で画像アップロードを全滅させたのは1つ目の組み合わせなので、
  * 3点を1か所に閉じて、関数ごとに書き写さなくて済むようにする。
  *
+ * export しているのはテストから直接呼ぶため。スタック経由では通らない分岐
+ * （外部ロールを渡した場合）を確かめる手段が他に無い。
+ *
  * @param fn 計装する関数
  * @param id レイヤー参照の construct ID に使う接頭辞。関数ごとに一意にする
  */
-function enableApplicationSignals(fn: NodejsFunction, id: string): void {
+export function enableApplicationSignals(fn: NodejsFunction, id: string): void {
   fn.addLayers(
     LayerVersion.fromLayerVersionArn(
       fn,
@@ -144,6 +147,21 @@ function enableApplicationSignals(fn: NodejsFunction, id: string): void {
   );
   // レイヤー v15 に実在するラッパー。汎用 ADOT の /opt/otel-handler ではない
   fn.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/otel-instrument');
+  // Bedrock のリクエスト本文をスパンに載せない（PR #153 のレビュー指摘）。
+  //
+  // レイヤーには本文キャプチャの仕組みがあり、`AGENT_OBSERVABILITY_ENABLED=true`
+  // を入れると既定で有効になる。OCR の本文には base64 の画像（1枚あたり最大
+  // 3.75MB）が入っているので、有効になるとそれがスパン属性として
+  // `aws/spans` に流れ込む。
+  //
+  // いまこのアプリのどこにも `AGENT_OBSERVABILITY_ENABLED` は無い。ただし
+  // ソムリエ側の GenAI Observability を広げるときに入れる可能性があり、
+  // そのときは「入れる人が docs を読んでいること」だけが歯止めになる。
+  // 明示的に false を置いておけば、その順番に関係なく載らない。
+  //
+  // Bedrock を呼ばない関数（presigned-url）では効き目が無いが、害も無い。
+  // 関数ごとに付け外しすると、次に足す関数で判断をやり直すことになる
+  fn.addEnvironment('OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT', 'false');
   // テレメトリを書くための権限。中身は以下の2文だけ（v1、2024-10-16 以降変更なし）。
   //
   //   xray:PutTraceSegments                                  → Resource: *
@@ -159,7 +177,24 @@ function enableApplicationSignals(fn: NodejsFunction, id: string): void {
   // 外しているのは iam / sts / organizations / account だけなので、
   // xray と logs はどちらも天井の内側にある。
   // https://docs.aws.amazon.com/aws-managed-policy/latest/reference/CloudWatchLambdaApplicationSignalsExecutionRolePolicy.html
-  fn.role?.addManagedPolicy(
+  //
+  // 貼る前にロールの素性を確かめる（PR #153 のレビュー指摘）。`fn.role` が
+  // undefined になることは無い（NodejsFunction は渡されなければロールを作る。
+  // 実測で確認済み）が、`Role.fromRoleArn` で外から持ってきたロールを渡された
+  // 場合は `addManagedPolicy` が**何も言わずに捨てられる**。合成は成功し、
+  // レイヤーもラッパーも載るので、関数は起動するのにテレメトリだけ出ない。
+  //
+  // これは3つの壊れ方のうち一番見つけにくいものなので、合成時に落とす。
+  // いまの2つの呼び出し元はどちらもロールを渡していないため、この分岐には
+  // 入らない。将来ロールを外から渡す関数へ広げたときに気づけるようにしておく
+  if (!cdk.aws_iam.Role.isRole(fn.role)) {
+    throw new Error(
+      `${id}: 実行ロールがこのスタックで作られたものではないため、Application Signals の` +
+        '管理ポリシーを貼れない。外部のロールに addManagedPolicy は黙って捨てられ、' +
+        '関数は起動するのにテレメトリだけ出ない状態になる',
+    );
+  }
+  fn.role.addManagedPolicy(
     cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
       'CloudWatchLambdaApplicationSignalsExecutionRolePolicy',
     ),
