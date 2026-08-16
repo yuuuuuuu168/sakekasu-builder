@@ -5,10 +5,25 @@
       "Bash(aws * delete-*)",
       "Bash(aws * update-*)",
       "Bash(aws * put-*)",
+      "Bash(aws * send-*)",
       "Bash(aws s3 cp*)",
       "Bash(aws s3 mv*)",
       "Bash(aws s3 rm*)",
-      "Bash(aws s3 sync*)"
+      "Bash(aws s3 sync*)",
+      "Bash(aws s3api copy-*)",
+      "Bash(aws s3api upload-*)",
+      "Bash(aws s3api complete-multipart-upload*)",
+      "Bash(aws sts assume-role*)",
+      "Bash(aws sts get-federation-token*)",
+      "Bash(aws lambda invoke*)",
+      "Bash(aws ec2 run-instances*)",
+      "Bash(aws ec2 terminate-instances*)",
+      "Bash(aws iam attach-*)",
+      "Bash(aws iam detach-*)",
+      "Bash(aws cloudformation execute-change-set*)",
+      "Bash(aws cloudformation deploy*)",
+      "Bash(aws dynamodb batch-write-item*)",
+      "Bash(aws ssm start-session*)"
     ]
   },
   "hooks": {
