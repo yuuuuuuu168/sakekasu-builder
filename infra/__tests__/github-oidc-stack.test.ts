@@ -245,6 +245,16 @@ describe('GithubOidcStack', () => {
     }
   });
 
+  it('cdkd のデプロイロールは信頼ポリシーを書き換えられない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+
+    // 信頼ポリシーを書き換えられると「誰がそのロールになれるか」を変えられる。
+    // 外部アカウントを信頼先に足してロールを乗っ取れば、境界が拒否しない
+    // DynamoDB や S3 には届いてしまう。iam:PermissionsBoundary はこの
+    // アクションに渡らないため、条件で縛ることもできない
+    expect(allows(statements, 'iam:UpdateAssumeRolePolicy')).toBe(false);
+  });
+
   it('cdkd のデプロイロールは境界を外せない', () => {
     const statements = statementsFor(template, /^CdkdDeployRole/);
 
@@ -333,6 +343,26 @@ describe('GithubOidcStack', () => {
       (r) => (r as { Properties: { ManagedPolicyArns?: unknown[] } }).Properties.ManagedPolicyArns ?? [],
     );
     expect(managed).toEqual([]);
+  });
+
+  it('OIDC 連携のロールは1つ残らず Deny の対象になっている', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+    const denied = statements
+      .filter((s) => s.Effect === 'Deny')
+      .flatMap((s) => toArray(s.Resource));
+
+    // このスタックがロールを増やしたら、Deny にも足す必要がある。
+    // 足し忘れると、そのロールを cdkd のデプロイロールから書き換えられる
+    const roles = Object.values(template.findResources('AWS::IAM::Role'))
+      .map((r) => (r as { Properties: { RoleName?: unknown } }).Properties.RoleName)
+      .filter((n): n is string => typeof n === 'string');
+
+    expect(roles.length).toBeGreaterThan(0);
+    for (const roleName of roles) {
+      expect(denied, `${roleName} が Deny に入っていない`).toContain(
+        `arn:aws:iam::${ACCOUNT}:role/${roleName}`,
+      );
+    }
   });
 
   it('OIDC プロバイダーは GitHub Actions のトークン発行元を指す', () => {
