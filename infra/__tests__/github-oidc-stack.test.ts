@@ -55,6 +55,20 @@ function allows(statements: Statement[], action: string): boolean {
   );
 }
 
+/**
+ * そのアクションを明示的に拒否しているか。`allows` の Deny 版。
+ *
+ * 「Allow に入っていない」と「Deny で塞いである」は別物。前者は誰かが
+ * Allow を広げた瞬間に消えるが、後者は残る
+ */
+function denies(statements: Statement[], action: string): boolean {
+  return statements.some(
+    (s) =>
+      s.Effect === 'Deny' &&
+      toArray(s.Action).some((a) => new RegExp(`^${a.replace(/\*/g, '.*')}$`, 'i').test(action)),
+  );
+}
+
 describe('GithubOidcStack', () => {
   let template: Template;
 
@@ -298,6 +312,44 @@ describe('GithubOidcStack', () => {
 
     expect(allows(statements, 'applicationsignals:CreateServiceLevelObjective')).toBe(true);
     expect(allows(statements, 'applicationsignals:TagResource')).toBe(true);
+  });
+
+  // サービス検出はアカウントに1つの設定で、スタックから外して守っている。
+  // 一度これを消しかけてソムリエの可観測性を道連れにしている。
+  // applicationsignals:* にすると IAM の側から素通りで触れてしまう
+  it('cdkd のデプロイロールはサービス検出を有効化できない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+
+    expect(allows(statements, 'applicationsignals:StartDiscovery')).toBe(false);
+
+    // Allow が広がっても効くように Deny も置いてある
+    expect(
+      denies(statements, 'applicationsignals:StartDiscovery'),
+      'StartDiscovery を拒否するステートメントが無い',
+    ).toBe(true);
+  });
+
+  // SLO をデプロイした後、PR で cdkd diff が既存の状態を読みにいく。
+  // 読めないと差分を出す前に AccessDenied で落ちる
+  it('diff ロールは SLO を読める', () => {
+    const statements = statementsFor(template, /^DiffRole/);
+
+    expect(allows(statements, 'applicationsignals:GetServiceLevelObjective')).toBe(true);
+    expect(allows(statements, 'applicationsignals:ListServiceLevelObjectives')).toBe(true);
+  });
+
+  // diff ロールは読み取り専用。SLO も例外ではない
+  it('diff ロールは SLO を書き換えられない', () => {
+    const statements = statementsFor(template, /^DiffRole/);
+
+    for (const action of [
+      'applicationsignals:CreateServiceLevelObjective',
+      'applicationsignals:UpdateServiceLevelObjective',
+      'applicationsignals:DeleteServiceLevelObjective',
+      'applicationsignals:StartDiscovery',
+    ]) {
+      expect(allows(statements, action), `${action} が許可されている`).toBe(false);
+    }
   });
 
   it('cdkd のデプロイロールはログの中身を読めない', () => {
