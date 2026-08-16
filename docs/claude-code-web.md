@@ -39,7 +39,7 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 - クラウドのコンテナには AWS CLI が入っていないため、同じスクリプトが先に v2 を導入する（v2 が入っていれば飛ばす）。SSO のデバイスコードフローは v1 では動かないので、有無ではなくバージョンで判定している。SessionStart フックではなくこちらに置いたのは、AWS を触らないセッションにまで 70MB 超のダウンロードを負わせないため
 - 参照する Permission Set は `AgentVerifyAccess`。作成手順と権限の考え方は [agent-verify-permission-set.md](agent-verify-permission-set.md) にまとめてある
 - このスクリプトも `$CLAUDE_CODE_REMOTE` を見てクラウド VM でだけ動く。ローカルの `~/.aws/config` を上書きしないため
-- 変更操作は [scripts/deny-aws-writes.sh](../scripts/deny-aws-writes.sh)（`PreToolUse` フック）が止める。読み取り操作だけを通す許可リスト方式で、`get-` / `list-` / `describe-` などの接頭辞と、`sso login` / `logs start-query` / `s3 ls` のような明示リストに載るものだけが通る。`invoke` や `assume-role` のように動詞が read でも write でもない操作を数え漏らさないため、拒否リストではなく許可リストにしている
+- 変更操作は [scripts/deny-aws-writes.sh](../scripts/deny-aws-writes.sh)（`PreToolUse` フック）が止める。読み取り操作だけを通す許可リスト方式で、`get-` / `list-` / `describe-` などの接頭辞と、`sso login` / `logs tail` / `s3 ls` のような明示リストに載るものだけが通る。明示リストに足すときは、`ecs execute-command` のように名前が読み取りっぽくても実質が違うものがあるため、一つずつ実際の権限を確かめる。`invoke` や `assume-role` のように動詞が read でも write でもない操作を数え漏らさないため、拒否リストではなく許可リストにしている
 - このフックも**クラウドでだけ判定する**。`permissions.deny` に書くとリポジトリ共有のためローカルの正当な管理作業（`sso-admin create-permission-set` など）まで止まり、実際に一度それで詰まった
 - Network access は `awsapps.com` と `*.amazonaws.com` への到達が必要。認証エラーに見える失敗はまずここを疑う
 
