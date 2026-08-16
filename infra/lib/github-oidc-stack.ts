@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import type { Construct } from 'constructs';
 import { cdkdDeployStatements, cdkdDiffStatements } from './cdkd-policies.js';
+import { createRoleBoundary } from './role-boundary.js';
 
 export interface GithubOidcStackProps extends cdk.StackProps {
   /** 信頼する GitHub リポジトリ（owner/repo 形式） */
@@ -65,6 +66,11 @@ export class GithubOidcStack extends cdk.Stack {
       }),
     );
 
+    // アプリのロールに付ける Permissions Boundary（Issue #150）。
+    // cdkd のデプロイロールが作るロールはこの天井を超えられない。
+    // 詳細は lib/role-boundary.ts
+    const roleBoundary = createRoleBoundary(this, 'RoleBoundary');
+
     // cdkd のデプロイ先ロール（Issue #150）。
     //
     // 信頼するのは deploy ロールだけ。GitHub の OIDC からは直接引き受けられない
@@ -123,5 +129,6 @@ export class GithubOidcStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'DeployRoleArn', { value: deployRole.roleArn });
     new cdk.CfnOutput(this, 'DiffRoleArn', { value: diffRole.roleArn });
     new cdk.CfnOutput(this, 'CdkdDeployRoleArn', { value: cdkdDeployRole.roleArn });
+    new cdk.CfnOutput(this, 'RoleBoundaryArn', { value: roleBoundary.managedPolicyArn });
   }
 }

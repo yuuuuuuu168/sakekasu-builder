@@ -3,6 +3,7 @@ import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import type { Construct } from 'constructs';
+import { applyRoleBoundary } from './role-boundary.js';
 
 export interface HealthGlobalStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
@@ -22,6 +23,12 @@ export interface HealthGlobalStackProps extends cdk.StackProps {
 export class HealthGlobalStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: HealthGlobalStackProps) {
     super(scope, id, props);
+
+    // このスタックが作るロールはすべて Permissions Boundary の内側に置く
+    // （Issue #150）。cdkd のデプロイロールは境界の付いたロールしか
+    // 作り替えられない条件になっているため、外すとデプロイが止まる。
+    // 詳細は lib/role-boundary.ts
+    applyRoleBoundary(this);
 
     const prefix = `${props.envName}-sakekasu`;
     const targetBusArn = `arn:aws:events:${props.targetRegion}:${this.account}:event-bus/default`;

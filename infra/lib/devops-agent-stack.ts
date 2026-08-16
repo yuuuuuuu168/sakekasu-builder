@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
 import { LAMBDA_LOG_RETENTION } from './log-retention.js';
+import { applyRoleBoundary } from './role-boundary.js';
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 
@@ -45,6 +46,12 @@ export interface DevOpsAgentStackProps extends cdk.StackProps {
 export class DevOpsAgentStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: DevOpsAgentStackProps) {
     super(scope, id, props);
+
+    // このスタックが作るロールはすべて Permissions Boundary の内側に置く
+    // （Issue #150）。cdkd のデプロイロールは境界の付いたロールしか
+    // 作り替えられない条件になっているため、外すとデプロイが止まる。
+    // 詳細は lib/role-boundary.ts
+    applyRoleBoundary(this);
 
     const prefix = `${props.envName}-sakekasu`;
     const webhookSecretName = `${prefix}/devops-agent/webhook`;

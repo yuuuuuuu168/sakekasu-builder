@@ -15,11 +15,14 @@ function synth(): Template {
   return Template.fromStack(stack);
 }
 
+const ROLE_BOUNDARY_ARN = `arn:aws:iam::${ACCOUNT}:policy/sakekasu-role-boundary`;
+
 interface Statement {
   Sid?: string;
   Effect: 'Allow' | 'Deny';
   Action: string | string[];
   Resource: string | string[];
+  Condition?: Record<string, Record<string, string | string[]>>;
 }
 
 function toArray(value: string | string[]): string[] {
@@ -199,7 +202,11 @@ describe('GithubOidcStack', () => {
 
   it('cdkd のデプロイロールは OIDC 連携のロール自身を書き換えられない', () => {
     const statements = statementsFor(template, /^CdkdDeployRole/);
-    const deny = statements.find((s) => s.Effect === 'Deny');
+    const deny = statements.find(
+      (s) =>
+        s.Effect === 'Deny' &&
+        toArray(s.Resource).includes(`arn:aws:iam::${ACCOUNT}:role/sakekasu-cdkd-deploy`),
+    );
 
     expect(deny, 'Deny ステートメントが無い').toBeDefined();
     expect(toArray(deny!.Action)).toContain('iam:*');
@@ -210,6 +217,85 @@ describe('GithubOidcStack', () => {
         `arn:aws:iam::${ACCOUNT}:role/sakekasu-github-actions-diff`,
       ]),
     );
+  });
+
+  it('cdkd のデプロイロールはロールの権限を境界の内側でしか書き換えられない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+
+    // 権限を増やしうる IAM の API は、すべて境界の条件付きでなければならない。
+    // 1つでも素通しがあると、Lambda の実行ロールに管理者相当を書き込んで
+    // その関数を呼ぶ、という昇格の連鎖が通ってしまう
+    const escalating = [
+      'iam:CreateRole',
+      'iam:PutRolePolicy',
+      'iam:AttachRolePolicy',
+      'iam:PutRolePermissionsBoundary',
+    ];
+    for (const action of escalating) {
+      const granting = statements.filter(
+        (s) => s.Effect === 'Allow' && toArray(s.Action).includes(action),
+      );
+      expect(granting.length, `${action} を許可するステートメントが無い`).toBeGreaterThan(0);
+      for (const statement of granting) {
+        expect(
+          statement.Condition?.ArnEquals?.['iam:PermissionsBoundary'],
+          `${action} に境界の条件が無い`,
+        ).toBe(ROLE_BOUNDARY_ARN);
+      }
+    }
+  });
+
+  it('cdkd のデプロイロールは境界を外せない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+
+    expect(allows(statements, 'iam:DeleteRolePermissionsBoundary')).toBe(false);
+
+    const denied = statements
+      .filter((s) => s.Effect === 'Deny')
+      .flatMap((s) => toArray(s.Action));
+    expect(denied).toContain('iam:DeleteRolePermissionsBoundary');
+
+    // 境界そのものの中身を書き換えられても意味が無くなる
+    const rewriting = statements.find(
+      (s) => s.Effect === 'Deny' && toArray(s.Resource).includes(ROLE_BOUNDARY_ARN),
+    );
+    expect(rewriting, '境界ポリシーの書き換えを塞ぐ Deny が無い').toBeDefined();
+    expect(toArray(rewriting!.Action)).toContain('iam:CreatePolicyVersion');
+  });
+
+  it('PassRole は実際に使うサービスにしか渡せない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+    const passRole = statements.filter(
+      (s) => s.Effect === 'Allow' && toArray(s.Action).includes('iam:PassRole'),
+    );
+
+    expect(passRole.length).toBe(1);
+    // iam:PassedToService は PassRole 専用の条件キー。他のアクションと同居
+    // させると、そちらが常に拒否される
+    expect(toArray(passRole[0].Action)).toEqual(['iam:PassRole']);
+    expect(toArray(passRole[0].Condition!.StringEquals['iam:PassedToService'])).toEqual([
+      'lambda.amazonaws.com',
+      'appsync.amazonaws.com',
+      'events.amazonaws.com',
+    ]);
+  });
+
+  it('cdkd のデプロイロールはログの中身を読めない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+
+    for (const action of [
+      'logs:GetLogEvents',
+      'logs:FilterLogEvents',
+      'logs:StartQuery',
+      'logs:GetQueryResults',
+      'logs:StartLiveTail',
+    ]) {
+      expect(allows(statements, action), `${action} が許可されている`).toBe(false);
+    }
+
+    // ロググループの管理そのものはできる必要がある
+    expect(allows(statements, 'logs:PutRetentionPolicy')).toBe(true);
+    expect(allows(statements, 'logs:PutMetricFilter')).toBe(true);
   });
 
   it('cdkd のデプロイロールは利用者のデータを読めない', () => {

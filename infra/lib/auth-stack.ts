@@ -8,6 +8,7 @@ import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
 import { LAMBDA_LOG_RETENTION } from './log-retention.js';
+import { applyRoleBoundary } from './role-boundary.js';
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 
@@ -39,6 +40,12 @@ export class AuthStack extends cdk.Stack {
 
   constructor(scope: Construct, id: string, props: AuthStackProps) {
     super(scope, id, props);
+
+    // このスタックが作るロールはすべて Permissions Boundary の内側に置く
+    // （Issue #150）。cdkd のデプロイロールは境界の付いたロールしか
+    // 作り替えられない条件になっているため、外すとデプロイが止まる。
+    // 詳細は lib/role-boundary.ts
+    applyRoleBoundary(this);
 
     this.userPool = new cognito.UserPool(this, 'UserPool', {
       userPoolName: `${props.envName}-sakekasu-userpool`,
