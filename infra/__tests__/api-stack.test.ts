@@ -9,6 +9,32 @@ import {
   assertInferenceProfileMatchesFoundationModel,
 } from '../lib/api-stack.js';
 
+/**
+ * 関数名から実行ロールのリソース定義を引く。
+ *
+ * `hasResourceProperties('AWS::IAM::Role', ...)` は型が一致するリソースを
+ * 総なめして1つでも当たれば通る。ロールに何かが付いていることを確かめたい
+ * 場面では、隣の関数のロールで通ってしまい検査にならない
+ */
+type RoleResource = { Properties?: { ManagedPolicyArns?: unknown } };
+
+function executionRoleOf(template: Template, functionName: string): RoleResource {
+  const [fn] = Object.values(
+    template.findResources('AWS::Lambda::Function', {
+      Properties: { FunctionName: functionName },
+    }),
+  );
+  expect(fn, `${functionName} が見つからない`).toBeDefined();
+
+  // 実行ロールは Fn::GetAtt で参照される。[論理ID, 'Arn'] の形
+  const roleLogicalId = fn.Properties?.Role?.['Fn::GetAtt']?.[0];
+  expect(roleLogicalId, `${functionName} の Role が論理IDで参照されていない`).toBeDefined();
+
+  const role = template.findResources('AWS::IAM::Role')[roleLogicalId];
+  expect(role, `${functionName} の実行ロール ${roleLogicalId} が見つからない`).toBeDefined();
+  return role;
+}
+
 describe('ApiStack', () => {
   let template: Template;
 
@@ -538,9 +564,9 @@ describe('ApiStack', () => {
     // - aws-otel-nodejs-amd64-ver-*（汎用 ADOT）        → /opt/otel-handler
     // 前回は後者のレイヤーに前者のラッパー名を組み合わせて落ちた。
     // ラッパー名だけを見ても正誤は決まらないので、レイヤーとの組み合わせで固定する。
-    it('OCR は Application Signals のレイヤーとラッパーが揃っている', () => {
+    it.each(targets)('%s は Application Signals のレイヤーとラッパーが揃っている', (functionName) => {
       template.hasResourceProperties('AWS::Lambda::Function', {
-        FunctionName: 'dev-sakekasu-ocr-analyzer',
+        FunctionName: functionName,
         Layers: Match.arrayWith([Match.stringLikeRegexp('AWSOpenTelemetryDistroJs')]),
         Environment: {
           Variables: Match.objectLike({
@@ -550,35 +576,19 @@ describe('ApiStack', () => {
       });
     });
 
-    it('OCR の実行ロールに Application Signals の権限が付いている', () => {
+    it.each(targets)('%s の実行ロールに Application Signals の権限が付いている', (functionName) => {
       // レイヤーが起動してもこの権限が無いとテレメトリが送れず、
-      // 「動いているのに何も出ない」状態になる
-      template.hasResourceProperties('AWS::IAM::Role', {
-        ManagedPolicyArns: Match.arrayWith([
-          Match.objectLike({
-            'Fn::Join': Match.arrayWith([
-              Match.arrayWith([
-                Match.stringLikeRegexp(
-                  'CloudWatchLambdaApplicationSignalsExecutionRolePolicy',
-                ),
-              ]),
-            ]),
-          }),
-        ]),
-      });
-    });
+      // 「動いているのに何も出ない」状態になる。
+      //
+      // ロールは関数から引く。AWS::IAM::Role を型だけで探すと、どれか1つの
+      // ロールに付いていれば通ってしまい、関数を増やしたときの付け忘れを
+      // 素通りさせる
+      const role = executionRoleOf(template, functionName);
 
-    // 前回は2関数へ同時に入れて両方止め、画像アップロードの動線ごと失った。
-    // OCR で様子を見てから広げる。広げるときにこのテストを書き換える
-    it('presigned-url にはまだ計装を入れていない', () => {
-      const functions = template.findResources('AWS::Lambda::Function', {
-        Properties: { FunctionName: 'dev-sakekasu-presigned-url' },
-      });
-      const [fn] = Object.values(functions);
-
-      expect(fn).toBeDefined();
-      expect(fn.Properties?.Environment?.Variables?.AWS_LAMBDA_EXEC_WRAPPER).toBeUndefined();
-      expect(fn.Properties?.Layers ?? []).toHaveLength(0);
+      expect(
+        JSON.stringify(role.Properties?.ManagedPolicyArns ?? []),
+        `${functionName} の実行ロールに Application Signals の管理ポリシーが無い`,
+      ).toContain('CloudWatchLambdaApplicationSignalsExecutionRolePolicy');
     });
 
     // ラッパーを指定した関数には必ずレイヤーが要る。片方だけの状態が

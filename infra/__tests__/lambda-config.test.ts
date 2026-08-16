@@ -399,4 +399,28 @@ describe('Lambda のランタイム', () => {
   it('管理アカウント側のスタックは予約を入れていない', () => {
     expect(collectReservations(OTHER_ACCOUNT_STACKS)).toEqual({});
   });
+
+  // Issue #86: 計装を入れるのは api スタックの2関数だけ。監視系
+  // （health-check / slack-notifier / sommelier-canary / signup-notifier）は
+  // 意図的に対象外にしている。監視の監視は既存のアラームで足りていて、
+  // 広げるとノイズと費用だけが増えるため。
+  //
+  // 対象は api-stack.test.ts でも見ているが、そちらは api スタックしか
+  // 合成しないので「他のスタックへ広がっていない」ことは見られない。
+  // 判断そのものを docs/application-signals.md に書いてあるので、
+  // 増やすときは文書ごと更新してほしい。その合図としてここで固定する
+  it('Application Signals の計装は対象の2関数だけに入っている', () => {
+    const instrumented = Object.values(templates)
+      .flatMap((template) => Object.values(template.findResources('AWS::Lambda::Function')))
+      .filter(
+        (fn) => fn.Properties?.Environment?.Variables?.AWS_LAMBDA_EXEC_WRAPPER !== undefined,
+      )
+      .map((fn) => fn.Properties?.FunctionName)
+      .sort();
+
+    expect(instrumented).toEqual([
+      `${SYNTH_ENV_NAME}-sakekasu-ocr-analyzer`,
+      `${SYNTH_ENV_NAME}-sakekasu-presigned-url`,
+    ]);
+  });
 });
