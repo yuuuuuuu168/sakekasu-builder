@@ -25,7 +25,15 @@ AWS 管理の `ReadOnlyAccess` は 2912 アクションを許可し、そこに�
 - アタッチする AWS 管理ポリシー: `ReadOnlyAccess`
 - インラインポリシー: [agent-verify-deny-policy.json](agent-verify-deny-policy.json)
 
-CloudWatch Logs・メトリクス・Application Signals・X-Ray は**意図的に Deny していない**。障害調査でログ本文とトレースを読む必要があるため。ログ本文には Cognito sub が入りうることを承知のうえで許可している。
+CloudWatch Logs・メトリクス・Application Signals・X-Ray は**意図的に Deny していない**。障害調査でログ本文とトレースを読む必要があるため。ログ本文には Cognito sub が入りうることを承知のうえで許可している。ただし `logs:Unmask`（Data Protection のマスクを外す操作）は [cdkd-policies.ts](../infra/lib/cdkd-policies.ts) と揃えて Deny する。
+
+画像バケットは `s3:ListBucket` も Deny する。キーが `{cognito-sub}/{recordType}/{recordId}/{fileName}` の形（[presigned-url/index.ts](../infra/lambda/presigned-url/index.ts)）で、一覧するだけで利用者の Cognito sub が列挙できてしまうため。オブジェクト本文を読めなくても、これは利用者の識別子そのものが漏れる。アプリ側もログから sub を伏せており、そこと方針を揃える。CDK のアセットバケットなどは調査に使うので、Deny は画像バケットに限定する。
+
+一方、次は Deny していない。名前や設定は漏れるが値は漏れず、障害調査での利用価値が上回るため。
+
+- `secretsmanager:ListSecrets` / `DescribeSecret`（シークレット名とローテーション設定。値は `GetSecretValue` 側で Deny 済み）
+- `ssm:DescribeParameters`（パラメータ名。値は `GetParameter*` 側で Deny 済み）
+- `cognito-idp:DescribeUserPool` / `DescribeUserPoolClient` / `ListGroups`（プールの設定。利用者そのものは `ListUsers` / `AdminGetUser` 側で Deny 済み）
 
 ## 作成状況
 
@@ -64,6 +72,21 @@ aws sso-admin create-account-assignment --instance-arn $INST \
 
 なお [scripts/deny-aws-writes.sh](../scripts/deny-aws-writes.sh) により、クラウドセッションからは `create-*` / `put-*` 系が実行できない。これらはローカルまたは人間が手で流す。
 
+## 設定が正しいかを確かめる
+
+インラインポリシーの投入（3番目のコマンド）を飛ばすと、土台の `ReadOnlyAccess` がむき出しになり、利用者データが読める状態で気づけない。作成・変更のたびに、実際に入っている内容がリポジトリの定義と一致するか確認する。
+
+```sh
+INST=arn:aws:sso:::instance/<インスタンス ID>
+PS=arn:aws:sso:::permissionSet/<インスタンス ID>/<Permission Set ID>
+
+aws sso-admin get-inline-policy-for-permission-set --instance-arn $INST \
+  --permission-set-arn $PS --query InlinePolicy --output text > /tmp/live.json
+python3 -c "import json;print('一致' if json.load(open('/tmp/live.json'))==json.load(open('docs/agent-verify-deny-policy.json')) else '不一致')"
+```
+
+Permission Set を更新した場合は `aws sso-admin provision-permission-set` が必要になることがある。反映後は下の動作確認をやり直す。
+
 ## 動作確認（実施済みの結果）
 
 `aws sso login --profile verify --use-device-code` の後、実機で次を確認した。
@@ -76,6 +99,7 @@ aws sso-admin create-account-assignment --instance-arn $INST \
 | `dynamodb list-tables` / `s3api list-buckets` / `lambda list-functions` | 通る（構造の把握は残す） |
 | `dynamodb scan` / `get-item` | AccessDenied |
 | `s3api get-object`（`dev-sakekasu-images` の実オブジェクト） | AccessDenied（explicit deny） |
+| `s3api list-objects-v2 --bucket dev-sakekasu-images` | AccessDenied（Cognito sub の列挙を防ぐ） |
 | `ssm get-parameter` / `secretsmanager get-secret-value` | AccessDenied |
 | `cognito-idp list-users` | AccessDenied |
 | `s3api put-object` / `lambda invoke` | AccessDenied |
