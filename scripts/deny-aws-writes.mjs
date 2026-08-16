@@ -18,10 +18,14 @@ const READ_PREFIXES = [
   'search-', 'select-', 'filter-', 'check-', 'validate-', 'simulate-', 'estimate-',
 ];
 
-// 接頭辞では拾えない読み取り操作
+// 接頭辞では拾えない読み取り操作。
+// 読み取りそうな名前でも実質は違うものがあるため、載せる前に実際の権限を確認する。
+// 例えば ecs execute-command はコンテナ内でコマンドを実行するので、ここには載せない。
 const READ_EXACT = new Set([
   'sso login', 'sso logout',
   'configure list', 'configure list-profiles', 'configure get',
+  // logs tail は高レベルコマンドで、内部は FilterLogEvents（--follow なら StartLiveTail）
+  'logs tail',
   'logs start-query', 'logs stop-query', 'logs start-live-tail',
   'dynamodb scan', 'dynamodb query',
   's3 ls',
