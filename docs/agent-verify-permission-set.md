@@ -27,51 +27,60 @@ AWS 管理の `ReadOnlyAccess` は 2912 アクションを許可し、そこに�
 
 CloudWatch Logs・メトリクス・Application Signals・X-Ray は**意図的に Deny していない**。障害調査でログ本文とトレースを読む必要があるため。ログ本文には Cognito sub が入りうることを承知のうえで許可している。
 
-## 作成手順（IIC 管理アカウントで1回だけ）
+## 作成状況
 
-IAM Identity Center は CDK 管理外のため手動で作成する。
+作成・割り当て済み（2026-08-17）。IAM Identity Center は CDK 管理外のため手動で作成した。
+
+| 項目 | 値 |
+|---|---|
+| インスタンス | `arn:aws:sso:::instance/<インスタンス ID>`（管理アカウント <管理アカウント ID> 所有） |
+| Permission Set | `arn:aws:sso:::permissionSet/<インスタンス ID>/<Permission Set ID>` |
+| セッション時間 | `PT12H`（既存の `AdministratorAccess` / `ReadOnlyAccess` に揃えた） |
+| 割り当て先 | アカウント <アプリのアカウント ID> / グループ `sakekasu`（既存もグループ割り当てのため揃えた） |
+
+作り直す場合の手順は次のとおり。管理アカウント（<管理アカウント ID>）の認証が必要で、メンバーアカウントからは `sso:ListPermissionSets` すら通らない。
 
 ```sh
-# 1. Permission Set を作る
-aws sso-admin create-permission-set \
-  --instance-arn <INSTANCE_ARN> \
+INST=arn:aws:sso:::instance/<インスタンス ID>
+
+aws sso-admin create-permission-set --instance-arn $INST \
   --name AgentVerifyAccess \
   --description "Read-only access for Claude Code cloud sessions. Denies user data and secret reads." \
-  --session-duration PT4H
+  --session-duration PT12H
 
-# 2. ReadOnlyAccess をアタッチする
-aws sso-admin attach-managed-policy-to-permission-set \
-  --instance-arn <INSTANCE_ARN> \
+aws sso-admin attach-managed-policy-to-permission-set --instance-arn $INST \
   --permission-set-arn <PERMISSION_SET_ARN> \
   --managed-policy-arn arn:aws:iam::aws:policy/ReadOnlyAccess
 
-# 3. Deny のインラインポリシーを入れる
-aws sso-admin put-inline-policy-to-permission-set \
-  --instance-arn <INSTANCE_ARN> \
+aws sso-admin put-inline-policy-to-permission-set --instance-arn $INST \
   --permission-set-arn <PERMISSION_SET_ARN> \
   --inline-policy file://docs/agent-verify-deny-policy.json
 
-# 4. アカウント <アプリのアカウント ID> に、自分のユーザーで割り当てる
-aws sso-admin create-account-assignment \
-  --instance-arn <INSTANCE_ARN> \
+aws sso-admin create-account-assignment --instance-arn $INST \
   --permission-set-arn <PERMISSION_SET_ARN> \
   --target-id <アプリのアカウント ID> --target-type AWS_ACCOUNT \
-  --principal-id <USER_ID> --principal-type USER
+  --principal-id 97242a68-30e1-70ce-49a7-0ba461fb1bf2 --principal-type GROUP
 ```
 
-`<INSTANCE_ARN>` は `aws sso-admin list-instances` で、`<USER_ID>` は `aws identitystore list-users --identity-store-id <ID>` で取得する。
+なお `.claude/settings.json` の deny により、Claude Code のセッションからは `create-*` / `put-*` 系が実行できない。これらは人間が手で流す。
 
-## 動作確認
+## 動作確認（実施済みの結果）
 
-割り当て後、次が期待どおりになること。
+`aws sso login --profile verify --use-device-code` の後、実機で次を確認した。
 
-```sh
-aws sso login --profile verify --use-device-code
-aws sts get-caller-identity --profile verify                    # 成功する
-aws logs describe-log-groups --profile verify                    # 成功する（可観測性は残す）
-aws dynamodb scan --table-name <records-table> --profile verify  # AccessDenied になる
-aws s3api get-object --bucket <images-bucket> --key x /tmp/x --profile verify  # AccessDenied になる
-```
+| コマンド | 結果 |
+|---|---|
+| `sts get-caller-identity` | `AWSReservedSSO_AgentVerifyAccess_...` として成功 |
+| `logs describe-log-groups` / `filter-log-events` | 通る |
+| `cloudwatch describe-alarms` / `get-metric-data` | 通る |
+| `dynamodb list-tables` / `s3api list-buckets` / `lambda list-functions` | 通る（構造の把握は残す） |
+| `dynamodb scan` / `get-item` | AccessDenied |
+| `s3api get-object`（`dev-sakekasu-images` の実オブジェクト） | AccessDenied（explicit deny） |
+| `ssm get-parameter` / `secretsmanager get-secret-value` | AccessDenied |
+| `cognito-idp list-users` | AccessDenied |
+| `s3api put-object` / `lambda invoke` | AccessDenied |
+
+`s3api get-object` を試すときは**実在するオブジェクトのキー**を使うこと。存在しないキーだと、`s3:ListBucket` を持っているぶん S3 が `NoSuchKey`（404）を返し、GetObject の認可結果が観測できない。
 
 ## 変更したくなったら
 
