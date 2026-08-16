@@ -476,6 +476,22 @@ describe('MonitoringStack', () => {
       }
     });
 
+    // 日に数回しか呼ばれないので、1時間窓にするとほとんどが「データ無し」に
+    // なる。バーンレートは窓の選び方がそのまま使い物になるかを決める
+    it('SLO のバーンレートは1日窓だけを使う', () => {
+      const slos = Object.values(
+        template.findResources('AWS::ApplicationSignals::ServiceLevelObjective'),
+      );
+
+      expect(slos.length).toBeGreaterThan(0);
+      for (const slo of slos) {
+        expect(
+          slo.Properties?.BurnRateConfigurations,
+          `${slo.Properties?.Name} の参照窓`,
+        ).toEqual([{ LookBackWindowMinutes: 1440 }]);
+      }
+    });
+
     // 30日の budget で緩やかな失敗を見るのが目的。7日（既定）に戻ると、
     // 日に数回の規模では母数が小さすぎて 1 回の失敗で budget を使い切る
     it('SLO は 30 日の rolling で 90% を目標にしている', () => {
