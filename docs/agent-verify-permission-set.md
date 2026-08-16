@@ -62,7 +62,7 @@ aws sso-admin create-account-assignment --instance-arn $INST \
   --principal-id 97242a68-30e1-70ce-49a7-0ba461fb1bf2 --principal-type GROUP
 ```
 
-なお `.claude/settings.json` の deny により、Claude Code のセッションからは `create-*` / `put-*` 系が実行できない。これらは人間が手で流す。
+なお [scripts/deny-aws-writes.sh](../scripts/deny-aws-writes.sh) により、クラウドセッションからは `create-*` / `put-*` 系が実行できない。これらはローカルまたは人間が手で流す。
 
 ## 動作確認（実施済みの結果）
 
