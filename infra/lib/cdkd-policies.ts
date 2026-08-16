@@ -219,14 +219,24 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
       },
     }),
 
-    // 権限を増やさない操作。iam:PermissionsBoundary が渡らないので条件は付けない
+    // 読み取りと、権限に影響しない属性の変更。iam:PermissionsBoundary が
+    // 渡らないアクションなので条件は付けられない。
+    //
+    // iam:UpdateAssumeRolePolicy はここに入れてはいけない。信頼ポリシーを
+    // まるごと書き換える API で、「誰がそのロールになれるか」を変えられる。
+    // 外部のアカウントを信頼先に足せば、そのロールの権限をそのまま使える。
+    // 境界は iam と sts しか拒否しないので、たとえば OCR 関数のロールを
+    // 乗っ取れば DynamoDB の記録や S3 の画像に届いてしまう。
+    //
+    // cdkd がこれを必要とするのは、CDK 側で assumedBy を変えたときだけ。
+    // 起きたら AccessDenied で止まるので、そのときは人間が手で直す
+    // （PR #152 のレビュー指摘）
     new iam.PolicyStatement({
       sid: 'ReadAndTagApplicationRoles',
       actions: [
         'iam:GetRole',
         'iam:UpdateRole',
         'iam:UpdateRoleDescription',
-        'iam:UpdateAssumeRolePolicy',
         'iam:GetRolePolicy',
         'iam:ListRolePolicies',
         'iam:ListAttachedRolePolicies',
