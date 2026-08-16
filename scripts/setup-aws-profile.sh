@@ -27,7 +27,7 @@ cat > ~/.aws/config << 'EOF'
 sso_start_url = https://d-xxxxxxxxxx.awsapps.com/start
 sso_region = ap-northeast-1
 sso_account_id = 232791540685
-sso_role_name = ReadOnlyAccess
+sso_role_name = AgentVerifyAccess
 region = ap-northeast-1
 output = json
 EOF
