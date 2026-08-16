@@ -44,15 +44,38 @@ function statementsFor(template: Template, roleLogicalId: RegExp): Statement[] {
 }
 
 /**
+ * ポリシーのアクション表記を正規表現に直す。
+ *
+ * IAM のワイルドカードは `*`（0文字以上）と `?`（ちょうど1文字）の2つ。
+ * 素朴に `*` だけを `.*` へ置き換えると、`?` が正規表現の「直前の文字が
+ * 0個か1個」として解釈され、意味が変わる。`iam:PassRol?` が
+ * `iam:PassRole` に当たらない（取りこぼし）だけでなく、書き方によっては
+ * 逆に当たってしまう（見逃し）。
+ *
+ * 見逃す側が問題で、Deny を検査するテストが「塞げていないのに緑」になる。
+ * ここは `denies()` が唯一の担保になっている StartDiscovery の検査に
+ * 効いてくる（PR #161 のレビュー指摘）。
+ *
+ * エスケープは展開より先に行う。順番が逆だと、エスケープ用に足した
+ * バックスラッシュまでワイルドカードとして展開してしまう。
+ */
+function iamActionToRegex(action: string): RegExp {
+  const escaped = action.replace(/[.+[\](){}^$|\\]/g, '\\$&');
+  return new RegExp(`^${escaped.replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i');
+}
+
+/** そのステートメントが、指定の効果でそのアクションに当たるか */
+function matches(statement: Statement, effect: 'Allow' | 'Deny', action: string): boolean {
+  if (statement.Effect !== effect) return false;
+  return toArray(statement.Action).some((a) => iamActionToRegex(a).test(action));
+}
+
+/**
  * そのアクションが許可されているか。ポリシーはワイルドカード（`appsync:*`）を
  * 使うため、文字列の一致ではなくパターンとして評価する
  */
 function allows(statements: Statement[], action: string): boolean {
-  return statements.some(
-    (s) =>
-      s.Effect === 'Allow' &&
-      toArray(s.Action).some((a) => new RegExp(`^${a.replace(/\*/g, '.*')}$`, 'i').test(action)),
-  );
+  return statements.some((s) => matches(s, 'Allow', action));
 }
 
 /**
@@ -62,12 +85,39 @@ function allows(statements: Statement[], action: string): boolean {
  * Allow を広げた瞬間に消えるが、後者は残る
  */
 function denies(statements: Statement[], action: string): boolean {
-  return statements.some(
-    (s) =>
-      s.Effect === 'Deny' &&
-      toArray(s.Action).some((a) => new RegExp(`^${a.replace(/\*/g, '.*')}$`, 'i').test(action)),
-  );
+  return statements.some((s) => matches(s, 'Deny', action));
 }
+
+// 下のテスト群はこの判定に乗っている。ここが取りこぼすと、権限が広がっても
+// Deny が消えても緑のままになる
+describe('アクション表記の判定', () => {
+  const on = (action: string) => [{ Effect: 'Allow' as const, Action: [action], Resource: '*' }];
+
+  it('ワイルドカードを展開する', () => {
+    for (const pattern of ['s3:GetObject', 's3:Get*', 's3:*', '*']) {
+      expect(allows(on(pattern), 's3:GetObject'), `${pattern} を取りこぼしている`).toBe(true);
+    }
+  });
+
+  it('? はちょうど1文字として扱う', () => {
+    expect(allows(on('iam:PassRol?'), 'iam:PassRole'), '? が1文字に当たらない').toBe(true);
+    // 「直前の文字が0個か1個」と解釈されると、これが通ってしまう
+    expect(allows(on('iam:PassRole?'), 'iam:PassRole'), '? が0文字に当たっている').toBe(false);
+  });
+
+  it('ワイルドカード以外のメタ文字は文字として扱う', () => {
+    expect(allows(on('s3:Get.bject'), 's3:GetObject')).toBe(false);
+    expect(allows(on('s3:GetObject+'), 's3:GetObject')).toBe(false);
+  });
+
+  it('効果を取り違えない', () => {
+    const deny = [{ Effect: 'Deny' as const, Action: ['s3:*'], Resource: '*' }];
+
+    expect(allows(deny, 's3:GetObject'), 'Deny を許可として数えている').toBe(false);
+    expect(denies(deny, 's3:GetObject')).toBe(true);
+    expect(denies(on('s3:*'), 's3:GetObject'), 'Allow を拒否として数えている').toBe(false);
+  });
+});
 
 describe('GithubOidcStack', () => {
   let template: Template;
