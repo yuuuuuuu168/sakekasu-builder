@@ -18,9 +18,23 @@
         "cognito-idp:AdminListGroupsForUser",
         "cognito-idp:AdminListUserAuthEvents",
         "cognito-idp:AdminGetDevice",
-        "cognito-idp:AdminListDevices"
+        "cognito-idp:AdminListDevices",
+        "logs:Unmask"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "DenyImageBucketListing",
+      "Effect": "Deny",
+      "Action": [
+        "s3:ListBucket",
+        "s3:ListBucketVersions"
+      ],
+      "Resource": [
+        "arn:aws:s3:::dev-sakekasu-images",
+        "arn:aws:s3:::staging-sakekasu-images",
+        "arn:aws:s3:::prod-sakekasu-images"
+      ]
     },
     {
       "Sid": "DenySecretReads",
