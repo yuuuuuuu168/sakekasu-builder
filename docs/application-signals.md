@@ -127,35 +127,67 @@ AWS_PROFILE=sakekasu-builder aws lambda get-function-configuration \
   --query '{Layers:Layers[].Arn,Wrapper:Environment.Variables.AWS_LAMBDA_EXEC_WRAPPER,Tracing:TracingConfig.Mode}'
 ```
 
-### ログの保持期間を設定する
+### ログの保持期間（作業不要だった）
 
-Application Signals と Transaction Search が使うロググループは AWS 側が自動で作る。既定の保持期間は無期限なので、出てきたら設定する。CDK からは触れない（まだ存在しないものに保持期間は付けられないし、同名で作ろうとすると衝突する）。
+Application Signals と Transaction Search が使うロググループは AWS 側が自動で作る。**AWS が作る時点で 30 日が付いているので、こちらで設定する必要は無かった。** 2026-08-16 の実測。
+
+| ロググループ | 保持 | 蓄積 |
+|---|---|---|
+| `aws/spans` | 30日 | 3.3 MB |
+| `/aws/application-signals/data` | 30日 | 347 KB |
+
+以前ここには「既定の保持期間は無期限なので、出てきたら設定する」と書いてあったが誤り。`lib/log-retention.ts` のコメント（`aws/spans` は AWS が既定で 30 日を付ける）のほうが正しかった。
+
+CDK からは触れない。まだ存在しないものに保持期間は付けられないし、同名で作ろうとすると衝突する。加えてアカウントに1つのロググループなので、Transaction Search 本体と同じくスタックの寿命に紐づけない。
+
+現状の確認はこれで足りる。
 
 ```bash
-for lg in /aws/application-signals/data aws/spans; do
-  AWS_PROFILE=sakekasu-builder aws logs put-retention-policy \
-    --log-group-name "$lg" --retention-in-days 30 --region ap-northeast-1
+for lg in aws/spans /aws/application-signals/data; do
+  AWS_PROFILE=sakekasu-builder aws logs describe-log-groups \
+    --log-group-name-prefix "$lg" --region ap-northeast-1 \
+    --query 'logGroups[].{Name:logGroupName,Retention:retentionInDays,StoredBytes:storedBytes}'
 done
 ```
 
-X-Ray のトレースそのものは30日で消える（X-Ray 側の固定値で変更できない）。保持期間を設定するのは、Transaction Search が Logs 側に送るぶん。
+X-Ray のトレースそのものは30日で消える（X-Ray 側の固定値で変更できない）。保持期間が効くのは、Transaction Search が Logs 側に送るぶん。
 
 ### トレースに利用者の識別子が入っていないか確認する
 
 S3 のキーは `<Cognito の sub>/<種別>/<記録 ID>/<ファイル名>` という形をしている。計装が AWS SDK の呼び出しパラメータをスパンに載せる実装だと、この sub がトレースに残ることになる。sub は利用者ごとに固定の UUID なので、残るなら扱いを決めておきたい。
 
-OpenTelemetry の JS 版 AWS SDK 計装は S3 専用の拡張を持たず、記録するのは呼び出したサービス名と操作名までなので、そのままでは載らない見込み。ただしバージョンによって変わりうるので、最初のトレースが出た時点で実際に見て確かめる。
+**載っていないことを実機で確認済み**（`@opentelemetry/instrumentation-aws-sdk` 0.74.0、2026-08-16）。記録されるのはサービス名・操作名・バケット名までで、キーは属性に入らない。
 
-```bash
-# GetObject / DeleteObject のスパンに S3 のキーが含まれていないかを見る
-AWS_PROFILE=sakekasu-builder aws logs start-query \
-  --log-group-name aws/spans \
-  --start-time $(( $(date +%s) - 3600 )) --end-time $(date +%s) \
-  --query-string 'fields @message | filter @message like /GetObject/ | limit 5' \
-  --region ap-northeast-1
+| 操作 | 確認した関数 | 結果 |
+|---|---|---|
+| `GetObject` | ocr-analyzer | キー無し（2026-08-10） |
+| `CopyObject` | presigned-url | キー無し。`CopySource` も入らない |
+| `DeleteObject` | presigned-url | キー無し |
+| `PutObject` | — | そもそもスパンが出ない。アップロードはブラウザが署名済み URL で直接 S3 へ送るので Lambda を通らない |
+
+`CopyObject` はコピー元のキーを引数（`CopySource`）に持つので唯一の懸念だったが、載っていなかった。スパンに出るのは次の程度。
+
+```
+aws.s3.bucket:                   dev-sakekasu-images
+aws.remote.resource.identifier:  dev-sakekasu-images
+rpc.method:                      CopyObject
 ```
 
-実際に載っていたら、キーの構造を変える（sub をハッシュ化する、階層から外す）か、スパンプロセッサで該当の属性を落とす。
+レイヤーや計装ライブラリを上げたときは、確認し直すこと。
+
+```bash
+for op in CopyObject DeleteObject GetObject; do
+  echo "=== $op"
+  AWS_PROFILE=sakekasu-builder aws logs filter-log-events \
+    --log-group-name aws/spans \
+    --start-time $(( ($(date +%s) - 3600) * 1000 )) \
+    --filter-pattern "\"$op\"" --region ap-northeast-1 \
+    --query 'events[].message' --output text | head -c 2000
+  echo
+done
+```
+
+載るようになっていたら、キーの構造を変える（sub をハッシュ化する、階層から外す）か、スパンプロセッサで該当の属性を落とす。
 
 属性の値を一律で切り詰める `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT=0` は使わない。全部の属性が潰れて、下流ごとの内訳という計装の目的そのものが消えるため。
 
@@ -277,17 +309,68 @@ AWS_PROFILE=sakekasu-builder aws logs filter-log-events \
 
 24時間の窓に計装前の値が残っていれば、これ1回で前後が並ぶ。残っていなければ、同じコマンドを**マージ前**に流して控えておく。それも取り忘れたら、CloudWatch Logs Insights で計装が入った時刻をまたいで `Init Duration` を並べる。
 
-## SLO をまだ入れていない理由
+## SLO
 
-Issue #86 には SLO の定義とエラーバジェット消費アラームも挙げてあるが、この変更には含めていない。
+OCR に2つ定義してある（`monitoring-stack.ts`）。`presigned-url` は計装が 2026-08-16 に入ったばかりで材料が無いため、まだ作っていない。SLO は Application Signals の課金対象なので、数は絞る。
 
-SLO はしきい値（可用性 99%、レイテンシー p90 ≤ 15s など）を決めないと作れない。その値は実測を見てから決めるものなので、先に計装だけ入れてデータを溜める。当てずっぽうのしきい値で作ると、鳴りっぱなしか鳴らないかのどちらかになり、作り直すことになる。
+| SLO | 目標 | 評価期間 |
+|---|---|---|
+| `dev-sakekasu-ocr-analyzer-availability` | 成功率 90% | 30日 rolling |
+| `dev-sakekasu-ocr-analyzer-latency` | 90% が 15 秒未満 | 30日 rolling |
 
-データが溜まり始めたのは OCR が 2026-08-10、`presigned-url` が 2026-08-16 から。`presigned-url` のぶんが1〜2週間たまるのは 8月末以降になる。
+### なぜ既存のアラームがあるのに要るか
 
-決めるときの材料は Application Signals の「Service detail」に出る p50 / p90 / p99。1〜2週間ぶん見てから、`AWS::ApplicationSignals::ServiceLevelObjective`（CDK では `applicationsignals.CfnServiceLevelObjective`）で定義する。アラームは monitoring スタック側に置く。ApiStack に置くと通知先の SNS を参照して循環参照になる。
+`dev-sakekasu-ocr-errors` は「15分で3件以上」で鳴る。まとまって落ちたときには効くが、**ぽつぽつ失敗するのは素通りする**。実際 Issue #115 は24時間で12回中3回の失敗（エラー率 25%）で、このアラームは一度も鳴っていない。30日の budget で見ると、そういう緩やかな失敗が数字に出る。
 
-SLO 自体も Application Signals の課金対象なので、数を絞る。
+### しきい値の根拠
+
+利用者が本人だけで実績は日に数回なので、厳しくしても鳴りっぱなしになるだけ。90% に置いた。30日で 90 リクエスト程度、失敗 9 回までが budget の中に入る。
+
+レイテンシーのしきい値は実測から。2026-08-11〜16 の日次はこうなっている。
+
+| 日 | 件数 | p50 | p90 | p99 |
+|---|---|---|---|---|
+| 8/11 | 3 | 7137 | 7147 | 7150 |
+| 8/12 | 3 | 4619 | 4764 | 4797 |
+| 8/16 | 4 | 4830 | 8006 | 8146 |
+
+**単位はミリ秒。** `get-metric-statistics` の応答が `Unit: Milliseconds` を返し、生値も4桁で出る（秒に直すと 4.6〜8.1 秒）。SLO の `MetricThreshold: 15000` はこの単位に合わせた 15 秒で、**秒だと思って 15 を入れると 15 ミリ秒になり達成率が 0% に張り付く**。逆にミリ秒の値を秒として読むと「15000 秒＝約4時間」と誤読される（PR #161 のレビューで実際に起きた）。数字を書き換えるときは単位を確認すること。
+
+所要時間の大半は Bedrock なので画像の大きさで振れる。8 秒台の実測に対して 10 秒だと余裕が 2 秒しかなく揺れで鳴るため、倍近い余裕を取った。ここを割るのは「いつもより明らかに遅い」ときだけでよい。
+
+### request-based にしている理由
+
+period-based は「期間ごとに good / bad を判定して、good な期間の割合」を見る。日に数回しか呼ばれないと、ほとんどの期間がデータ無しになって判定が成り立たない。request-based は「リクエストの成功割合」を直接数えるので、疎なトラフィックでも意味のある値になる。
+
+同じ理由でバーンレートの参照窓は1日（1440分）だけにしてある。1時間窓はほとんどが空になる。
+
+### エラーバジェット消費アラームはまだ入れていない
+
+**バーンレートのメトリクス名とディメンションを実機で確認していないため。** 名前を間違えたアラームは `INSUFFICIENT_DATA` のまま居座り、「監視が入っている」ように見えて何も鳴らない。この状態がいちばん困る。
+
+SLO をデプロイしたら、実際に出ているメトリクスを見てから作る。
+
+```bash
+AWS_PROFILE=sakekasu-builder aws cloudwatch list-metrics \
+  --namespace AWS/ApplicationSignals --region ap-northeast-1 --output json
+```
+
+アラームは monitoring スタック側に置く。ApiStack に置くと通知先の SNS を参照して循環参照になる。
+
+### 実測を取り直すコマンド
+
+しきい値を見直すときはこれで分布を取る。
+
+```bash
+AWS_PROFILE=sakekasu-builder aws cloudwatch get-metric-statistics \
+  --namespace ApplicationSignals --metric-name Latency \
+  --dimensions Name=Service,Value=dev-sakekasu-ocr-analyzer \
+               Name=Environment,Value=lambda:default \
+  --start-time "$(date -u -v-30d +%Y-%m-%dT%H:%M:%SZ)" \
+  --end-time "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --period 86400 --extended-statistics p50 p90 p99 --statistics SampleCount \
+  --region ap-northeast-1 --output table
+```
 
 ## 費用
 

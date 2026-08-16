@@ -69,8 +69,15 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | AppSync FunctionConfiguration | 4 | 一覧になし → Cloud Control API |
 | Cognito UserPoolClient | 2 | 同上 |
 | Logs MetricFilter | 2 | 同上 |
+| ApplicationSignals ServiceLevelObjective | 2 | 同上（Issue #86 で追加） |
 
 対応表に無い型は Cloud Control API へ自動でフォールバックする。実際に通るかは手順5の `cdkd diff` で分かる。cdkd は未対応のプロパティを pre-flight で検出して落ちる作りになっている。
+
+**Cloud Control API へフォールバックする型でも、その先のサービス権限は要る。** SLO であれば `applicationsignals:CreateServiceLevelObjective` が呼ばれるので、`UseCloudControlApi` の `cloudformation:CreateResource` だけでは足りない。デプロイロールとは別に、**diff ロールにも読み取りの権限が要る**（`cdkd diff` は既存の状態を Cloud Control 経由で読む）。Cognito UserPoolClient に `cognito-idp:DescribeUserPoolClient` を足してあるのと同じ形。
+
+**サービス単位のワイルドカードにはしない。** `applicationsignals:*` にすると `StartDiscovery`（サービス検出の有効化）が入る。これはアカウントに1つの設定で、スタックから意図的に外して守っているもの。IAM の側から素通りで触れる形にすると、スタックの守りが意味を失う。`ManageServiceLevelObjectives` で SLO の操作だけを列挙し、`StartDiscovery` は Deny でも塞いである。
+
+**リソースの型を増やしたときは、この対応表と両ロールの権限を合わせて見直すこと。** 足りない操作が出たときはデプロイか diff が AccessDenied で落ちるので、落ちてから足せばよい。分からないまま広い権限を渡すよりよい。
 
 AppSync の認証は Cognito UserPool のみで API Key を使っていないため、CloudFormation が import できない型として名指しされている `AWS::AppSync::ApiKey` は該当しない。
 

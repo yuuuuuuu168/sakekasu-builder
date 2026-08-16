@@ -401,5 +401,111 @@ describe('MonitoringStack', () => {
       template.resourceCountIs('AWS::ApplicationSignals::Discovery', 0);
       template.resourceCountIs('AWS::XRay::TransactionSearchConfig', 0);
     });
+
+    // SLO は Application Signals の課金対象なので、増える方向の変更に気づきたい。
+    // 数を固定しておけば、3つ目を足すときにこのテストが目に入る
+    it('SLO は OCR の2つだけ', () => {
+      template.resourceCountIs('AWS::ApplicationSignals::ServiceLevelObjective', 2);
+    });
+
+    // SLO が対象のサービスを見つけられないと、達成率が空のまま「作れてはいる」
+    // 状態になる。KeyAttributes は実機のメトリクスのディメンションと一致して
+    // いないといけないので、推測で書き換えられないよう固定する
+    it.each([
+      ['dev-sakekasu-ocr-analyzer-availability', 'AVAILABILITY'],
+      ['dev-sakekasu-ocr-analyzer-latency', 'LATENCY'],
+    ])('%s は OCR のサービスを指している', (name, metricType) => {
+      template.hasResourceProperties('AWS::ApplicationSignals::ServiceLevelObjective', {
+        Name: name,
+        RequestBasedSli: Match.objectLike({
+          RequestBasedSliMetric: Match.objectLike({
+            KeyAttributes: {
+              Type: 'Service',
+              Name: 'dev-sakekasu-ocr-analyzer',
+              Environment: 'lambda:default',
+            },
+            MetricType: metricType,
+          }),
+        }),
+      });
+    });
+
+    // 演算子としきい値が SLO の意味そのもの。演算子が反転すると「遅いほど
+    // 達成率が高い」になり、単位を取り違えると常に達成（15000 秒＝約4時間）か
+    // 常に未達（15 ミリ秒）になる。どちらも「SLO はあるのに何も見ていない」
+    // 状態なので、値を固定する（PR #161 のレビュー指摘）。
+    //
+    // ApplicationSignals の Latency はミリ秒。実測の生値が4桁で、
+    // get-metric-statistics の応答も Unit: Milliseconds を返す
+    it('レイテンシー SLO は 15 秒（15000 ミリ秒）未満を条件にしている', () => {
+      template.hasResourceProperties('AWS::ApplicationSignals::ServiceLevelObjective', {
+        Name: 'dev-sakekasu-ocr-analyzer-latency',
+        RequestBasedSli: Match.objectLike({
+          ComparisonOperator: 'LessThan',
+          MetricThreshold: 15000,
+        }),
+      });
+    });
+
+    // 可用性 SLO は成功率そのものを見るので、しきい値も演算子も持たない。
+    // ここに値が入っているのは、レイテンシー用の設定を書き写した取り違え
+    it('可用性 SLO はしきい値を持たない', () => {
+      const slos = template.findResources('AWS::ApplicationSignals::ServiceLevelObjective', {
+        Properties: { Name: 'dev-sakekasu-ocr-analyzer-availability' },
+      });
+      const [slo] = Object.values(slos);
+
+      expect(slo).toBeDefined();
+      expect(slo.Properties?.RequestBasedSli?.MetricThreshold).toBeUndefined();
+      expect(slo.Properties?.RequestBasedSli?.ComparisonOperator).toBeUndefined();
+    });
+
+    // 日に数回しか呼ばれないので period-based では判定が成り立たない。
+    // 種別が入れ替わると「ほとんどの期間がデータ無し」で達成率が壊れる
+    it('SLO は request-based で定義している', () => {
+      const slos = Object.values(
+        template.findResources('AWS::ApplicationSignals::ServiceLevelObjective'),
+      );
+
+      expect(slos.length).toBeGreaterThan(0);
+      for (const slo of slos) {
+        expect(slo.Properties?.RequestBasedSli, `${slo.Properties?.Name} が request-based でない`)
+          .toBeDefined();
+        expect(slo.Properties?.Sli, `${slo.Properties?.Name} に period-based の定義が混ざっている`)
+          .toBeUndefined();
+      }
+    });
+
+    // 日に数回しか呼ばれないので、1時間窓にするとほとんどが「データ無し」に
+    // なる。バーンレートは窓の選び方がそのまま使い物になるかを決める
+    it('SLO のバーンレートは1日窓だけを使う', () => {
+      const slos = Object.values(
+        template.findResources('AWS::ApplicationSignals::ServiceLevelObjective'),
+      );
+
+      expect(slos.length).toBeGreaterThan(0);
+      for (const slo of slos) {
+        expect(
+          slo.Properties?.BurnRateConfigurations,
+          `${slo.Properties?.Name} の参照窓`,
+        ).toEqual([{ LookBackWindowMinutes: 1440 }]);
+      }
+    });
+
+    // 30日の budget で緩やかな失敗を見るのが目的。7日（既定）に戻ると、
+    // 日に数回の規模では母数が小さすぎて 1 回の失敗で budget を使い切る
+    it('SLO は 30 日の rolling で 90% を目標にしている', () => {
+      const slos = Object.values(
+        template.findResources('AWS::ApplicationSignals::ServiceLevelObjective'),
+      );
+
+      for (const slo of slos) {
+        expect(slo.Properties?.Goal?.AttainmentGoal, `${slo.Properties?.Name} の目標値`).toBe(90);
+        expect(
+          slo.Properties?.Goal?.Interval?.RollingInterval,
+          `${slo.Properties?.Name} の評価期間`,
+        ).toEqual({ Duration: 30, DurationUnit: 'DAY' });
+      }
+    });
   });
 });
