@@ -1,4 +1,16 @@
 {
+  "permissions": {
+    "deny": [
+      "Bash(aws * create-*)",
+      "Bash(aws * delete-*)",
+      "Bash(aws * update-*)",
+      "Bash(aws * put-*)",
+      "Bash(aws s3 cp*)",
+      "Bash(aws s3 mv*)",
+      "Bash(aws s3 rm*)",
+      "Bash(aws s3 sync*)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
