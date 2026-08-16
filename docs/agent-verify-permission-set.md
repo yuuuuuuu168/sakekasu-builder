@@ -85,7 +85,20 @@ aws sso-admin get-inline-policy-for-permission-set --instance-arn $INST \
 python3 -c "import json;print('一致' if json.load(open('/tmp/live.json'))==json.load(open('docs/agent-verify-deny-policy.json')) else '不一致')"
 ```
 
-Permission Set を更新した場合は `aws sso-admin provision-permission-set` が必要になることがある。反映後は下の動作確認をやり直す。
+**`put-inline-policy-to-permission-set` だけでは対象アカウントに効かない。** コマンドは成功し、`get-inline-policy-for-permission-set` も新しい内容を返すが、アカウント側の IAM ロールは古いままになる。実際に一度これで「直したつもり」の状態になった。必ず再プロビジョニングし、対象アカウントのロールまで見て確認する。
+
+```sh
+aws sso-admin provision-permission-set --instance-arn $INST \
+  --permission-set-arn $PS --target-type ALL_PROVISIONED_ACCOUNTS
+
+# Status が SUCCEEDED になるまで待つ
+aws sso-admin describe-permission-set-provisioning-status --instance-arn $INST \
+  --provision-permission-set-request-id <REQUEST_ID> --query 'PermissionSetProvisioningStatus.Status'
+
+# 対象アカウント（<アプリのアカウント ID>）側で、実体のロールに入っているか確かめる
+aws iam get-role-policy --role-name AWSReservedSSO_AgentVerifyAccess_13e5a14e9d6af7d8 \
+  --policy-name AwsSSOInlinePolicy --query 'PolicyDocument.Statement[].Sid'
+```
 
 ## 動作確認（実施済みの結果）
 
@@ -99,7 +112,8 @@ Permission Set を更新した場合は `aws sso-admin provision-permission-set`
 | `dynamodb list-tables` / `s3api list-buckets` / `lambda list-functions` | 通る（構造の把握は残す） |
 | `dynamodb scan` / `get-item` | AccessDenied |
 | `s3api get-object`（`dev-sakekasu-images` の実オブジェクト） | AccessDenied（explicit deny） |
-| `s3api list-objects-v2 --bucket dev-sakekasu-images` | AccessDenied（Cognito sub の列挙を防ぐ） |
+| `s3api list-objects-v2` / `s3 ls`（`dev-sakekasu-images`） | AccessDenied（Cognito sub の列挙を防ぐ） |
+| `s3api list-objects-v2`（CDK アセットバケット） | 通る（Deny は画像バケットに限定） |
 | `ssm get-parameter` / `secretsmanager get-secret-value` | AccessDenied |
 | `cognito-idp list-users` | AccessDenied |
 | `s3api put-object` / `lambda invoke` | AccessDenied |
