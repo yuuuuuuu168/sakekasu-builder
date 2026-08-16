@@ -51,6 +51,14 @@ const ACCOUNT_CONCURRENCY_LIMIT = 1000;
 const MIN_UNRESERVED_CONCURRENCY = 100;
 
 /**
+ * 計装を入れた関数に持たせるメモリの下限（Issue #86）。
+ *
+ * 実測で Max Memory Used が 100MB 前後から 120MB へ増えた。既定の 128MB では
+ * 残り 8MB になってしまうので、その倍は確保する。
+ */
+const MIN_INSTRUMENTED_MEMORY_MB = 256;
+
+/**
  * テストでスタックを合成するときの環境名。
  *
  * 関数名は `{envName}-sakekasu-...` で組み立てられるため、期待値を書く側と
@@ -169,6 +177,14 @@ function synthAllTemplates(): {
 describe('Lambda のランタイム', () => {
   // 合成に esbuild が走るため、既定の 5 秒では足りない
   const { templates, accounts } = synthAllTemplates();
+
+  /** 全スタックを横断して、計装（起動ラッパー）が入っている関数を集める */
+  const instrumentedFunctions = () =>
+    Object.values(templates)
+      .flatMap((template) => Object.values(template.findResources('AWS::Lambda::Function')))
+      .filter(
+        (fn) => fn.Properties?.Environment?.Variables?.AWS_LAMBDA_EXEC_WRAPPER !== undefined,
+      );
 
   // 自前で定義した関数は functionName を必ず指定している。CDK が内部で作る
   // LogRetention や カスタムリソースのプロバイダーは指定しないので、
@@ -410,11 +426,7 @@ describe('Lambda のランタイム', () => {
   // 判断そのものを docs/application-signals.md に書いてあるので、
   // 増やすときは文書ごと更新してほしい。その合図としてここで固定する
   it('Application Signals の計装は対象の2関数だけに入っている', () => {
-    const instrumented = Object.values(templates)
-      .flatMap((template) => Object.values(template.findResources('AWS::Lambda::Function')))
-      .filter(
-        (fn) => fn.Properties?.Environment?.Variables?.AWS_LAMBDA_EXEC_WRAPPER !== undefined,
-      )
+    const instrumented = instrumentedFunctions()
       .map((fn) => fn.Properties?.FunctionName)
       .sort();
 
@@ -422,5 +434,27 @@ describe('Lambda のランタイム', () => {
       `${SYNTH_ENV_NAME}-sakekasu-ocr-analyzer`,
       `${SYNTH_ENV_NAME}-sakekasu-presigned-url`,
     ]);
+  });
+
+  // 計装のレイヤーはメモリを 20MB ほど余分に使う（Issue #86 の実測）。
+  // 既定の 128MB のままだと余裕が 8MB しか残らず、超えれば invocation ごと
+  // OOM で落ちる。加えて Lambda は割り当てメモリに比例して CPU を配るので、
+  // 128MB のままだとレイヤーぶんコールドスタートが伸びたままになる。
+  //
+  // 値そのものではなく「既定のままにしない」を見ている。関数ごとに適正な値は
+  // 違うが、計装を足すときにメモリを考えていない状態は共通して困る
+  it.each([
+    `${SYNTH_ENV_NAME}-sakekasu-ocr-analyzer`,
+    `${SYNTH_ENV_NAME}-sakekasu-presigned-url`,
+  ])('%s は計装ぶんを見込んでメモリを明示している', (functionName) => {
+    const [fn] = instrumentedFunctions().filter(
+      (f) => f.Properties?.FunctionName === functionName,
+    );
+
+    expect(fn, `${functionName} が計装されていない`).toBeDefined();
+    expect(
+      fn.Properties?.MemorySize,
+      `${functionName} が既定のメモリ（128MB）のまま`,
+    ).toBeGreaterThanOrEqual(MIN_INSTRUMENTED_MEMORY_MB);
   });
 });

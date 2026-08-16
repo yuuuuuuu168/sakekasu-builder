@@ -407,6 +407,29 @@ export class ApiStack extends cdk.Stack {
         // Application Signals と一緒に使うと、リクエスト単位で
         // どこに時間がかかったかまで辿れる
         tracing: Tracing.ACTIVE,
+        // 既定の 128MB から上げている（Issue #86）。理由は2つあって、
+        // 効いているのは前者のほう。
+        //
+        // **余裕が無かった。** 計装を入れた直後の実測で Max Memory Used が
+        // 100〜103MB から 120MB へ増え、128MB の枠に対して残り 8MB になった。
+        // 超えると invocation ごと OOM で落ちる。落ちる先が画像アップロードの
+        // 入口なので、いちばん困る場所。
+        //
+        // なおこの 120MB は固定的なオーバーヘッドで、画像の枚数では増えない
+        // （URL に署名するだけで、copyImages も S3 側でコピーするためバイト列が
+        // Lambda を通らない）。実測でも4回の invocation がすべて 120MB で揃う。
+        // 青天井ではないが、8MB は薄すぎる。
+        //
+        // **コールドスタートが 438ms → 1145ms に伸びた。** Lambda は割り当てメモリに
+        // 比例して CPU を配るので、512MB にすると CPU が4倍になり、初期化は
+        // 計装前と同程度まで戻る見込み。この関数は同期の動線でコールドスタートが
+        // そのまま体感になる（OCR は待つ前提の操作なので 512MB のまま +602ms を許容した）。
+        //
+        // 費用は判断材料に入れていない。GB-秒の単価は上がるが初期化が縮むぶん
+        // 相殺され、そもそもこの規模（月に数百リクエスト）では無料枠に遠く届かない。
+        //
+        // 実測の値と取り方は docs/application-signals.md の「計装の代償」にある
+        memorySize: 512,
         environment: {
           BUCKET_NAME: this.imageBucket.bucketName,
           UPLOAD_EXPIRY: '300',
