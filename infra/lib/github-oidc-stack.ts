@@ -1,6 +1,8 @@
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import type { Construct } from 'constructs';
+import { cdkdDeployStatements, cdkdDiffStatements } from './cdkd-policies.js';
+import { createRoleBoundary } from './role-boundary.js';
 
 export interface GithubOidcStackProps extends cdk.StackProps {
   /** 信頼する GitHub リポジトリ（owner/repo 形式） */
@@ -19,6 +21,11 @@ export interface GithubOidcStackProps extends cdk.StackProps {
  * - diff ロール: pull_request イベントからのみ引き受け可能。
  *   読み取り専用の lookup ロールにしか入れないため、PR 上で cdk diff は
  *   できてもリソース変更はできない
+ *
+ * これに加えて、cdkd（CDK Direct）移行用のロールを1本足している（Issue #150）。
+ * cdkd は CloudFormation を通さないため bootstrap のロールが使えず、強い権限を
+ * 持つロールが別に要る。ランナー自身にその権限を持たせず、deploy ロールから
+ * AssumeRole して使う形にすることで、強い権限を1箇所に閉じ込める。
  *
  * このスタック自体は Actions のデプロイ対象（--all）に含めない。
  * 自分自身のロールを自動更新して締め出す事故を避けるため、billing と同じく
@@ -59,6 +66,39 @@ export class GithubOidcStack extends cdk.Stack {
       }),
     );
 
+    // アプリのロールに付ける Permissions Boundary（Issue #150）。
+    // cdkd のデプロイロールが作るロールはこの天井を超えられない。
+    // 詳細は lib/role-boundary.ts
+    const roleBoundary = createRoleBoundary(this, 'RoleBoundary');
+
+    // cdkd のデプロイ先ロール（Issue #150）。
+    //
+    // 信頼するのは deploy ロールだけ。GitHub の OIDC からは直接引き受けられない
+    // ため、main への push という条件は deploy ロール側の信頼ポリシーが担保する。
+    //
+    // ロール名を固定しているのは、ワークフローの CDKD_ROLE_ARN と
+    // 移行手順（docs/cdkd-migration.md）から名前で参照するため。
+    const cdkdDeployRole = new iam.Role(this, 'CdkdDeployRole', {
+      roleName: 'sakekasu-cdkd-deploy',
+      description: 'cdkd deploy target (assumed by the GitHub Actions deploy role)',
+      assumedBy: new iam.ArnPrincipal(deployRole.roleArn),
+      // 既定の1時間。cdkd のデプロイは数分で終わる想定で、長く持たせる理由がない
+      maxSessionDuration: cdk.Duration.hours(1),
+    });
+    for (const statement of cdkdDeployStatements(this.account)) {
+      cdkdDeployRole.addToPolicy(statement);
+    }
+
+    // deploy ロールから cdkd ロールへ入れるようにする。
+    // cdk-hnb659fds-* への AssumeRole は、移行が終わって CDK CLI を使わなく
+    // なるまで残す（移行途中は cdk deploy と cdkd deploy が混在する）
+    deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['sts:AssumeRole'],
+        resources: [cdkdDeployRole.roleArn],
+      }),
+    );
+
     const diffRole = new iam.Role(this, 'DiffRole', {
       roleName: 'sakekasu-github-actions-diff',
       description: 'Read-only cdk diff from GitHub Actions (pull_request)',
@@ -76,7 +116,19 @@ export class GithubOidcStack extends cdk.Stack {
       }),
     );
 
+    // cdkd diff 用の読み取り権限（Issue #150）。
+    //
+    // cdkd は lookup ロールに入らず、自分の認証情報で各リソースを読む。
+    // 移行が終わるまでは cdk diff も動かし続けるため、上の lookup ロールへの
+    // AssumeRole は残したまま、読み取り権限を足す形にしている。
+    // 書き込みは入れないので、PR からリソースを変更できない構成は変わらない
+    for (const statement of cdkdDiffStatements(this.account)) {
+      diffRole.addToPolicy(statement);
+    }
+
     new cdk.CfnOutput(this, 'DeployRoleArn', { value: deployRole.roleArn });
     new cdk.CfnOutput(this, 'DiffRoleArn', { value: diffRole.roleArn });
+    new cdk.CfnOutput(this, 'CdkdDeployRoleArn', { value: cdkdDeployRole.roleArn });
+    new cdk.CfnOutput(this, 'RoleBoundaryArn', { value: roleBoundary.managedPolicyArn });
   }
 }

@@ -4,14 +4,55 @@ import * as cdk from 'aws-cdk-lib';
 import { GithubOidcStack } from '../lib/github-oidc-stack.js';
 
 const REPOSITORY = 'yuuuuuuu168/sakekasu-builder';
+const ACCOUNT = '111111111111';
 
 function synth(): Template {
   const app = new cdk.App();
   const stack = new GithubOidcStack(app, 'TestGithubOidc', {
     repository: REPOSITORY,
-    env: { account: '111111111111', region: 'ap-northeast-1' },
+    env: { account: ACCOUNT, region: 'ap-northeast-1' },
   });
   return Template.fromStack(stack);
+}
+
+const ROLE_BOUNDARY_ARN = `arn:aws:iam::${ACCOUNT}:policy/sakekasu-role-boundary`;
+
+interface Statement {
+  Sid?: string;
+  Effect: 'Allow' | 'Deny';
+  Action: string | string[];
+  Resource: string | string[];
+  Condition?: Record<string, Record<string, string | string[]>>;
+}
+
+function toArray(value: string | string[]): string[] {
+  return Array.isArray(value) ? value : [value];
+}
+
+/** 指定したロールに付いている AWS::IAM::Policy の全ステートメントを集める */
+function statementsFor(template: Template, roleLogicalId: RegExp): Statement[] {
+  const policies = template.findResources('AWS::IAM::Policy');
+  return Object.values(policies)
+    .map((p) => (p as { Properties: { Roles?: unknown[]; PolicyDocument: { Statement: Statement[] } } }).Properties)
+    .filter((props) =>
+      (props.Roles ?? []).some(
+        (r) => typeof r === 'object' && r !== null && 'Ref' in r &&
+          roleLogicalId.test((r as { Ref: string }).Ref),
+      ),
+    )
+    .flatMap((props) => props.PolicyDocument.Statement);
+}
+
+/**
+ * そのアクションが許可されているか。ポリシーはワイルドカード（`appsync:*`）を
+ * 使うため、文字列の一致ではなくパターンとして評価する
+ */
+function allows(statements: Statement[], action: string): boolean {
+  return statements.some(
+    (s) =>
+      s.Effect === 'Allow' &&
+      toArray(s.Action).some((a) => new RegExp(`^${a.replace(/\*/g, '.*')}$`, 'i').test(action)),
+  );
 }
 
 describe('GithubOidcStack', () => {
@@ -40,17 +81,34 @@ describe('GithubOidcStack', () => {
     });
   });
 
-  it('deploy ロールの実権限は bootstrap ロール群への AssumeRole だけ', () => {
+  it('deploy ロールの実権限は AssumeRole だけ（自分では何も作れない）', () => {
+    // CdkdDeployRole も論理 ID に DeployRole を含むため、明示的に除く
+    const statements = statementsFor(template, /^DeployRole/);
+
+    expect(statements.length).toBeGreaterThan(0);
+    for (const statement of statements) {
+      expect(statement.Effect).toBe('Allow');
+      expect(toArray(statement.Action)).toEqual(['sts:AssumeRole']);
+    }
+
+    const targets = statements.flatMap((s) => toArray(s.Resource));
+    // 移行が終わるまでは CDK CLI も使うため、bootstrap ロールへの経路は残す
+    expect(targets).toContain(`arn:aws:iam::${ACCOUNT}:role/cdk-hnb659fds-*`);
+  });
+
+  it('deploy ロールは cdkd のデプロイロールへ入れる', () => {
     template.hasResourceProperties('AWS::IAM::Policy', {
-      Roles: Match.arrayWith([Match.objectLike({ Ref: Match.stringLikeRegexp('DeployRole') })]),
+      Roles: Match.arrayWith([Match.objectLike({ Ref: Match.stringLikeRegexp('^DeployRole') })]),
       PolicyDocument: {
-        Statement: [
-          {
+        Statement: Match.arrayWith([
+          Match.objectLike({
             Action: 'sts:AssumeRole',
             Effect: 'Allow',
-            Resource: 'arn:aws:iam::111111111111:role/cdk-hnb659fds-*',
-          },
-        ],
+            Resource: {
+              'Fn::GetAtt': Match.arrayWith([Match.stringLikeRegexp('^CdkdDeployRole')]),
+            },
+          }),
+        ]),
       },
     });
   });
@@ -70,18 +128,211 @@ describe('GithubOidcStack', () => {
         ]),
       },
     });
-    template.hasResourceProperties('AWS::IAM::Policy', {
-      Roles: Match.arrayWith([Match.objectLike({ Ref: Match.stringLikeRegexp('DiffRole') })]),
-      PolicyDocument: {
+    const statements = statementsFor(template, /^DiffRole/);
+    const targets = statements.flatMap((s) => toArray(s.Resource));
+    expect(targets).toContain(`arn:aws:iam::${ACCOUNT}:role/cdk-hnb659fds-lookup-role-*`);
+  });
+
+  it('diff ロールには書き込み権限が一切ない', () => {
+    const statements = statementsFor(template, /^DiffRole/);
+    expect(statements.length).toBeGreaterThan(0);
+
+    for (const action of [
+      'lambda:UpdateFunctionCode',
+      'lambda:CreateFunction',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateTable',
+      's3:PutObject',
+      's3:DeleteObject',
+      'iam:PutRolePolicy',
+      'iam:CreateRole',
+      'cognito-idp:UpdateUserPool',
+      'cloudformation:CreateResource',
+      'cloudformation:UpdateResource',
+      'cloudformation:DeleteStack',
+    ]) {
+      expect(allows(statements, action), `${action} が許可されている`).toBe(false);
+    }
+  });
+
+  it('diff ロールは読み取りでも利用者のデータには届かない', () => {
+    const statements = statementsFor(template, /^DiffRole/);
+    expect(statements.length).toBeGreaterThan(0);
+
+    // ログには画像キー経由で Cognito の sub が入りうる（lib/log-retention.ts）
+    for (const action of [
+      'logs:GetLogEvents',
+      'logs:FilterLogEvents',
+      'dynamodb:GetItem',
+      'dynamodb:Query',
+      'dynamodb:Scan',
+      'cognito-idp:ListUsers',
+      'cognito-idp:AdminGetUser',
+    ]) {
+      expect(allows(statements, action), `${action} が許可されている`).toBe(false);
+    }
+
+    // s3:GetObject は cdkd の state バケットにだけ許す。画像バケットには許さない
+    const objectReaders = statements.filter(
+      (s) => s.Effect === 'Allow' && toArray(s.Action).includes('s3:GetObject'),
+    );
+    expect(objectReaders.length).toBeGreaterThan(0);
+    for (const statement of objectReaders) {
+      for (const resource of toArray(statement.Resource)) {
+        expect(resource).toContain(`cdkd-state-${ACCOUNT}`);
+      }
+    }
+  });
+
+  it('cdkd のデプロイロールは deploy ロールからしか引き受けられない', () => {
+    template.hasResourceProperties('AWS::IAM::Role', {
+      RoleName: 'sakekasu-cdkd-deploy',
+      AssumeRolePolicyDocument: {
         Statement: [
-          {
+          Match.objectLike({
             Action: 'sts:AssumeRole',
-            Effect: 'Allow',
-            Resource: 'arn:aws:iam::111111111111:role/cdk-hnb659fds-lookup-role-*',
-          },
+            Principal: {
+              AWS: { 'Fn::GetAtt': Match.arrayWith([Match.stringLikeRegexp('^DeployRole')]) },
+            },
+          }),
         ],
       },
     });
+  });
+
+  it('cdkd のデプロイロールは OIDC 連携のロール自身を書き換えられない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+    const deny = statements.find(
+      (s) =>
+        s.Effect === 'Deny' &&
+        toArray(s.Resource).includes(`arn:aws:iam::${ACCOUNT}:role/sakekasu-cdkd-deploy`),
+    );
+
+    expect(deny, 'Deny ステートメントが無い').toBeDefined();
+    expect(toArray(deny!.Action)).toContain('iam:*');
+    expect(toArray(deny!.Resource)).toEqual(
+      expect.arrayContaining([
+        `arn:aws:iam::${ACCOUNT}:role/sakekasu-cdkd-deploy`,
+        `arn:aws:iam::${ACCOUNT}:role/sakekasu-github-actions-deploy`,
+        `arn:aws:iam::${ACCOUNT}:role/sakekasu-github-actions-diff`,
+      ]),
+    );
+  });
+
+  it('cdkd のデプロイロールはロールの権限を境界の内側でしか書き換えられない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+
+    // 権限を増やしうる IAM の API は、すべて境界の条件付きでなければならない。
+    // 1つでも素通しがあると、Lambda の実行ロールに管理者相当を書き込んで
+    // その関数を呼ぶ、という昇格の連鎖が通ってしまう
+    const escalating = [
+      'iam:CreateRole',
+      'iam:PutRolePolicy',
+      'iam:AttachRolePolicy',
+      'iam:PutRolePermissionsBoundary',
+    ];
+    for (const action of escalating) {
+      const granting = statements.filter(
+        (s) => s.Effect === 'Allow' && toArray(s.Action).includes(action),
+      );
+      expect(granting.length, `${action} を許可するステートメントが無い`).toBeGreaterThan(0);
+      for (const statement of granting) {
+        expect(
+          statement.Condition?.ArnEquals?.['iam:PermissionsBoundary'],
+          `${action} に境界の条件が無い`,
+        ).toBe(ROLE_BOUNDARY_ARN);
+      }
+    }
+  });
+
+  it('cdkd のデプロイロールは境界を外せない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+
+    expect(allows(statements, 'iam:DeleteRolePermissionsBoundary')).toBe(false);
+
+    const denied = statements
+      .filter((s) => s.Effect === 'Deny')
+      .flatMap((s) => toArray(s.Action));
+    expect(denied).toContain('iam:DeleteRolePermissionsBoundary');
+
+    // 境界そのものの中身を書き換えられても意味が無くなる
+    const rewriting = statements.find(
+      (s) => s.Effect === 'Deny' && toArray(s.Resource).includes(ROLE_BOUNDARY_ARN),
+    );
+    expect(rewriting, '境界ポリシーの書き換えを塞ぐ Deny が無い').toBeDefined();
+    expect(toArray(rewriting!.Action)).toContain('iam:CreatePolicyVersion');
+  });
+
+  it('PassRole は実際に使うサービスにしか渡せない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+    const passRole = statements.filter(
+      (s) => s.Effect === 'Allow' && toArray(s.Action).includes('iam:PassRole'),
+    );
+
+    expect(passRole.length).toBe(1);
+    // iam:PassedToService は PassRole 専用の条件キー。他のアクションと同居
+    // させると、そちらが常に拒否される
+    expect(toArray(passRole[0].Action)).toEqual(['iam:PassRole']);
+    expect(toArray(passRole[0].Condition!.StringEquals['iam:PassedToService'])).toEqual([
+      'lambda.amazonaws.com',
+      'appsync.amazonaws.com',
+      'events.amazonaws.com',
+    ]);
+  });
+
+  it('cdkd のデプロイロールはログの中身を読めない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+
+    for (const action of [
+      'logs:GetLogEvents',
+      'logs:FilterLogEvents',
+      'logs:StartQuery',
+      'logs:GetQueryResults',
+      'logs:StartLiveTail',
+    ]) {
+      expect(allows(statements, action), `${action} が許可されている`).toBe(false);
+    }
+
+    // ロググループの管理そのものはできる必要がある
+    expect(allows(statements, 'logs:PutRetentionPolicy')).toBe(true);
+    expect(allows(statements, 'logs:PutMetricFilter')).toBe(true);
+  });
+
+  it('cdkd のデプロイロールは利用者のデータを読めない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+    expect(statements.length).toBeGreaterThan(0);
+
+    for (const action of [
+      'dynamodb:GetItem',
+      'dynamodb:Query',
+      'dynamodb:Scan',
+      'cognito-idp:ListUsers',
+      'cognito-idp:AdminGetUser',
+    ]) {
+      expect(allows(statements, action), `${action} が許可されている`).toBe(false);
+    }
+
+    // 画像バケットはバケットの設定だけ。オブジェクトには触らせない
+    const objectWriters = statements.filter(
+      (s) =>
+        s.Effect === 'Allow' &&
+        toArray(s.Action).some((a) => /^s3:(GetObject|PutObject|DeleteObject|\*)$/.test(a)),
+    );
+    for (const statement of objectWriters) {
+      for (const resource of toArray(statement.Resource)) {
+        expect(resource).toMatch(/cdkd-(state|assets)-/);
+      }
+    }
+  });
+
+  it('cdkd のデプロイロールは AdministratorAccess を貼っていない', () => {
+    const roles = template.findResources('AWS::IAM::Role', {
+      Properties: { RoleName: 'sakekasu-cdkd-deploy' },
+    });
+    const managed = Object.values(roles).flatMap(
+      (r) => (r as { Properties: { ManagedPolicyArns?: unknown[] } }).Properties.ManagedPolicyArns ?? [],
+    );
+    expect(managed).toEqual([]);
   });
 
   it('OIDC プロバイダーは GitHub Actions のトークン発行元を指す', () => {
