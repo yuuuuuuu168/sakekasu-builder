@@ -401,5 +401,65 @@ describe('MonitoringStack', () => {
       template.resourceCountIs('AWS::ApplicationSignals::Discovery', 0);
       template.resourceCountIs('AWS::XRay::TransactionSearchConfig', 0);
     });
+
+    // SLO は Application Signals の課金対象なので、増える方向の変更に気づきたい。
+    // 数を固定しておけば、3つ目を足すときにこのテストが目に入る
+    it('SLO は OCR の2つだけ', () => {
+      template.resourceCountIs('AWS::ApplicationSignals::ServiceLevelObjective', 2);
+    });
+
+    // SLO が対象のサービスを見つけられないと、達成率が空のまま「作れてはいる」
+    // 状態になる。KeyAttributes は実機のメトリクスのディメンションと一致して
+    // いないといけないので、推測で書き換えられないよう固定する
+    it.each([
+      ['dev-sakekasu-ocr-analyzer-availability', 'AVAILABILITY'],
+      ['dev-sakekasu-ocr-analyzer-latency', 'LATENCY'],
+    ])('%s は OCR のサービスを指している', (name, metricType) => {
+      template.hasResourceProperties('AWS::ApplicationSignals::ServiceLevelObjective', {
+        Name: name,
+        RequestBasedSli: Match.objectLike({
+          RequestBasedSliMetric: Match.objectLike({
+            KeyAttributes: {
+              Type: 'Service',
+              Name: 'dev-sakekasu-ocr-analyzer',
+              Environment: 'lambda:default',
+            },
+            MetricType: metricType,
+          }),
+        }),
+      });
+    });
+
+    // 日に数回しか呼ばれないので period-based では判定が成り立たない。
+    // 種別が入れ替わると「ほとんどの期間がデータ無し」で達成率が壊れる
+    it('SLO は request-based で定義している', () => {
+      const slos = Object.values(
+        template.findResources('AWS::ApplicationSignals::ServiceLevelObjective'),
+      );
+
+      expect(slos.length).toBeGreaterThan(0);
+      for (const slo of slos) {
+        expect(slo.Properties?.RequestBasedSli, `${slo.Properties?.Name} が request-based でない`)
+          .toBeDefined();
+        expect(slo.Properties?.Sli, `${slo.Properties?.Name} に period-based の定義が混ざっている`)
+          .toBeUndefined();
+      }
+    });
+
+    // 30日の budget で緩やかな失敗を見るのが目的。7日（既定）に戻ると、
+    // 日に数回の規模では母数が小さすぎて 1 回の失敗で budget を使い切る
+    it('SLO は 30 日の rolling で 90% を目標にしている', () => {
+      const slos = Object.values(
+        template.findResources('AWS::ApplicationSignals::ServiceLevelObjective'),
+      );
+
+      for (const slo of slos) {
+        expect(slo.Properties?.Goal?.AttainmentGoal, `${slo.Properties?.Name} の目標値`).toBe(90);
+        expect(
+          slo.Properties?.Goal?.Interval?.RollingInterval,
+          `${slo.Properties?.Name} の評価期間`,
+        ).toEqual({ Duration: 30, DurationUnit: 'DAY' });
+      }
+    });
   });
 });

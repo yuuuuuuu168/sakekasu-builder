@@ -9,6 +9,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as appsync from 'aws-cdk-lib/aws-appsync';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as applicationsignals from 'aws-cdk-lib/aws-applicationsignals';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import * as path from 'node:path';
@@ -87,6 +88,10 @@ export class MonitoringStack extends cdk.Stack {
     // 新しいアカウントに展開するときの有効化手順は docs/application-signals.md を参照。
     //
     // 計装そのもの（ADOT レイヤー・実行ロールの権限）は API スタック側にある。
+    //
+    // SLO はここで作る。API スタックに置くと、エラーバジェットのアラームを
+    // 足すときに通知先の SNS を参照して循環参照になる。
+    this.addOcrServiceLevelObjectives(props.envName);
 
     // --- 通知経路 ---
 
@@ -523,6 +528,83 @@ export class MonitoringStack extends cdk.Stack {
    * アラームを作って通知先を繋ぐ。
    * 復旧も通知するので、鳴りっぱなしか直ったかが Slack だけで分かる。
    */
+  /**
+   * OCR の SLO を定義する（Issue #86）。
+   *
+   * 対象は `analyzeSakeLabel` を実行する `ocr-analyzer` だけ。`presigned-url` は
+   * 計装が 2026-08-16 に入ったばかりで、しきい値を決める材料が無いので後回し。
+   * SLO は Application Signals の課金対象なので、増やすときは理由を持って増やす。
+   *
+   * ## なぜ既存のアラームがあるのに要るか
+   *
+   * `ocr-errors` は「15分で3件以上」で鳴る。まとまって落ちたときには効くが、
+   * **ぽつぽつ失敗するのは素通りする**。実際 Issue #115 は24時間で12回中3回の
+   * 失敗（エラー率 25%）で、このアラームは一度も鳴っていない。
+   * 30日の budget で見ると、そういう緩やかな失敗が可視化される。
+   *
+   * ## しきい値の根拠
+   *
+   * 利用者が本人だけで、実績は日に数回。厳しくしても鳴りっぱなしになるだけなので
+   * 90% に置いた。30日で 90 リクエスト程度、失敗 9 回までが budget の中に入る。
+   *
+   * レイテンシーの 15 秒は実測から。2026-08-11〜16 の日次で p50 が 4.6〜7.1 秒、
+   * p90 が 4.8〜8.0 秒、p99 が最大 8.1 秒。所要時間の大半は Bedrock なので
+   * 画像の大きさで振れる。8 秒台の実測に対して 10 秒だと余裕が 2 秒しかなく
+   * 揺れで鳴るため、倍近い余裕を取って 15 秒とする。ここを割るのは
+   * 「いつもより明らかに遅い」ときだけでよい。
+   *
+   * ## 種別を request-based にしている理由
+   *
+   * period-based は「期間ごとに good / bad を判定して、good な期間の割合」を見る。
+   * 日に数回しか呼ばれないと、ほとんどの期間がデータ無しになって判定が成り立たない。
+   * request-based は「リクエストの成功割合」を直接数えるので、疎なトラフィックでも
+   * 意味のある値になる。
+   */
+  private addOcrServiceLevelObjectives(envName: string): void {
+    const serviceName = `${envName}-sakekasu-ocr-analyzer`;
+    // Application Signals が Lambda のサービスに付ける環境名。実機の
+    // メトリクスのディメンションから取っている（推測で書くと SLO が
+    // 対象を見つけられず、達成率が空のまま出来上がる）
+    const keyAttributes = {
+      Type: 'Service',
+      Name: serviceName,
+      Environment: 'lambda:default',
+    };
+
+    // 30日の rolling。カレンダー月にしないのは、月初にバジェットが戻る形だと
+    // 月末の失敗を見落としやすいため
+    const goal = (attainmentGoal: number): applicationsignals.CfnServiceLevelObjective.GoalProperty => ({
+      attainmentGoal,
+      interval: { rollingInterval: { duration: 30, durationUnit: 'DAY' } },
+    });
+
+    // バーンレートの参照窓。日に数回しか呼ばれないので、1時間窓だとほとんどが
+    // データ無しになる。1日窓だけにする
+    const burnRateConfigurations = [{ lookBackWindowMinutes: 1440 }];
+
+    new applicationsignals.CfnServiceLevelObjective(this, 'OcrAvailabilitySlo', {
+      name: `${serviceName}-availability`,
+      description: 'ラベル OCR の成功率（30日で 90%）。ぽつぽつ失敗し続ける状態を見つけるためのもの',
+      burnRateConfigurations,
+      goal: goal(90),
+      requestBasedSli: {
+        requestBasedSliMetric: { keyAttributes, metricType: 'AVAILABILITY' },
+      },
+    });
+
+    new applicationsignals.CfnServiceLevelObjective(this, 'OcrLatencySlo', {
+      name: `${serviceName}-latency`,
+      description: 'ラベル OCR の所要時間（30日で 90% が 15 秒未満）。大半は Bedrock の時間',
+      burnRateConfigurations,
+      goal: goal(90),
+      requestBasedSli: {
+        comparisonOperator: 'LessThan',
+        metricThreshold: 15000,
+        requestBasedSliMetric: { keyAttributes, metricType: 'LATENCY' },
+      },
+    });
+  }
+
   private addAlarm(
     id: string,
     options: {
