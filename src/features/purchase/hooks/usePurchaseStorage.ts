@@ -12,8 +12,17 @@ export interface SavePurchaseOptions {
 
 export interface UsePurchaseStorageReturn {
   savePurchase: (data: PurchaseFormData, options?: SavePurchaseOptions) => Promise<SaveResult>;
-  /** 既存の購入記録を更新する（画像は対象外・既存を維持） */
-  updatePurchase: (id: string, data: PurchaseFormData) => Promise<SaveResult>;
+  /**
+   * 既存の購入記録を更新する。
+   *
+   * options に imageKeys を渡したときだけ画像を書き換える。渡さなければ
+   * 既存のキーはそのまま残る（Issue #142 で追加できるようにした）
+   */
+  updatePurchase: (
+    id: string,
+    data: PurchaseFormData,
+    options?: SavePurchaseOptions,
+  ) => Promise<SaveResult>;
   isSaving: boolean;
 }
 
@@ -55,7 +64,11 @@ export function usePurchaseStorage(): UsePurchaseStorageReturn {
     }
   };
 
-  const updatePurchase = async (id: string, data: PurchaseFormData): Promise<SaveResult> => {
+  const updatePurchase = async (
+    id: string,
+    data: PurchaseFormData,
+    options?: SavePurchaseOptions,
+  ): Promise<SaveResult> => {
     setIsSaving(true);
     try {
       const result = await client.graphql({
@@ -70,6 +83,13 @@ export function usePurchaseStorage(): UsePurchaseStorageReturn {
             purchaseDate: data.purchaseDate,
             category: data.category,
             memo: data.memo || null,
+            // 画像を触らない更新では送らない。undefined を送ると
+            // 既存のキーを消してしまう（更新式は渡されたフィールドだけを SET する）
+            // 空配列は送らない。サーバー側で弾かれるうえ、意味としても
+            // 「画像を触らない更新」と区別が付かない（create 側と揃える）
+            ...(options?.imageKeys?.length
+              ? { imageKey: options.imageKey ?? null, imageKeys: options.imageKeys }
+              : {}),
           },
         },
       });

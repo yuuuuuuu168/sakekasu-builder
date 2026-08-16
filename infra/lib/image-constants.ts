@@ -37,3 +37,12 @@ export const TEMP_TAG_VALUE = 'temporary';
  * 形式の説明にヘッダを持ち出さない
  */
 export const TEMP_OBJECT_TAGGING = `${TEMP_TAG_KEY}=${TEMP_TAG_VALUE}`;
+
+/**
+ * 1 つの記録に添付できる画像の上限。
+ *
+ * 複製（copyImages）と記録の作成・更新の両方で見る。片方だけだと、
+ * API を直接叩いて任意の枚数を書き込めてしまう。超えた記録は
+ * getDownloadUrls の上限（100件）に当たって開けなくなる
+ */
+export const MAX_IMAGES_PER_RECORD = 5;
