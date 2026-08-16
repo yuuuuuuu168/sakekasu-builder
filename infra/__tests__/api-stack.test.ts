@@ -654,6 +654,24 @@ describe('ApiStack', () => {
       expect(() => enableApplicationSignals(fn, 'ImportedRole')).toThrow(
         /テレメトリだけ出ない/,
       );
+
+      // 落ちるだけでなく、関数が手つかずで残ることまで見る（PR #153 のレビュー指摘）。
+      //
+      // construct への変更は取り消せないので、検査より先にレイヤーや環境変数を
+      // 足していると、例外を握り潰した呼び出し元に「レイヤーは載っているのに
+      // 権限だけ無い」関数が残る。それは計装が壊れた状態そのもの
+      const guardTemplate = Template.fromStack(stack);
+      const [synthesized] = Object.values(
+        guardTemplate.findResources('AWS::Lambda::Function'),
+      );
+
+      expect(synthesized.Properties?.Layers ?? [], 'レイヤーが載ってしまっている').toHaveLength(
+        0,
+      );
+      expect(
+        synthesized.Properties?.Environment?.Variables?.AWS_LAMBDA_EXEC_WRAPPER,
+        '起動ラッパーが設定されてしまっている',
+      ).toBeUndefined();
     });
 
     // ラッパーを指定した関数には必ずレイヤーが要る。片方だけの状態が

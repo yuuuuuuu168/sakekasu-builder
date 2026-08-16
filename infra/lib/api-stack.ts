@@ -138,6 +138,30 @@ const OCR_RESERVED_CONCURRENCY = 20;
  * @param id レイヤー参照の construct ID に使う接頭辞。関数ごとに一意にする
  */
 export function enableApplicationSignals(fn: NodejsFunction, id: string): void {
+  // 何かを足す前にロールの素性を確かめる（PR #153 のレビュー指摘）。
+  //
+  // `fn.role` が undefined になることは無い（NodejsFunction は渡されなければ
+  // ロールを作る。実測で確認済み）が、`Role.fromRoleArn` で外から持ってきた
+  // ロールを渡された場合は `addManagedPolicy` が**何も言わずに捨てられる**。
+  // 合成は成功し、レイヤーもラッパーも載るので、関数は起動するのに
+  // テレメトリだけ出ない。3つの壊れ方のうち一番見つけにくいものなので、
+  // 合成時に落とす。
+  //
+  // **検査を先頭に置くこと**に意味がある。construct への変更は取り消せない
+  // ので、レイヤーや環境変数を足したあとで落とすと、例外を握り潰した呼び出し元に
+  // 「レイヤーは載っているのに権限だけ無い」半端な関数が残る。ここで返れば
+  // 関数は手つかずのまま。
+  //
+  // いまの2つの呼び出し元はどちらもロールを渡していないため、この分岐には
+  // 入らない。将来ロールを外から渡す関数へ広げたときに気づけるようにしておく
+  if (!cdk.aws_iam.Role.isRole(fn.role)) {
+    throw new Error(
+      `${id}: 実行ロールがこのスタックで作られたものではないため、Application Signals の` +
+        '管理ポリシーを貼れない。外部のロールに addManagedPolicy は黙って捨てられ、' +
+        '関数は起動するのにテレメトリだけ出ない状態になる',
+    );
+  }
+
   fn.addLayers(
     LayerVersion.fromLayerVersionArn(
       fn,
@@ -178,22 +202,7 @@ export function enableApplicationSignals(fn: NodejsFunction, id: string): void {
   // xray と logs はどちらも天井の内側にある。
   // https://docs.aws.amazon.com/aws-managed-policy/latest/reference/CloudWatchLambdaApplicationSignalsExecutionRolePolicy.html
   //
-  // 貼る前にロールの素性を確かめる（PR #153 のレビュー指摘）。`fn.role` が
-  // undefined になることは無い（NodejsFunction は渡されなければロールを作る。
-  // 実測で確認済み）が、`Role.fromRoleArn` で外から持ってきたロールを渡された
-  // 場合は `addManagedPolicy` が**何も言わずに捨てられる**。合成は成功し、
-  // レイヤーもラッパーも載るので、関数は起動するのにテレメトリだけ出ない。
-  //
-  // これは3つの壊れ方のうち一番見つけにくいものなので、合成時に落とす。
-  // いまの2つの呼び出し元はどちらもロールを渡していないため、この分岐には
-  // 入らない。将来ロールを外から渡す関数へ広げたときに気づけるようにしておく
-  if (!cdk.aws_iam.Role.isRole(fn.role)) {
-    throw new Error(
-      `${id}: 実行ロールがこのスタックで作られたものではないため、Application Signals の` +
-        '管理ポリシーを貼れない。外部のロールに addManagedPolicy は黙って捨てられ、' +
-        '関数は起動するのにテレメトリだけ出ない状態になる',
-    );
-  }
+  // ロールが CDK 管理のものであることは先頭で確かめてある
   fn.role.addManagedPolicy(
     cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
       'CloudWatchLambdaApplicationSignalsExecutionRolePolicy',
