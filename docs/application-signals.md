@@ -275,10 +275,14 @@ AWS_PROFILE=sakekasu-builder aws xray get-indexing-rules --region ap-northeast-1
   ```
 
 - **ESM バンドルは通る見込み（実機確認は計装後）。** 対象の関数は esbuild で ESM の単一ファイル（`index.mjs`）にバンドルしている。レイヤーの `otel-instrument` は `/var/task/*.mjs` の有無で ESM を判定し、Node 20 以上なら `--import /opt/wrapper.mjs` を使う。これは `module.register()` による選択的フックで、レイヤー自身のコメントに「バンドルされたアプリコードの ESM ライブバインディングを壊す `--experimental-loader` を避けるため」と書かれている。加えて CDK は `@aws-sdk/*` を external にするため（合成結果で確認済み。バンドルには import 文しか残っていない）、SDK は実行時に読み込まれフックが刺さる。それでも効かなければ対象関数だけ CJS バンドルに変える
-- **Bedrock のリクエスト本文はスパンに載らない（現構成では）。** `InvokeModel` のフックは body を `JSON.parse` するが、取り出すのは `max_tokens` / `temperature` / `top_p` などの推論パラメータだけで、`messages`（base64 画像）を属性に入れる箇所は無い。ただし**レイヤーには本文キャプチャの仕組み自体はある**。`AGENT_OBSERVABILITY_ENABLED=true` を設定すると `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` が既定で `true` になるので、ソムリエ側の GenAI Observability を広げるなどでこの環境変数を入れるときは、**明示的に `false` を指定すること**。入れないと最大 5MB の画像がスパン属性に載りうる
+- **Bedrock のリクエスト本文はスパンに載らない。** `InvokeModel` のフックは body を `JSON.parse` するが、取り出すのは `max_tokens` / `temperature` / `top_p` などの推論パラメータだけで、`messages`（base64 画像）を属性に入れる箇所は無い。ただし**レイヤーには本文キャプチャの仕組み自体はある**。`AGENT_OBSERVABILITY_ENABLED=true` を設定すると `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` が既定で `true` になり、最大 5MB の画像がスパン属性に載りうる。
+
+  **これは `enableApplicationSignals()` が `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=false` を必ず入れることで塞いである。** 以前はこの文書に「入れるときは明示的に false を指定すること」と書いてあるだけで、`AGENT_OBSERVABILITY_ENABLED` を足す人がこの段落を読んでいることが唯一の歯止めになっていた。ソムリエ側の GenAI Observability を広げるときも、こちらを外さない限り本文は載らない
 - **Bedrock のフックが毎回 5MB の JSON をパースする。** 属性を取り出すために `JSON.parse(commandInput.body)` が呼び出しごとに走る。セキュリティの問題ではないが遅延要因になる。レイテンシーを見るときはレイヤー読み込みぶんと合わせて見込む
 - **コールドスタートが悪化する。** レイヤーは展開後 9.7MB ある。OCR の実測で +602ms。`presigned-url` は同期の動線でメモリも少ないぶん、影響が出やすい（「計装の代償」を参照）
-- **レイヤーの ARN にはバージョンが埋まっている**（`AWSOpenTelemetryDistroJs:15`）。上げるときは ARN ごと差し替える。自動で追随する仕組みは入れていないので、たまに新しいバージョンが出ていないかを見る。差し替えるときは中身の展開もやり直すこと
+- **レイヤーの ARN にはバージョンが埋まっている**（`AWSOpenTelemetryDistroJs:15`）。上げるときは ARN ごと差し替える。自動で追随する仕組みは入れていないので、たまに新しいバージョンが出ていないかを見る。差し替えるときは中身の展開もやり直すこと。
+
+  ARN は `api-stack.test.ts` に**提供元アカウント（`615299751070`）とバージョンまで込みで**書き写してある。レイヤーはアプリと同じ実行環境でアプリコードより先に動き、実行ロールの認証情報にも環境変数にも届くため、名前の部分一致だけで見ていると提供元の取り違えを緑のまま通してしまう。差し替えるときは実装とテストの両方を直すことになる（片方だけだと落ちる）
 
   ```bash
   # 存在するバージョンを探す（list-layer-versions はクロスアカウントでは権限が要る）
