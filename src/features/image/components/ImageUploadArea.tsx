@@ -38,6 +38,13 @@ export interface ImageUploadAreaProps {
   hasOcrRun?: boolean;
   /** 最大画像数 */
   maxImages?: number;
+  /**
+   * 既に記録に添付されている画像の URL。
+   *
+   * 編集時に「今ある写真の続きに足す」と分かるよう先頭に並べる。
+   * 削除・差し替えは別 Issue のため、ここでは表示だけ行う（Issue #142）
+   */
+  existingImageUrls?: string[];
 }
 
 function formatMB(bytes: number): string {
@@ -60,6 +67,7 @@ export function ImageUploadArea({
   ocrMessage = null,
   hasOcrRun = false,
   maxImages = 5,
+  existingImageUrls = [],
 }: ImageUploadAreaProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -67,7 +75,10 @@ export function ImageUploadArea({
   // 複数画像対応: imageFiles prop があればそちらを使う、なければ imageFile から配列化
   const imageFiles = imageFilesProp ?? (imageFile ? [imageFile] : []);
   const hasImages = imageFiles.length > 0;
-  const canAddMore = imageFiles.length < maxImages;
+  // 上限は記録あたりの枚数。編集時は既に添付されている分も数に入れる
+  const attachedCount = imageFiles.length + existingImageUrls.length;
+  const hasAnyImage = attachedCount > 0;
+  const canAddMore = attachedCount < maxImages;
 
   const handleFileSelect = useCallback(
     (file: File) => {
@@ -147,9 +158,13 @@ export function ImageUploadArea({
         data-testid="image-file-input"
       />
 
-      {/* プレビュー一覧 */}
-      {hasImages && (
+      {/* プレビュー一覧（編集時は既存の写真を先頭に並べ、その続きに追加する） */}
+      {hasAnyImage && (
         <div className="flex flex-wrap gap-2">
+          {existingImageUrls.map((url, index) => (
+            <ExistingItem key={url} url={url} index={index} />
+          ))}
+
           {imageFiles.map((file, index) => (
             <PreviewItem
               key={`${file.name}-${file.size}-${index}`}
@@ -196,7 +211,7 @@ export function ImageUploadArea({
       )}
 
       {/* ドロップゾーン（画像がないとき） */}
-      {!hasImages && (
+      {!hasAnyImage && (
         <DropZone
           isDragOver={isDragOver}
           isInteractive={isInteractive}
@@ -258,9 +273,9 @@ export function ImageUploadArea({
       </AnimatePresence>
 
       {/* 画像枚数表示 */}
-      {hasImages && (
+      {hasAnyImage && (
         <p className="text-xs text-muted-foreground/70">
-          {imageFiles.length}/{maxImages}枚
+          {attachedCount}/{maxImages}枚
         </p>
       )}
     </div>
@@ -318,6 +333,28 @@ function DropZone({
       <p className="text-xs text-muted-foreground/70">
         JPEG・PNG（最大5枚）
       </p>
+    </div>
+  );
+}
+
+/**
+ * 既に記録に添付されている画像。
+ *
+ * 削除・差し替えは別 Issue のため削除ボタンを出さない。追加した画像
+ * （PreviewItem）とは見た目で区別できるよう、控えめな枠で表示する
+ */
+function ExistingItem({ url, index }: { url: string; index: number }) {
+  return (
+    <div className="relative inline-block" data-testid={`image-existing-${index}`}>
+      <img
+        src={url}
+        alt={`登録済みの画像 ${index + 1}`}
+        className="h-24 w-24 rounded-lg border border-border object-cover opacity-90"
+        loading="lazy"
+      />
+      <span className="absolute bottom-1 left-1 rounded bg-background/80 px-1 text-[10px] text-muted-foreground">
+        登録済み
+      </span>
     </div>
   );
 }

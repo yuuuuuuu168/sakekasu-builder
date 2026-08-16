@@ -183,6 +183,11 @@ input UpdatePurchaseRecordInput {
   memo: String
   drinkingStatus: DrinkingStatus
   openedAt: AWSDateTime
+  # 登録後に写真を足せるようにするための項目（Issue #142）。
+  # 送られたキーは create と同じく所有者を検証してから保存する。
+  # 要素は非 null（[String] だと [null] を受け付け、検証が実行時エラーになる）
+  imageKey: String
+  imageKeys: [String!]
 }
 
 # 飲酒記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）
@@ -212,4 +217,9 @@ input UpdateDrinkingRecordInput {
   drinkingMethod: String
   rating: Int
   memo: String
+  # 登録後に写真を足せるようにするための項目（Issue #142）。
+  # 送られたキーは create と同じく所有者を検証してから保存する。
+  # 要素は非 null（[String] だと [null] を受け付け、検証が実行時エラーになる）
+  imageKey: String
+  imageKeys: [String!]
 }

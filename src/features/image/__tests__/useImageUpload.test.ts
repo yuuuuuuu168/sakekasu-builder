@@ -182,6 +182,61 @@ describe('useImageUpload - uploadImages', () => {
   });
 });
 
+// 上限は「記録あたりの枚数」。編集で足すときは既存の枚数を差し引いて数える
+// （Issue #142）。見ないと保存時にサーバー側の上限で弾かれる
+describe('useImageUpload - 既存画像がある場合の残り枠', () => {
+  beforeEach(() => {
+    mockValidate.mockReset();
+    mockValidate.mockReturnValue({ valid: true });
+    mockCompress.mockReset();
+    mockCompress.mockImplementation(async (file: File) => ({
+      file,
+      originalSize: file.size,
+      compressedSize: file.size,
+      wasCompressed: false,
+      wasReadable: true,
+    }));
+  });
+
+  it('既存 3 枚なら 2 枚まで追加できる', async () => {
+    const { result } = renderHook(() => useImageUpload({ alreadyAttached: 3 }));
+
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('a.jpg'));
+    });
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('b.jpg'));
+    });
+
+    expect(result.current.imageFiles).toHaveLength(2);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('残り枠を超えると既存の枚数を添えて断る', async () => {
+    const { result } = renderHook(() => useImageUpload({ alreadyAttached: 5 }));
+
+    await act(async () => {
+      await result.current.handleImageSelect(makeFile('a.jpg'));
+    });
+
+    expect(result.current.imageFiles).toHaveLength(0);
+    expect(result.current.error).toContain('既に5枚');
+  });
+
+  it('指定が無ければ従来どおり 5 枚まで', async () => {
+    const { result } = renderHook(() => useImageUpload());
+
+    for (const name of ['a', 'b', 'c', 'd', 'e', 'f']) {
+      await act(async () => {
+        await result.current.handleImageSelect(makeFile(`${name}.jpg`));
+      });
+    }
+
+    expect(result.current.imageFiles).toHaveLength(5);
+    expect(result.current.error).toContain('最大5枚');
+  });
+});
+
 // OCR の事前アップロードは記録の作成前に走るため、保存せず離れたキーが
 // 孤児として残る。置き場を一時領域に分けてライフサイクルで消す（Issue #140）
 describe('useImageUpload - 一時領域からの引き取り', () => {
