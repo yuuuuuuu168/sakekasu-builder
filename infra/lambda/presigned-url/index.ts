@@ -5,9 +5,11 @@ import {
   DeleteObjectCommand,
   CopyObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
+  MAX_IMAGES_PER_RECORD,
   TEMP_LOCATION,
   TEMP_OBJECT_TAGGING,
 } from '../../lib/image-constants';
@@ -30,9 +32,6 @@ const MAX_DOWNLOAD_KEYS = 100;
 
 /** サムネイルのファイル名に付けるプレフィックス（フロントの thumbnailKey.ts と揃える） */
 const THUMBNAIL_PREFIX = 'thumb_';
-
-/** 記録に添付できる画像の上限（フロントの useImageUpload と揃える） */
-const MAX_IMAGES_PER_RECORD = 5;
 
 /** キーに使える記録種別。任意の文字列を通すとキーの階層を細工できる */
 const ALLOWED_RECORD_TYPES = ['purchase', 'drinking'];
@@ -404,7 +403,22 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
     }
   }
 
+  // 複製先に既にあるファイル名を先に押さえる。押さえないと、同じ名前の画像を
+  // 後から追加したときに既存の実体を上書きしてしまう。記録は同じキーを指した
+  // まま中身だけ入れ替わるので、画面上は気づけない（Issue #142 で編集からの
+  // 追加ができるようになり、現実に起こりうる経路になった）
   const usedNames = new Set<string>();
+  const destinationPrefix = `${ownerSub}/${recordType}/${recordId}/`;
+  const existing = await s3Client.send(
+    new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: destinationPrefix }),
+  );
+  for (const object of existing.Contents ?? []) {
+    const name = object.Key?.slice(destinationPrefix.length);
+    if (name) {
+      usedNames.add(name);
+    }
+  }
+
   const destinations: string[] = [];
 
   for (const source of uniqueSources) {

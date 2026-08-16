@@ -9,8 +9,19 @@ import { copyRecordImages } from '../lib/copyRecordImages';
 
 const client = generateClient();
 
-/** 最大画像数 */
+/** 1 つの記録に添付できる画像の上限（サーバー側の copyImages と揃える） */
 const MAX_IMAGES = 5;
+
+export interface UseImageUploadOptions {
+  /**
+   * 編集対象の記録が既に持っている画像の枚数。
+   *
+   * 上限は記録あたりの枚数なので、追加で選べるのは残り枠だけ。
+   * ここを見ないと「既存3枚 + 新規3枚」が選べてしまい、保存時に
+   * サーバー側の上限で弾かれる
+   */
+  alreadyAttached?: number;
+}
 
 /**
  * 画像として読み込めなかったときの警告。
@@ -61,7 +72,11 @@ export interface UseImageUploadReturn {
   clearImage: () => void;
 }
 
-export function useImageUpload(): UseImageUploadReturn {
+export function useImageUpload(
+  options?: UseImageUploadOptions,
+): UseImageUploadReturn {
+  const alreadyAttached = options?.alreadyAttached ?? 0;
+  const selectableCount = Math.max(0, MAX_IMAGES - alreadyAttached);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [isCompressing, setIsCompressing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -137,9 +152,15 @@ export function useImageUpload(): UseImageUploadReturn {
   }, []);
 
   const handleImageSelect = useCallback(async (file: File) => {
-    // 最大枚数チェック。state ではなく控えを見る（同時に複数選んだときの取りこぼし対策）
-    if (selectedCountRef.current >= MAX_IMAGES) {
-      setError(`画像は最大${MAX_IMAGES}枚まで添付できます`);
+    // 最大枚数チェック。編集時は既存の枚数を差し引いた残り枠で見る。
+    // 判定に使うのは state ではなく控え。複数ファイルを一度に選ぶと、
+    // すべての呼び出しが同じ描画時点の値を見て全部が通ってしまう
+    if (selectedCountRef.current >= selectableCount) {
+      setError(
+        alreadyAttached > 0
+          ? `画像は1つの記録につき最大${MAX_IMAGES}枚までです（この記録には既に${alreadyAttached}枚あります）`
+          : `画像は最大${MAX_IMAGES}枚まで添付できます`,
+      );
       return;
     }
 
@@ -176,7 +197,7 @@ export function useImageUpload(): UseImageUploadReturn {
     } finally {
       setIsCompressing(false);
     }
-  }, []);
+  }, [selectableCount, alreadyAttached]);
 
   const removeImage = useCallback(
     (index: number) => {

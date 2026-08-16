@@ -31,43 +31,106 @@ describe('ApiStack', () => {
     });
   });
 
+  // Issue #142: 登録後に画像を追加できるようにしたため、更新経路にも
+  // 画像キーの所有者検証が要る。無いと他人の画像キーを自分の記録に紐づけられ、
+  // その記録を削除したときに削除パイプラインが他人の画像を消してしまう
+  describe('画像キーの所有者検証', () => {
+    it.each(['PurchaseRecord', 'DrinkingRecord'])(
+      '%s の create リゾルバーが画像キーの所有者を検証する',
+      (typeName) => {
+        template.hasResourceProperties('AWS::AppSync::Resolver', {
+          FieldName: `create${typeName}`,
+          Code: Match.stringLikeRegexp('imageKeys must belong to the requester'),
+        });
+      },
+    );
+
+    it.each(['PurchaseRecord', 'DrinkingRecord'])(
+      '%s の update リゾルバーが画像キーの所有者を検証する',
+      (typeName) => {
+        template.hasResourceProperties('AWS::AppSync::Resolver', {
+          FieldName: `update${typeName}`,
+          Code: Match.stringLikeRegexp('imageKeys must belong to the requester'),
+        });
+      },
+    );
+  });
+
   // 一時領域のキーは 1 日で消える。記録に持たせると実体だけが消えて
   // 画像の出ない記録が残る。フロントは保存前に正式な場所へ複製しているが、
-  // API を直接叩けばその手順を飛ばせるのでサーバー側でも拒否する（Issue #140）
+  // API を直接叩けばその手順を飛ばせるのでサーバー側でも拒否する（Issue #140）。
+  // 更新経路でも画像キーを受け取るようになったため、両方に要る（Issue #142）
   describe('一時領域のキーを記録に保存させない', () => {
-    it.each(['PurchaseRecord', 'DrinkingRecord'])(
-      '%s の create リゾルバーが tmp 区画のキーを拒否する',
-      (typeName) => {
-        template.hasResourceProperties('AWS::AppSync::Resolver', {
-          FieldName: `create${typeName}`,
-          Code: Match.stringLikeRegexp('temporary keys cannot be stored in records'),
-        });
-      },
-    );
+    it.each([
+      'createPurchaseRecord',
+      'createDrinkingRecord',
+      'updatePurchaseRecord',
+      'updateDrinkingRecord',
+    ])('%s リゾルバーが tmp 区画のキーを拒否する', (fieldName) => {
+      template.hasResourceProperties('AWS::AppSync::Resolver', {
+        FieldName: fieldName,
+        Code: Match.stringLikeRegexp('temporary keys cannot be stored in records'),
+      });
+    });
 
-    it.each(['PurchaseRecord', 'DrinkingRecord'])(
-      '%s の create リゾルバーが区画の位置で判定する（部分一致にしない）',
-      (typeName) => {
-        // ファイル名や sub に tmp が現れても一時領域とは限らない。
-        // includes で見ると正式な画像まで拒否してしまう
-        template.hasResourceProperties('AWS::AppSync::Resolver', {
-          FieldName: `create${typeName}`,
-          Code: Match.stringLikeRegexp("split\\('/'\\)\\[1\\] === 'tmp'"),
-        });
-      },
-    );
+    it.each([
+      'createPurchaseRecord',
+      'createDrinkingRecord',
+      'updatePurchaseRecord',
+      'updateDrinkingRecord',
+    ])('%s リゾルバーが区画の位置で判定する（部分一致にしない）', (fieldName) => {
+      // ファイル名や sub に tmp が現れても一時領域とは限らない。
+      // includes で見ると正式な画像まで拒否してしまう
+      template.hasResourceProperties('AWS::AppSync::Resolver', {
+        FieldName: fieldName,
+        Code: Match.stringLikeRegexp("split\\('/'\\)\\[1\\] === 'tmp'"),
+      });
+    });
 
-    it.each(['PurchaseRecord', 'DrinkingRecord'])(
-      '%s の create リゾルバーが null 要素で落ちない',
-      (typeName) => {
-        // imageKeys の要素が null だと key.startsWith が実行時エラーになる。
-        // スキーマ側でも [String!] にしてあるが、ガードでも受け止める
-        template.hasResourceProperties('AWS::AppSync::Resolver', {
-          FieldName: `create${typeName}`,
-          Code: Match.stringLikeRegexp('!!key && key.startsWith'),
-        });
-      },
-    );
+    it.each([
+      'createPurchaseRecord',
+      'createDrinkingRecord',
+      'updatePurchaseRecord',
+      'updateDrinkingRecord',
+    ])('%s リゾルバーが null 要素で落ちない', (fieldName) => {
+      // imageKeys の要素が null だと key.startsWith が実行時エラーになる。
+      // スキーマ側でも [String!] にしてあるが、ガードでも受け止める
+      template.hasResourceProperties('AWS::AppSync::Resolver', {
+        FieldName: fieldName,
+        Code: Match.stringLikeRegexp('!!key && key.startsWith'),
+      });
+    });
+  });
+
+  // copyImages にも同じ上限があるが、あちらは複製経路だけを見ている。
+  // API を直接叩いて任意の枚数を書き込まれると、getDownloadUrls の上限（100件）に
+  // 当たって記録が開けなくなる（PR #146 のレビュー指摘）
+  describe('画像の枚数制限', () => {
+    it.each([
+      'createPurchaseRecord',
+      'createDrinkingRecord',
+      'updatePurchaseRecord',
+      'updateDrinkingRecord',
+    ])('%s リゾルバーが 5 枚を超える imageKeys を拒否する', (fieldName) => {
+      template.hasResourceProperties('AWS::AppSync::Resolver', {
+        FieldName: fieldName,
+        Code: Match.stringLikeRegexp('input.imageKeys.length > 5'),
+      });
+    });
+
+    // 空配列は truthy なのでループの検査を 1 度も通らないまま書き込まれ、
+    // 記録から画像への参照だけが消える（PR #146 の 3 巡目レビュー指摘）
+    it.each([
+      'createPurchaseRecord',
+      'createDrinkingRecord',
+      'updatePurchaseRecord',
+      'updateDrinkingRecord',
+    ])('%s リゾルバーが空の imageKeys を拒否する', (fieldName) => {
+      template.hasResourceProperties('AWS::AppSync::Resolver', {
+        FieldName: fieldName,
+        Code: Match.stringLikeRegexp('input.imageKeys.length === 0'),
+      });
+    });
   });
 
   // Issue #140: OCR の事前アップロードは記録の作成前に走るため、保存せず離れた

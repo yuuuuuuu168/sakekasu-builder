@@ -14,6 +14,9 @@ class FakeCopyObjectCommand {
 class FakeHeadObjectCommand {
   constructor(public input: { Bucket: string; Key: string }) {}
 }
+class FakeListObjectsV2Command {
+  constructor(public input: { Bucket: string; Prefix: string }) {}
+}
 
 vi.mock('@aws-sdk/client-s3', () => ({
   S3Client: class {
@@ -30,6 +33,7 @@ vi.mock('@aws-sdk/client-s3', () => ({
   },
   CopyObjectCommand: FakeCopyObjectCommand,
   HeadObjectCommand: FakeHeadObjectCommand,
+  ListObjectsV2Command: FakeListObjectsV2Command,
 }));
 
 vi.mock('@aws-sdk/s3-request-presigner', () => ({
@@ -246,9 +250,13 @@ describe('copyImages', () => {
   // CopySource は x-amz-copy-source ヘッダとして送られる。素のキーを渡すと
   // 日本語やスペースを含む名前で Node.js が弾き、コピーが落ちる（PR #149）
   describe('複製元のエンコード', () => {
+    // 全角スペースを含む実際のファイル名。ソースに素で書くと lint の
+    // no-irregular-whitespace に当たるため、エスケープで表す
+    const IDEOGRAPHIC_SPACE = '\u3000';
+    const JP_NAME = `アラン${IDEOGRAPHIC_SPACE}ポートカスク1.jpeg`;
     it('日本語を含むファイル名でもヘッダに載せられる形にする', async () => {
       await callCopyImages({
-        sourceKeys: [`${OWNER}/tmp/upload-1/アラン　ポートカスク1.jpeg`],
+        sourceKeys: [`${OWNER}/tmp/upload-1/${JP_NAME}`],
       });
 
       for (const source of rawCopySources()) {
@@ -275,13 +283,50 @@ describe('copyImages', () => {
 
     it('複製先のキーはエンコードしない（SDK が処理する）', async () => {
       const result = await callCopyImages({
-        sourceKeys: [`${OWNER}/tmp/upload-1/アラン　ポートカスク1.jpeg`],
+        sourceKeys: [`${OWNER}/tmp/upload-1/${JP_NAME}`],
       });
 
-      expect(result).toEqual([
-        `${OWNER}/drinking/${RECORD_ID}/アラン　ポートカスク1.jpeg`,
-      ]);
+      expect(result).toEqual([`${OWNER}/drinking/${RECORD_ID}/${JP_NAME}`]);
     });
+  });
+
+  // 複製先に同名の画像が既にあると、実体だけが入れ替わって記録は同じキーを
+  // 指したまま。画面では気づけない（PR #146 の 3 巡目レビュー指摘）
+  it('複製先に同名のファイルがあれば連番で避ける', async () => {
+    sendMock.mockImplementation(async (command: unknown) => {
+      if (command instanceof FakeListObjectsV2Command) {
+        return {
+          Contents: [
+            { Key: `${OWNER}/drinking/${RECORD_ID}/photo.jpg` },
+            { Key: `${OWNER}/drinking/${RECORD_ID}/thumb_photo.jpg` },
+          ],
+        };
+      }
+      return {};
+    });
+
+    const result = await callCopyImages({
+      sourceKeys: [`${OWNER}/purchase/rec-1/photo.jpg`],
+    });
+
+    // 既存の photo.jpg を上書きしない
+    expect(result).toEqual([`${OWNER}/drinking/${RECORD_ID}/photo-2.jpg`]);
+    expect(copies().some(([, dest]) => dest.endsWith('/photo.jpg'))).toBe(false);
+  });
+
+  it('複製先が空なら従来どおりの名前を使う', async () => {
+    sendMock.mockImplementation(async (command: unknown) => {
+      if (command instanceof FakeListObjectsV2Command) {
+        return { Contents: [] };
+      }
+      return {};
+    });
+
+    const result = await callCopyImages({
+      sourceKeys: [`${OWNER}/purchase/rec-1/photo.jpg`],
+    });
+
+    expect(result).toEqual([`${OWNER}/drinking/${RECORD_ID}/photo.jpg`]);
   });
 
   it('空の配列を渡したら何も複製しない', async () => {
