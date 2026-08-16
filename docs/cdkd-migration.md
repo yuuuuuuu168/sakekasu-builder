@@ -69,8 +69,11 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | AppSync FunctionConfiguration | 4 | 一覧になし → Cloud Control API |
 | Cognito UserPoolClient | 2 | 同上 |
 | Logs MetricFilter | 2 | 同上 |
+| ApplicationSignals ServiceLevelObjective | 2 | 同上（Issue #86 で追加） |
 
 対応表に無い型は Cloud Control API へ自動でフォールバックする。実際に通るかは手順5の `cdkd diff` で分かる。cdkd は未対応のプロパティを pre-flight で検出して落ちる作りになっている。
+
+**Cloud Control API へフォールバックする型でも、その先のサービス権限は要る。** SLO であれば `applicationsignals:CreateServiceLevelObjective` が呼ばれるので、`UseCloudControlApi` の `cloudformation:CreateResource` だけでは足りない。`cdkd-policies.ts` の `ManageStatelessServices` に `applicationsignals:*` を入れてある。**リソースの型を増やしたときは、この対応表とデプロイロールの権限を合わせて見直すこと。**
 
 AppSync の認証は Cognito UserPool のみで API Key を使っていないため、CloudFormation が import できない型として名指しされている `AWS::AppSync::ApiKey` は該当しない。
 
