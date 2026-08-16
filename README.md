@@ -57,7 +57,7 @@
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuu168/sakekasu-builder/issues/92)） |
 | DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。コンソール側の設定あり（[#67](https://github.com/yuuuuuu168/sakekasu-builder/issues/67)） |
 | Application Signals による APM | サービス検出・X-Ray トレースまで。ADOT の計装と SLO は未導入（[#86](https://github.com/yuuuuuu168/sakekasu-builder/issues/86)） |
-| CDK デプロイの自動化 | main へのマージで GitHub Actions が `cdk deploy`（OIDC 認証、[#94](https://github.com/yuuuuuu168/sakekasu-builder/issues/94)） |
+| CDK デプロイの自動化 | main へのマージで GitHub Actions が `cdk deploy`（OIDC 認証、[#94](https://github.com/yuuuuuu168/sakekasu-builder/issues/94)）。cdkd への移行が進行中（[#150](https://github.com/yuuuuuu168/sakekasu-builder/issues/150)） |
 | 一覧画面の画像表示高速化 | サムネイル生成・Presigned URL キャッシュ・遅延読み込み |
 
 ## 今後やりたいこと
@@ -662,7 +662,11 @@ cd infra
 AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc -c github-oidc=true
 ```
 
-これで OIDC プロバイダーと deploy / diff ロールが作られ、以後 Actions が動くようになる。
+これで OIDC プロバイダーと deploy / diff ロール、それに cdkd 用のデプロイロール（`sakekasu-cdkd-deploy`）が作られ、以後 Actions が動くようになる。
+
+### cdkd（CDK Direct）への移行
+
+CloudFormation を経由しない [cdkd](https://github.com/go-to-k/cdkd) への移行を進めている（[#150](https://github.com/yuuuuuu168/sakekasu-builder/issues/150)）。いまはロールと依存を用意した段階で、ワークフローはまだ `cdk deploy` のまま。AWS 側の取り込み作業とワークフロー差し替えの手順は [docs/cdkd-migration.md](docs/cdkd-migration.md) にある。
 
 ## テスト
 
