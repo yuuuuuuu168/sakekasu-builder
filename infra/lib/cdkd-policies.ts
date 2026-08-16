@@ -1,4 +1,31 @@
 import * as iam from 'aws-cdk-lib/aws-iam';
+import { roleBoundaryArn } from './role-boundary.js';
+
+/**
+ * ロールを渡す先のサービス。合成した4スタックの信頼ポリシーを走査した結果、
+ * この3つしか出てこない（Issue #150 のレビュー指摘への対応）
+ */
+const PASS_ROLE_TARGET_SERVICES = [
+  'lambda.amazonaws.com',
+  'appsync.amazonaws.com',
+  'events.amazonaws.com',
+];
+
+/**
+ * CloudWatch Logs のデータプレーン。ログ本文には画像キー経由で利用者の
+ * Cognito sub が入りうる（lib/log-retention.ts）ため、デプロイロールにも
+ * 渡さない。列挙し漏らしたときの保険として Deny でも塞ぐ
+ */
+const LOGS_DATA_PLANE_ACTIONS = [
+  'logs:GetLogEvents',
+  'logs:FilterLogEvents',
+  'logs:GetLogRecord',
+  'logs:GetQueryResults',
+  'logs:StartQuery',
+  'logs:StartLiveTail',
+  'logs:GetLogGroupFields',
+  'logs:Unmask',
+];
 
 /**
  * cdkd（CDK Direct）用の IAM ポリシー定義（Issue #150）。
@@ -35,12 +62,41 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
       actions: [
         'appsync:*',
         'lambda:*',
-        'logs:*',
         'cloudwatch:*',
         'sns:*',
         'events:*',
         'ecr:*',
       ],
+      resources: ['*'],
+    }),
+
+    // CloudWatch Logs はログ本文に利用者の sub が入りうるので、
+    // ロググループとメトリクスフィルターの管理に必要なものだけを列挙する
+    new iam.PolicyStatement({
+      sid: 'ManageLogGroups',
+      actions: [
+        'logs:CreateLogGroup',
+        'logs:DeleteLogGroup',
+        'logs:DescribeLogGroups',
+        'logs:PutRetentionPolicy',
+        'logs:DeleteRetentionPolicy',
+        'logs:PutMetricFilter',
+        'logs:DeleteMetricFilter',
+        'logs:DescribeMetricFilters',
+        'logs:TagLogGroup',
+        'logs:UntagLogGroup',
+        'logs:TagResource',
+        'logs:UntagResource',
+        'logs:ListTagsForResource',
+      ],
+      resources: ['*'],
+    }),
+
+    // 上の列挙から漏れたデータプレーンの API が将来増えても届かないように
+    new iam.PolicyStatement({
+      sid: 'DenyLogDataPlane',
+      effect: iam.Effect.DENY,
+      actions: LOGS_DATA_PLANE_ACTIONS,
       resources: ['*'],
     }),
 
@@ -136,29 +192,60 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
     }),
 
     // Lambda や AppSync の実行ロールを作る。スタック名が接頭辞に付くので
-    // sakekasu-* に閉じられる（自動生成名は <スタック名>-<論理ID><ハッシュ>）
+    // sakekasu-* に閉じられる（自動生成名は <スタック名>-<論理ID><ハッシュ>）。
+    //
+    // 権限を書き換える系の API は、対象ロールに Permissions Boundary が
+    // 付いていることを条件にする。境界の無いロールは作れず、境界の付いた
+    // ロールに管理者相当を書き込んでも実効権限は境界で頭打ちになるため、
+    // 「ロールに書き込む → その権限で動かす」という昇格の連鎖が切れる。
+    //
+    // 条件を付けられるのは iam:PermissionsBoundary に対応したアクションだけ。
+    // TagRole などに付けると、キーが渡らないため常に不一致となり
+    // 恒久的な AccessDenied になる。対応しているものだけをここに集める
     new iam.PolicyStatement({
-      sid: 'ManageApplicationRoles',
+      sid: 'ManageApplicationRolesWithinBoundary',
       actions: [
         'iam:CreateRole',
         'iam:DeleteRole',
+        'iam:PutRolePolicy',
+        'iam:DeleteRolePolicy',
+        'iam:AttachRolePolicy',
+        'iam:DetachRolePolicy',
+        'iam:PutRolePermissionsBoundary',
+      ],
+      resources: [`arn:aws:iam::${account}:role/sakekasu-*`],
+      conditions: {
+        ArnEquals: { 'iam:PermissionsBoundary': roleBoundaryArn(account) },
+      },
+    }),
+
+    // 権限を増やさない操作。iam:PermissionsBoundary が渡らないので条件は付けない
+    new iam.PolicyStatement({
+      sid: 'ReadAndTagApplicationRoles',
+      actions: [
         'iam:GetRole',
         'iam:UpdateRole',
         'iam:UpdateRoleDescription',
         'iam:UpdateAssumeRolePolicy',
-        'iam:PutRolePolicy',
-        'iam:DeleteRolePolicy',
         'iam:GetRolePolicy',
         'iam:ListRolePolicies',
-        'iam:AttachRolePolicy',
-        'iam:DetachRolePolicy',
         'iam:ListAttachedRolePolicies',
         'iam:ListRoleTags',
         'iam:TagRole',
         'iam:UntagRole',
-        'iam:PassRole',
       ],
       resources: [`arn:aws:iam::${account}:role/sakekasu-*`],
+    }),
+
+    // iam:PassedToService は PassRole 専用の条件キーで、他のアクションには
+    // 効かない。同じステートメントに混ぜると、そちらが常に拒否されるため分ける
+    new iam.PolicyStatement({
+      sid: 'PassApplicationRolesToKnownServices',
+      actions: ['iam:PassRole'],
+      resources: [`arn:aws:iam::${account}:role/sakekasu-*`],
+      conditions: {
+        StringEquals: { 'iam:PassedToService': PASS_ROLE_TARGET_SERVICES },
+      },
     }),
 
     // AWS 管理ポリシーを AttachRolePolicy で貼るとき、cdkd が中身を読む
@@ -188,6 +275,30 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
         `arn:aws:iam::${account}:role/sakekasu-github-actions-diff`,
         `arn:aws:iam::${account}:oidc-provider/token.actions.githubusercontent.com`,
       ],
+    }),
+
+    // 境界そのものを外されると上の条件が意味を失う。境界の削除と、
+    // 境界ポリシーの中身の書き換えを塞ぐ（AWS の推奨どおり、境界の管理は
+    // デプロイ用の identity から切り離す）
+    new iam.PolicyStatement({
+      sid: 'DenyEscapingTheRoleBoundary',
+      effect: iam.Effect.DENY,
+      actions: [
+        'iam:DeleteRolePermissionsBoundary',
+        'iam:DeleteUserPermissionsBoundary',
+      ],
+      resources: ['*'],
+    }),
+    new iam.PolicyStatement({
+      sid: 'DenyRewritingTheRoleBoundary',
+      effect: iam.Effect.DENY,
+      actions: [
+        'iam:CreatePolicyVersion',
+        'iam:DeletePolicyVersion',
+        'iam:SetDefaultPolicyVersion',
+        'iam:DeletePolicy',
+      ],
+      resources: [roleBoundaryArn(account)],
     }),
 
     // cdkd が対応表に持たない型（Cognito UserPoolClient / Logs MetricFilter /

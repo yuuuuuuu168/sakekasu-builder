@@ -11,6 +11,7 @@ import * as url from 'node:url';
 import type { Construct } from 'constructs';
 import { LAMBDA_LOG_RETENTION } from './log-retention.js';
 import { TEMP_LOCATION, TEMP_TAG_KEY, TEMP_TAG_VALUE } from './image-constants.js';
+import { applyRoleBoundary } from './role-boundary.js';
 
 /**
  * Application Signals 用の OpenTelemetry レイヤー（Issue #86）。
@@ -174,6 +175,12 @@ export class ApiStack extends cdk.Stack {
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
+
+    // このスタックが作るロールはすべて Permissions Boundary の内側に置く
+    // （Issue #150）。cdkd のデプロイロールは境界の付いたロールしか
+    // 作り替えられない条件になっているため、外すとデプロイが止まる。
+    // 詳細は lib/role-boundary.ts
+    applyRoleBoundary(this);
 
     // 利用者の記録・画像は dev 環境にも実データが入るため、環境名によらず
     // スタック削除時に残す。削除する場合は明示的に手動操作を要求する
