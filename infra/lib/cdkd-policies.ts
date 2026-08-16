@@ -70,6 +70,45 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
       resources: ['*'],
     }),
 
+    // Application Signals は SLO の操作だけに絞る（Issue #86）。
+    //
+    // SLO は Cloud Control API 経由で作られるが、その先で
+    // applicationsignals:CreateServiceLevelObjective が呼ばれるため、
+    // UseCloudControlApi の cloudformation:CreateResource だけでは足りない。
+    //
+    // **`applicationsignals:*` にはしない。** サービス検出の有効化
+    // （StartDiscovery）が入ってしまうため。これはアカウントに1つの設定で、
+    // 一度スタックに載せて失敗したときにロールバックがそれを消しにいき、
+    // ソムリエの可観測性を道連れにしかけた（monitoring-stack.ts のコメント）。
+    // スタックから外して守っている設定を、IAM の側から素通りで触れる形にしない
+    // （PR #161 のレビュー指摘）。
+    //
+    // 足りない操作が出たらデプロイが AccessDenied で落ちる。落ちれば分かるので、
+    // 分からないまま広い権限を渡すよりよい
+    new iam.PolicyStatement({
+      sid: 'ManageServiceLevelObjectives',
+      actions: [
+        'applicationsignals:CreateServiceLevelObjective',
+        'applicationsignals:UpdateServiceLevelObjective',
+        'applicationsignals:DeleteServiceLevelObjective',
+        'applicationsignals:GetServiceLevelObjective',
+        'applicationsignals:ListServiceLevelObjectives',
+        'applicationsignals:TagResource',
+        'applicationsignals:UntagResource',
+        'applicationsignals:ListTagsForResource',
+      ],
+      resources: ['*'],
+    }),
+
+    // 上の列挙が将来ワイルドカードに戻されても、アカウント単位の設定には
+    // 届かないようにする。DenyLogDataPlane と同じ考え方
+    new iam.PolicyStatement({
+      sid: 'DenyApplicationSignalsAccountSettings',
+      effect: iam.Effect.DENY,
+      actions: ['applicationsignals:StartDiscovery'],
+      resources: ['*'],
+    }),
+
     // CloudWatch Logs はログ本文に利用者の sub が入りうるので、
     // ロググループとメトリクスフィルターの管理に必要なものだけを列挙する
     new iam.PolicyStatement({
@@ -375,6 +414,13 @@ export function cdkdDiffStatements(account: string): iam.PolicyStatement[] {
     new iam.PolicyStatement({
       sid: 'ReadStatelessServices',
       actions: [
+        // SLO は Cloud Control 経由で読まれるので、その先の権限が要る。
+        // 無いと SLO をデプロイした後の cdkd diff が AccessDenied で落ちる。
+        // Cognito UserPoolClient に cognito-idp:DescribeUserPoolClient を
+        // 足してあるのと同じ形（PR #161 のレビュー指摘）
+        'applicationsignals:GetServiceLevelObjective',
+        'applicationsignals:ListServiceLevelObjectives',
+        'applicationsignals:ListTagsForResource',
         'appsync:Get*',
         'appsync:List*',
         'lambda:Get*',
