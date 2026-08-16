@@ -430,6 +430,36 @@ describe('MonitoringStack', () => {
       });
     });
 
+    // 演算子としきい値が SLO の意味そのもの。演算子が反転すると「遅いほど
+    // 達成率が高い」になり、単位を取り違えると常に達成（15000 秒＝約4時間）か
+    // 常に未達（15 ミリ秒）になる。どちらも「SLO はあるのに何も見ていない」
+    // 状態なので、値を固定する（PR #161 のレビュー指摘）。
+    //
+    // ApplicationSignals の Latency はミリ秒。実測の生値が4桁で、
+    // get-metric-statistics の応答も Unit: Milliseconds を返す
+    it('レイテンシー SLO は 15 秒（15000 ミリ秒）未満を条件にしている', () => {
+      template.hasResourceProperties('AWS::ApplicationSignals::ServiceLevelObjective', {
+        Name: 'dev-sakekasu-ocr-analyzer-latency',
+        RequestBasedSli: Match.objectLike({
+          ComparisonOperator: 'LessThan',
+          MetricThreshold: 15000,
+        }),
+      });
+    });
+
+    // 可用性 SLO は成功率そのものを見るので、しきい値も演算子も持たない。
+    // ここに値が入っているのは、レイテンシー用の設定を書き写した取り違え
+    it('可用性 SLO はしきい値を持たない', () => {
+      const slos = template.findResources('AWS::ApplicationSignals::ServiceLevelObjective', {
+        Properties: { Name: 'dev-sakekasu-ocr-analyzer-availability' },
+      });
+      const [slo] = Object.values(slos);
+
+      expect(slo).toBeDefined();
+      expect(slo.Properties?.RequestBasedSli?.MetricThreshold).toBeUndefined();
+      expect(slo.Properties?.RequestBasedSli?.ComparisonOperator).toBeUndefined();
+    });
+
     // 日に数回しか呼ばれないので period-based では判定が成り立たない。
     // 種別が入れ替わると「ほとんどの期間がデータ無し」で達成率が壊れる
     it('SLO は request-based で定義している', () => {

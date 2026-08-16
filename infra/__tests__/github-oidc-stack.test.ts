@@ -290,6 +290,16 @@ describe('GithubOidcStack', () => {
     ]);
   });
 
+  // SLO は Cloud Control API 経由で作られるが、その先で
+  // applicationsignals:CreateServiceLevelObjective が呼ばれる。
+  // cloudformation:CreateResource だけでは AccessDenied で落ちる
+  it('cdkd のデプロイロールは SLO を作れる', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+
+    expect(allows(statements, 'applicationsignals:CreateServiceLevelObjective')).toBe(true);
+    expect(allows(statements, 'applicationsignals:TagResource')).toBe(true);
+  });
+
   it('cdkd のデプロイロールはログの中身を読めない', () => {
     const statements = statementsFor(template, /^CdkdDeployRole/);
 

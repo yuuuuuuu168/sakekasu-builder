@@ -56,7 +56,15 @@ const LOGS_DATA_PLANE_ACTIONS = [
  */
 export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
   return [
-    // 利用者のデータに触れないサービス群。ここはサービス単位で許可する
+    // 利用者のデータに触れないサービス群。ここはサービス単位で許可する。
+    //
+    // applicationsignals は SLO の作成に要る（Issue #86）。Cloud Control API
+    // 経由で作られるが、その先で applicationsignals:CreateServiceLevelObjective
+    // が呼ばれるため、UseCloudControlApi だけでは足りない（PR #161 のレビュー指摘）。
+    //
+    // このサービスが扱うのはサービスマップ・ゴールデンメトリクス・SLO で、
+    // 記録や画像には届かない。スパンの中身は CloudWatch Logs（aws/spans）側に
+    // あり、そちらは下の DenyLogDataPlane で引き続き読めない
     new iam.PolicyStatement({
       sid: 'ManageStatelessServices',
       actions: [
@@ -66,6 +74,7 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
         'sns:*',
         'events:*',
         'ecr:*',
+        'applicationsignals:*',
       ],
       resources: ['*'],
     }),
