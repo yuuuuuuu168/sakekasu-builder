@@ -10,7 +10,12 @@ import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
 import { LAMBDA_LOG_RETENTION } from './log-retention.js';
-import { TEMP_LOCATION, TEMP_TAG_KEY, TEMP_TAG_VALUE } from './image-constants.js';
+import {
+  MAX_IMAGES_PER_RECORD,
+  TEMP_LOCATION,
+  TEMP_TAG_KEY,
+  TEMP_TAG_VALUE,
+} from './image-constants.js';
 import { applyRoleBoundary } from './role-boundary.js';
 
 /**
@@ -547,24 +552,33 @@ export function response(ctx) {
   ): void {
     const jsRuntime = appsync.FunctionRuntime.JS_1_0_0;
 
-    // create ミューテーション
-    dataSource.createResolver(`Create${typeName}Resolver`, {
-      typeName: 'Mutation',
-      fieldName: `create${typeName}`,
-      runtime: jsRuntime,
-      code: appsync.Code.fromInline(`
-export function request(ctx) {
-  const now = util.time.nowISO8601();
-  const input = ctx.args.input;
+    /**
+     * 画像キーを検証するリゾルバーコード片（create / update で共有）。
+     *
+     * 他人のキーを書いた記録を作れると、その記録を削除したときに削除
+     * パイプラインが他人の画像を消してしまう。作成だけでなく更新でも要る
+     * （登録後に画像を足せるようにしたため。Issue #142）。
+     *
+     * あわせて一時領域（{sub}/tmp/...）のキーも拒否する。あちらは
+     * ライフサイクルで 1 日後に消えるため、記録に持たせると実体だけが
+     * 消えて画像の出ない記録が残る。フロントは保存前に正式な場所へ
+     * 複製しているが、API を直接叩けばその手順を飛ばせる（Issue #140）
+     */
+    const imageOwnershipGuard = `
+  // 添付枚数の上限。copyImages にも同じ上限があるが、あちらは複製経路だけを
+  // 見ている。API を直接叩いて任意の枚数を書き込まれると、getDownloadUrls の
+  // 上限（100件）を超えた記録が開けなくなり、削除時の S3 呼び出しも青天井になる
+  if (input.imageKeys && input.imageKeys.length > ${MAX_IMAGES_PER_RECORD}) {
+    util.error('Invalid imageKeys: too many images', 'BadRequest');
+  }
 
-  // 画像キーは自分のものだけを受け付ける。
-  // 他人のキーを書いた記録を作れると、その記録を削除したときに
-  // 削除パイプラインが他人の画像を消してしまう。
-  //
-  // あわせて一時領域（{sub}/tmp/...）のキーも拒否する。あちらは
-  // ライフサイクルで 1 日後に消えるため、記録に持たせると実体だけが
-  // 消えて画像の出ない記録が残る。フロントは保存前に正式な場所へ
-  // 複製しているが、API を直接叩けばその手順を飛ばせる（Issue #140）
+  // 空配列は素通りする。中身が無いのでループの検査は 1 度も走らないまま
+  // imageKeys = [] が書き込まれ、記録から画像への参照だけが消えて
+  // S3 の実体が誰からも辿れなくなる。画像を外す操作は今のところ無い
+  if (input.imageKeys && input.imageKeys.length === 0) {
+    util.error('Invalid imageKeys: must not be empty', 'BadRequest');
+  }
+
   const prefix = ctx.identity.sub + '/';
 
   // 自分のキーか。null 要素で落ちないよう、値の有無もここで見る
@@ -591,7 +605,20 @@ export function request(ctx) {
       rejectTemporary(key);
     }
   }
+`;
 
+    // create ミューテーション
+    dataSource.createResolver(`Create${typeName}Resolver`, {
+      typeName: 'Mutation',
+      fieldName: `create${typeName}`,
+      runtime: jsRuntime,
+      code: appsync.Code.fromInline(`
+export function request(ctx) {
+  const now = util.time.nowISO8601();
+  const input = ctx.args.input;
+
+  // 画像キーは自分のものだけを受け付ける
+${imageOwnershipGuard}
   const item = {
     ...input,
     id: util.autoId(),
@@ -686,6 +713,9 @@ export function request(ctx) {
   const input = ctx.args.input;
   const now = util.time.nowISO8601();
 
+  // 画像キーは自分のものだけを受け付ける。
+  // 登録後に画像を追加できるようにしたため、更新経路でも検証する（Issue #142）
+${imageOwnershipGuard}
   // input から id を除いた更新フィールドを構築
   const expParts = [];
   const expNames = {};

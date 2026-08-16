@@ -33,6 +33,9 @@ vi.mock('@aws-sdk/client-s3', () => ({
   HeadObjectCommand: class {
     constructor(public input: unknown) {}
   },
+  ListObjectsV2Command: class {
+    constructor(public input: unknown) {}
+  },
 }));
 
 vi.mock('@aws-sdk/s3-request-presigner', () => ({

@@ -19,6 +19,10 @@ export interface UseDrinkingFormOptions {
   stockDraft?: StockDrinkDraft | null;
   /** 在庫からの登録が完了したときの通知（紐づけ解除に使う） */
   onStockDrinkSaved?: () => void;
+  /** 編集対象が既に持っている代表画像キー */
+  existingImageKey?: string | null;
+  /** 編集対象が既に持っている画像キー一覧。追加分はこの後ろに足す */
+  existingImageKeys?: string[];
 }
 
 export interface UseDrinkingFormReturn {
@@ -68,8 +72,18 @@ export function getStockDrinkFormData(draft: StockDrinkDraft): DrinkingFormData 
 }
 
 export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFormReturn {
-  const { recordId, initialData, stockDraft, onStockDrinkSaved } = options ?? {};
+  const {
+    recordId,
+    initialData,
+    stockDraft,
+    onStockDrinkSaved,
+    existingImageKey = null,
+    existingImageKeys,
+  } = options ?? {};
   const isEditMode = recordId !== undefined;
+
+  // 記録に添付できる枚数は全体で決まっているので、追加できるのは残り枠だけ
+  const alreadyAttached = existingImageKeys?.length ?? 0;
 
   const [formData, setFormData] = useState<DrinkingFormData>(
     () => initialData ?? (stockDraft ? getStockDrinkFormData(stockDraft) : getInitialDrinkingFormData()),
@@ -79,7 +93,7 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
 
   const { errors, validateField, isValid, clearErrors } = useDrinkingValidation();
   const { saveDrinking, updateDrinking, isSaving } = useDrinkingStorage();
-  const imageUpload = useImageUpload();
+  const imageUpload = useImageUpload({ alreadyAttached });
 
   const isFormValid = Object.keys(errors).length === 0;
 
@@ -124,10 +138,28 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
         return;
       }
 
-      // 編集モード: 画像は対象外。テキスト・メタ情報のみ更新し、フォームはリセットしない
+      // 編集モード: 画像を足していれば既存の後ろに追記する。フォームはリセットしない
       if (isEditMode) {
-        const result = await updateDrinking(recordId, formData);
+        let imageOptions: { imageKey: string | null; imageKeys: string[] } | undefined;
+
+        if (imageUpload.imageFiles.length > 0) {
+          const uploaded = await imageUpload.uploadImages('drinking', recordId);
+          if (uploaded.length === 0) {
+            // アップロード失敗 → エラーは useImageUpload 側で設定済み、入力内容を保持
+            return;
+          }
+          imageOptions = {
+            // 代表画像は既存を優先する。差し替えではなく追加なので、
+            // 一覧のサムネイルが勝手に入れ替わらないようにする
+            imageKey: existingImageKey ?? uploaded[0] ?? null,
+            imageKeys: [...(existingImageKeys ?? []), ...uploaded],
+          };
+        }
+
+        const result = await updateDrinking(recordId, formData, imageOptions);
         if (result.success) {
+          // 追記済みのファイルを残すと、次の保存で二重に足される
+          if (imageOptions) imageUpload.clearImage();
           setSuccessMessage('更新が完了しました');
         } else {
           setErrorMessage(result.error || '更新に失敗しました。もう一度お試しください');
@@ -197,7 +229,20 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
       submittingRef.current = false;
       setIsSubmitting(false);
     }
-  }, [formData, isValid, isEditMode, recordId, saveDrinking, updateDrinking, clearErrors, imageUpload, stockDraft, onStockDrinkSaved]);
+  }, [
+    formData,
+    isValid,
+    isEditMode,
+    recordId,
+    saveDrinking,
+    updateDrinking,
+    clearErrors,
+    imageUpload,
+    stockDraft,
+    onStockDrinkSaved,
+    existingImageKey,
+    existingImageKeys,
+  ]);
 
   return {
     formData,

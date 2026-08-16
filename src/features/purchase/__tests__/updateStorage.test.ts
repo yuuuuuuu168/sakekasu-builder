@@ -54,9 +54,33 @@ describe('usePurchaseStorage.updatePurchase', () => {
     expect(input.purchaseDate).toBe('2026-01-15');
     expect(input.category).toBe('NIHONSHU');
     expect(input.memo).toBe('メモ');
-    // 画像フィールドは更新対象外
+    // 画像を指定しない更新では画像の項目自体を送らない。
+    // 送ると更新式が既存のキーを上書きしてしまう
     expect('imageKey' in input).toBe(false);
     expect('imageKeys' in input).toBe(false);
+  });
+
+  // Issue #142: 登録後に写真を足せるようにした
+  it('画像を指定した更新では imageKey と imageKeys を送る', async () => {
+    const { result } = renderHook(() => usePurchaseStorage());
+
+    await act(async () => {
+      const res = await result.current.updatePurchase('p1', formData, {
+        imageKey: 'sub-1/purchase/p1/first.jpg',
+        imageKeys: ['sub-1/purchase/p1/first.jpg', 'sub-1/purchase/p1/added.jpg'],
+      });
+      expect(res.success).toBe(true);
+    });
+
+    const callArgs = mockGraphqlFn.mock.calls[0][0] as {
+      variables: { input: Record<string, unknown> };
+    };
+    const input = callArgs.variables.input;
+    expect(input.imageKey).toBe('sub-1/purchase/p1/first.jpg');
+    expect(input.imageKeys).toEqual([
+      'sub-1/purchase/p1/first.jpg',
+      'sub-1/purchase/p1/added.jpg',
+    ]);
   });
 
   it('GraphQLエラー時は失敗を返す', async () => {
