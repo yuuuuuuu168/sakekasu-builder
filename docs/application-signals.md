@@ -6,7 +6,7 @@
 
 ## いま入っているもの / 入っていないもの
 
-**ADOT による計装はまだ入っていない。** 一度入れて本番を止めたため切り戻してある（PR #114）。経緯と再挑戦の手順は Issue #86 のコメントにまとめてある。
+**計装は対象の2関数に入っている。** 一度入れて本番を止めて切り戻し（PR #114）、原因を突き止めてから `ocr-analyzer`（PR #126、2026-08-10）、`presigned-url`（2026-08-16）の順に入れ直した。経緯は Issue #86 のコメントにまとめてある。
 
 | 要素 | 状態 |
 |------|------|
@@ -14,9 +14,9 @@
 | サービス検出（Discovery） | 有効（同上） |
 | X-Ray アクティブトレース | 有効（`ocr-analyzer` / `presigned-url`） |
 | アーキテクチャの明示（`x86_64`） | 入っている |
-| レイヤー・起動ラッパー・IAM ポリシー | `ocr-analyzer` のみ入っている（`presigned-url` はまだ） |
+| レイヤー・起動ラッパー・IAM ポリシー | `ocr-analyzer`（2026-08-10）と `presigned-url`（2026-08-16）の両方に入っている |
 
-そのため、`presigned-url` について見えるのは Lambda 標準メトリクス由来のエラー率と実行時間、それに X-Ray の呼び出し単位のトレースまで。**下流ごとの内訳（Bedrock に何秒、S3 に何秒）は計装した関数でしか見えない。**
+下流ごとの内訳（Bedrock に何秒、S3 に何秒）が見えるのは計装した関数だけなので、監視系の4関数については従来どおり Lambda 標準メトリクス由来のエラー率と実行時間までになる。
 
 なお、計装が無い状態でもエラー率は見えるので、それで既存のバグを1件見つけている（Issue #115）。
 
@@ -44,9 +44,21 @@
 
 監視系（health-check / slack-notifier / sommelier-canary / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増える。
 
-**1関数ずつ入れる。** 前回は2つ同時に入れて両方止め、画像アップロードの動線ごと失った。先に `ocr-analyzer` へ入れてある。OCR が落ちても記録の登録自体は通る（解析だけが失敗する）ので、被害が動線を塞がない側から試している。`presigned-url` へ広げるのは OCR で様子を見てから。
+**1関数ずつ入れた。** 前回は2つ同時に入れて両方止め、画像アップロードの動線ごと失った。今回は `ocr-analyzer`（2026-08-10）を先にして6日ぶん動かし、そのあと `presigned-url`（2026-08-16）に広げている。OCR が落ちても記録の登録自体は通る（解析だけが失敗する）ので、被害が動線を塞がない側から試した。
 
-`api-stack.test.ts` にレイヤーとラッパーの組み合わせを固定するテストを置いてある。`presigned-url` に広げるときは「presigned-url にはまだ計装を入れていない」というテストを意図的に書き換えることになるので、変更が目に入る。
+対象を増やすときも同じにする。3つ目を足す理由が出てきたら、既存の2つが安定していることを確かめてから1つずつ。
+
+計装の3点（レイヤー・起動ラッパー・IAM ポリシー）は `api-stack.ts` の `enableApplicationSignals()` にまとめてある。関数ごとに3行を書き写す形だと、増やすときに1つ書き落とす。落としたときの壊れ方は3通りで、レイヤーを落とすと関数が起動しなくなる（PR #110 がこれ）。
+
+テストは3つ置いてある。
+
+| テスト | 見ているもの |
+|---|---|
+| `api-stack.test.ts` の「レイヤーとラッパーが揃っている」 | 対象2関数それぞれのレイヤーとラッパーの組み合わせ |
+| `api-stack.test.ts` の「起動ラッパーを指定した関数には必ずレイヤーが付いている」 | 片方だけの状態（起動不能）が入り込んでいないか。関数を限定せず横断で見る |
+| `lambda-config.test.ts` の「対象の2関数だけに入っている」 | 監視系など、意図的に外した関数へ広がっていないか |
+
+最後の1つは全スタックを合成して見ているので、対象を増やすときはここが落ちる。この文書の判断（監視系は入れない）と一緒に更新すること。
 
 ### サービス検出と Transaction Search（アカウント単位・CDK 管理外）
 
@@ -85,18 +97,19 @@ AWS_PROFILE=<profile> aws application-signals start-discovery --region ap-northe
 
 ## デプロイ後にやること
 
-main へマージすれば GitHub Actions が `cdk deploy --all` を実行する。手動デプロイは不要。
+main へマージすれば GitHub Actions が自動デプロイする。手動デプロイは不要。
 
 **ただしデプロイの成功と関数が起動することは別。** 計装を入れたら、必ず実際のリクエストを1回通して `Runtime.ExitError` が出ないことを確かめる。前回はここを飛ばして本番を止めた。
 
 ```bash
-AWS_PROFILE=sakekasu-builder aws logs tail /aws/lambda/dev-sakekasu-ocr-analyzer \
-  --since 5m --region ap-northeast-1 | grep -E "ExitError|does not exist"
+for fn in dev-sakekasu-presigned-url dev-sakekasu-ocr-analyzer; do
+  echo "--- $fn"
+  AWS_PROFILE=sakekasu-builder aws logs tail "/aws/lambda/$fn" \
+    --since 5m --region ap-northeast-1 | grep -E "ExitError|does not exist"
+done
 ```
 
-### いまできること（計装が無くても）
-
-- **ログの保持期間を設定する**（下記）。Transaction Search は既に有効なので、ロググループはもう存在する
+`presigned-url` は画像アップロードの入口なので、通すのはアプリから実際に1枚アップロードするのがいちばん早い。URL の発行が通れば起動している。ここが落ちていると記録そのものが作れなくなるため、**ログを見るのはデプロイ完了の通知を待ってからではなく、その場で**。
 
 ### 計装を入れたあとにやること
 
@@ -170,7 +183,7 @@ AWS_PROFILE=sakekasu-builder aws logs start-query \
 | `health-check` / `slack-notifier` / `sommelier-canary` / `signup-notifier` | 意図的に対象外 |
 | `LogRetention` × 2 / `CustomAWSCDKOpenIdConnectProv` | CDK が裏で作るカスタムリソース。対象外 |
 
-計装が入ったあとの姿は「4 instrumented / 6 not」あたりになる。
+2関数が入ったので「4 instrumented / 6 not」あたりに落ち着く見込み（ソムリエと合わせて4）。反映には時間ウィンドウぶんの遅れがある。
 
 ### カナリアと RUM について
 
@@ -197,11 +210,39 @@ AWS_PROFILE=sakekasu-builder aws application-signals list-services \
   --output table
 ```
 
+## 計装の代償（OCR での実測）
+
+2026-08-10 に OCR で計装前後を比べた値。
+
+| | 計装前 | 計装後 |
+|---|---|---|
+| コールドスタート（Init Duration） | 638 ms | 1241 ms（+602 ms） |
+| Max Memory Used | 159 MB | 160 MB |
+
+メモリはほぼ変わらない。効くのはコールドスタートで、レイヤーが展開後 9.7MB あるぶん初期化が伸びる。
+
+**`presigned-url` では悪化幅がこれより大きくなりうる。** OCR はメモリ 512MB だが、`presigned-url` は既定の 128MB で、Lambda は割り当てメモリに比例して CPU を配るため初期化に時間がかかる。しかもこちらは画面の操作を待たせる同期の動線で、コールドスタートがそのまま体感になる（OCR は待つ前提の操作）。
+
+計装を入れたら実測して、許容できなければメモリを増やす。128MB → 512MB で CPU が4倍になり、初期化はおおむねその比で縮む。実行時間は伸びないので、費用（GB-秒）はほぼ変わらない。
+
+```bash
+# 直近のコールドスタートを拾う。REPORT 行の Init Duration がある呼び出しだけ
+AWS_PROFILE=sakekasu-builder aws logs filter-log-events \
+  --log-group-name /aws/lambda/dev-sakekasu-presigned-url \
+  --start-time $(( ($(date +%s) - 86400) * 1000 )) \
+  --filter-pattern '"Init Duration"' --region ap-northeast-1 \
+  --query 'events[].message' --output text
+```
+
+比べる相手は計装前の値。同じコマンドを**マージ前**に流して控えておくと差が取れる。取り忘れたら、CloudWatch Logs Insights で計装が入った時刻をまたいで `Init Duration` を並べる。
+
 ## SLO をまだ入れていない理由
 
 Issue #86 には SLO の定義とエラーバジェット消費アラームも挙げてあるが、この変更には含めていない。
 
 SLO はしきい値（可用性 99%、レイテンシー p90 ≤ 15s など）を決めないと作れない。その値は実測を見てから決めるものなので、先に計装だけ入れてデータを溜める。当てずっぽうのしきい値で作ると、鳴りっぱなしか鳴らないかのどちらかになり、作り直すことになる。
+
+データが溜まり始めたのは OCR が 2026-08-10、`presigned-url` が 2026-08-16 から。`presigned-url` のぶんが1〜2週間たまるのは 8月末以降になる。
 
 決めるときの材料は Application Signals の「Service detail」に出る p50 / p90 / p99。1〜2週間ぶん見てから、`AWS::ApplicationSignals::ServiceLevelObjective`（CDK では `applicationsignals.CfnServiceLevelObjective`）で定義する。アラームは monitoring スタック側に置く。ApiStack に置くと通知先の SNS を参照して循環参照になる。
 
@@ -234,10 +275,14 @@ AWS_PROFILE=sakekasu-builder aws xray get-indexing-rules --region ap-northeast-1
   ```
 
 - **ESM バンドルは通る見込み（実機確認は計装後）。** 対象の関数は esbuild で ESM の単一ファイル（`index.mjs`）にバンドルしている。レイヤーの `otel-instrument` は `/var/task/*.mjs` の有無で ESM を判定し、Node 20 以上なら `--import /opt/wrapper.mjs` を使う。これは `module.register()` による選択的フックで、レイヤー自身のコメントに「バンドルされたアプリコードの ESM ライブバインディングを壊す `--experimental-loader` を避けるため」と書かれている。加えて CDK は `@aws-sdk/*` を external にするため（合成結果で確認済み。バンドルには import 文しか残っていない）、SDK は実行時に読み込まれフックが刺さる。それでも効かなければ対象関数だけ CJS バンドルに変える
-- **Bedrock のリクエスト本文はスパンに載らない（現構成では）。** `InvokeModel` のフックは body を `JSON.parse` するが、取り出すのは `max_tokens` / `temperature` / `top_p` などの推論パラメータだけで、`messages`（base64 画像）を属性に入れる箇所は無い。ただし**レイヤーには本文キャプチャの仕組み自体はある**。`AGENT_OBSERVABILITY_ENABLED=true` を設定すると `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` が既定で `true` になるので、ソムリエ側の GenAI Observability を広げるなどでこの環境変数を入れるときは、**明示的に `false` を指定すること**。入れないと最大 5MB の画像がスパン属性に載りうる
+- **Bedrock のリクエスト本文はスパンに載らない。** `InvokeModel` のフックは body を `JSON.parse` するが、取り出すのは `max_tokens` / `temperature` / `top_p` などの推論パラメータだけで、`messages`（base64 画像）を属性に入れる箇所は無い。ただし**レイヤーには本文キャプチャの仕組み自体はある**。`AGENT_OBSERVABILITY_ENABLED=true` を設定すると `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` が既定で `true` になり、最大 5MB の画像がスパン属性に載りうる。
+
+  **これは `enableApplicationSignals()` が `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=false` を必ず入れることで塞いである。** 以前はこの文書に「入れるときは明示的に false を指定すること」と書いてあるだけで、`AGENT_OBSERVABILITY_ENABLED` を足す人がこの段落を読んでいることが唯一の歯止めになっていた。ソムリエ側の GenAI Observability を広げるときも、こちらを外さない限り本文は載らない
 - **Bedrock のフックが毎回 5MB の JSON をパースする。** 属性を取り出すために `JSON.parse(commandInput.body)` が呼び出しごとに走る。セキュリティの問題ではないが遅延要因になる。レイテンシーを見るときはレイヤー読み込みぶんと合わせて見込む
-- **コールドスタートが悪化する。** レイヤーは展開後 9.7MB ある。OCR は待つ前提の操作なので許容範囲とみているが、体感が悪くなったらメモリ増量で緩和する
-- **レイヤーの ARN にはバージョンが埋まっている**（`AWSOpenTelemetryDistroJs:15`）。上げるときは ARN ごと差し替える。自動で追随する仕組みは入れていないので、たまに新しいバージョンが出ていないかを見る。差し替えるときは中身の展開もやり直すこと
+- **コールドスタートが悪化する。** レイヤーは展開後 9.7MB ある。OCR の実測で +602ms。`presigned-url` は同期の動線でメモリも少ないぶん、影響が出やすい（「計装の代償」を参照）
+- **レイヤーの ARN にはバージョンが埋まっている**（`AWSOpenTelemetryDistroJs:15`）。上げるときは ARN ごと差し替える。自動で追随する仕組みは入れていないので、たまに新しいバージョンが出ていないかを見る。差し替えるときは中身の展開もやり直すこと。
+
+  ARN は `api-stack.test.ts` に**提供元アカウント（`615299751070`）とバージョンまで込みで**書き写してある。レイヤーはアプリと同じ実行環境でアプリコードより先に動き、実行ロールの認証情報にも環境変数にも届くため、名前の部分一致だけで見ていると提供元の取り違えを緑のまま通してしまう。差し替えるときは実装とテストの両方を直すことになる（片方だけだと落ちる）
 
   ```bash
   # 存在するバージョンを探す（list-layer-versions はクロスアカウントでは権限が要る）

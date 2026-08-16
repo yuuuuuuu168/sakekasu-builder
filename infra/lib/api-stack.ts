@@ -116,6 +116,101 @@ const BEDROCK_INFERENCE_REGIONS = ['ap-northeast-1', 'ap-northeast-3'];
 const OCR_RESERVED_CONCURRENCY = 20;
 
 /**
+ * Application Signals の計装を関数に入れる（Issue #86）。
+ *
+ * レイヤー・起動ラッパー・IAM ポリシーの3点は**セットでしか意味を持たない**。
+ * 欠けたときの壊れ方がそれぞれ違い、しかも1つは起動不能になる。
+ *
+ * | 欠けるもの | 起きること |
+ * |---|---|
+ * | レイヤー | ラッパーの解決に失敗し `Runtime.ExitError`。関数が 100% 落ちる |
+ * | ラッパー | レイヤーは載るが計装が始まらない。何も出ない |
+ * | IAM | 計装は動くがテレメトリを送れない。やはり何も出ない |
+ *
+ * 呼び出し側で3行を並べる形にしていると、関数を増やすときに1つ書き落とす。
+ * PR #110 で画像アップロードを全滅させたのは1つ目の組み合わせなので、
+ * 3点を1か所に閉じて、関数ごとに書き写さなくて済むようにする。
+ *
+ * export しているのはテストから直接呼ぶため。スタック経由では通らない分岐
+ * （外部ロールを渡した場合）を確かめる手段が他に無い。
+ *
+ * @param fn 計装する関数
+ * @param id レイヤー参照の construct ID に使う接頭辞。関数ごとに一意にする
+ */
+export function enableApplicationSignals(fn: NodejsFunction, id: string): void {
+  // 何かを足す前にロールの素性を確かめる（PR #153 のレビュー指摘）。
+  //
+  // `fn.role` が undefined になることは無い（NodejsFunction は渡されなければ
+  // ロールを作る。実測で確認済み）が、`Role.fromRoleArn` で外から持ってきた
+  // ロールを渡された場合は `addManagedPolicy` が**何も言わずに捨てられる**。
+  // 合成は成功し、レイヤーもラッパーも載るので、関数は起動するのに
+  // テレメトリだけ出ない。3つの壊れ方のうち一番見つけにくいものなので、
+  // 合成時に落とす。
+  //
+  // **検査を先頭に置くこと**に意味がある。construct への変更は取り消せない
+  // ので、レイヤーや環境変数を足したあとで落とすと、例外を握り潰した呼び出し元に
+  // 「レイヤーは載っているのに権限だけ無い」半端な関数が残る。ここで返れば
+  // 関数は手つかずのまま。
+  //
+  // いまの2つの呼び出し元はどちらもロールを渡していないため、この分岐には
+  // 入らない。将来ロールを外から渡す関数へ広げたときに気づけるようにしておく
+  if (!cdk.aws_iam.Role.isRole(fn.role)) {
+    throw new Error(
+      `${id}: 実行ロールがこのスタックで作られたものではないため、Application Signals の` +
+        '管理ポリシーを貼れない。外部のロールに addManagedPolicy は黙って捨てられ、' +
+        '関数は起動するのにテレメトリだけ出ない状態になる',
+    );
+  }
+
+  fn.addLayers(
+    LayerVersion.fromLayerVersionArn(
+      fn,
+      `${id}ApplicationSignalsLayer`,
+      APPLICATION_SIGNALS_NODEJS_LAYER_ARN,
+    ),
+  );
+  // レイヤー v15 に実在するラッパー。汎用 ADOT の /opt/otel-handler ではない
+  fn.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/otel-instrument');
+  // Bedrock のリクエスト本文をスパンに載せない（PR #153 のレビュー指摘）。
+  //
+  // レイヤーには本文キャプチャの仕組みがあり、`AGENT_OBSERVABILITY_ENABLED=true`
+  // を入れると既定で有効になる。OCR の本文には base64 の画像（1枚あたり最大
+  // 3.75MB）が入っているので、有効になるとそれがスパン属性として
+  // `aws/spans` に流れ込む。
+  //
+  // いまこのアプリのどこにも `AGENT_OBSERVABILITY_ENABLED` は無い。ただし
+  // ソムリエ側の GenAI Observability を広げるときに入れる可能性があり、
+  // そのときは「入れる人が docs を読んでいること」だけが歯止めになる。
+  // 明示的に false を置いておけば、その順番に関係なく載らない。
+  //
+  // Bedrock を呼ばない関数（presigned-url）では効き目が無いが、害も無い。
+  // 関数ごとに付け外しすると、次に足す関数で判断をやり直すことになる
+  fn.addEnvironment('OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT', 'false');
+  // テレメトリを書くための権限。中身は以下の2文だけ（v1、2024-10-16 以降変更なし）。
+  //
+  //   xray:PutTraceSegments                                  → Resource: *
+  //   logs:CreateLogGroup / CreateLogStream / PutLogEvents   → /aws/application-signals/data
+  //
+  // どちらも aws:ResourceAccount = ${aws:PrincipalAccount} の条件付きで自アカウントに閉じる。
+  //
+  // このポリシーが cloudwatch:PutMetricData を無制限に与える、という指摘が
+  // レビューで2度出ているが、PutMetricData は含まれていない。監視スタックが
+  // namespace 条件を付けているのと比べて緩い、という比較も対象が無いため成立しない。
+  //
+  // アプリのロールには Permissions Boundary が付く（Issue #150）。境界が
+  // 外しているのは iam / sts / organizations / account だけなので、
+  // xray と logs はどちらも天井の内側にある。
+  // https://docs.aws.amazon.com/aws-managed-policy/latest/reference/CloudWatchLambdaApplicationSignalsExecutionRolePolicy.html
+  //
+  // ロールが CDK 管理のものであることは先頭で確かめてある
+  fn.role.addManagedPolicy(
+    cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
+      'CloudWatchLambdaApplicationSignalsExecutionRolePolicy',
+    ),
+  );
+}
+
+/**
  * 推論プロファイルIDと基盤モデルIDの対応を検査する。
  *
  * システム定義の推論プロファイルIDは「<接頭辞>.<基盤モデルID>」の形をしていて、
@@ -325,6 +420,18 @@ export class ApiStack extends cdk.Stack {
       },
     );
 
+    // Application Signals の計装（Issue #86）。
+    //
+    // OCR で先に入れて確かめたのと同じ組み合わせ（レイヤー v15 / Node.js 22 /
+    // ESM バンドル / x86_64）なので、前回の未知だった部分はもう残っていない。
+    //
+    // ただしこちらは**同期の動線**で、コールドスタートがそのまま体感になる。
+    // OCR（512MB）での実測は Init Duration が 638ms → 1241ms。この関数は
+    // メモリが既定の 128MB でその分 CPU が少ないため、悪化幅はこれより
+    // 大きくなりうる。悪くなっていたらメモリを増やして緩和する（判断材料は
+    // docs/application-signals.md の計測手順）
+    enableApplicationSignals(this.presignedUrlFunction, 'PresignedUrl');
+
     // Lambda に S3 読み書き権限を付与
     this.imageBucket.grantReadWrite(this.presignedUrlFunction);
 
@@ -403,35 +510,11 @@ export class ApiStack extends cdk.Stack {
 
     // Application Signals の計装（Issue #86）。
     //
-    // まず OCR にだけ入れる。前回（PR #110）は presigned-url と同時に入れて
-    // 両方止め、画像アップロードの動線ごと失った。OCR が落ちても記録の登録
-    // 自体は通る（解析だけが失敗する）ので、被害が動線を塞がない側から試す。
-    // presigned-url へ広げるのは、OCR で一日ぶん様子を見てから。
-    this.ocrAnalyzerFunction.addLayers(
-      LayerVersion.fromLayerVersionArn(
-        this,
-        'OcrApplicationSignalsLayer',
-        APPLICATION_SIGNALS_NODEJS_LAYER_ARN,
-      ),
-    );
-    // レイヤー v15 に実在するラッパー。汎用 ADOT の /opt/otel-handler ではない
-    this.ocrAnalyzerFunction.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/otel-instrument');
-    // テレメトリを書くための権限。中身は以下の2文だけ（v1、2024-10-16 以降変更なし）。
-    //
-    //   xray:PutTraceSegments                                  → Resource: *
-    //   logs:CreateLogGroup / CreateLogStream / PutLogEvents   → /aws/application-signals/data
-    //
-    // どちらも aws:ResourceAccount = ${aws:PrincipalAccount} の条件付きで自アカウントに閉じる。
-    //
-    // このポリシーが cloudwatch:PutMetricData を無制限に与える、という指摘が
-    // レビューで2度出ているが、PutMetricData は含まれていない。監視スタックが
-    // namespace 条件を付けているのと比べて緩い、という比較も対象が無いため成立しない。
-    // https://docs.aws.amazon.com/aws-managed-policy/latest/reference/CloudWatchLambdaApplicationSignalsExecutionRolePolicy.html
-    this.ocrAnalyzerFunction.role?.addManagedPolicy(
-      cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
-        'CloudWatchLambdaApplicationSignalsExecutionRolePolicy',
-      ),
-    );
+    // 2026-08-10 に OCR へ先に入れ、6日ぶん動かしてから presigned-url へ広げた。
+    // 順に入れたのは、PR #110 で2関数へ同時に入れて両方止め、画像アップロードの
+    // 動線ごと失ったため。OCR が落ちても記録の登録自体は通る（解析だけが失敗する）
+    // ので、被害が動線を塞がない側から試している。
+    enableApplicationSignals(this.ocrAnalyzerFunction, 'Ocr');
 
     // S3 読み取り権限
     this.imageBucket.grantRead(this.ocrAnalyzerFunction);

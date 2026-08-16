@@ -3,11 +3,40 @@ import * as cdk from 'aws-cdk-lib';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import * as url from 'node:url';
+import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
+import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import { AuthStack } from '../lib/auth-stack.js';
 import {
   ApiStack,
   assertInferenceProfileMatchesFoundationModel,
+  enableApplicationSignals,
 } from '../lib/api-stack.js';
+
+/**
+ * 関数名から実行ロールのリソース定義を引く。
+ *
+ * `hasResourceProperties('AWS::IAM::Role', ...)` は型が一致するリソースを
+ * 総なめして1つでも当たれば通る。ロールに何かが付いていることを確かめたい
+ * 場面では、隣の関数のロールで通ってしまい検査にならない
+ */
+type RoleResource = { Properties?: { ManagedPolicyArns?: unknown } };
+
+function executionRoleOf(template: Template, functionName: string): RoleResource {
+  const [fn] = Object.values(
+    template.findResources('AWS::Lambda::Function', {
+      Properties: { FunctionName: functionName },
+    }),
+  );
+  expect(fn, `${functionName} が見つからない`).toBeDefined();
+
+  // 実行ロールは Fn::GetAtt で参照される。[論理ID, 'Arn'] の形
+  const roleLogicalId = fn.Properties?.Role?.['Fn::GetAtt']?.[0];
+  expect(roleLogicalId, `${functionName} の Role が論理IDで参照されていない`).toBeDefined();
+
+  const role = template.findResources('AWS::IAM::Role')[roleLogicalId];
+  expect(role, `${functionName} の実行ロール ${roleLogicalId} が見つからない`).toBeDefined();
+  return role;
+}
 
 describe('ApiStack', () => {
   let template: Template;
@@ -491,6 +520,24 @@ describe('ApiStack', () => {
   describe('Application Signals の計装', () => {
     const targets = ['dev-sakekasu-ocr-analyzer', 'dev-sakekasu-presigned-url'];
 
+    /**
+     * 期待するレイヤーの ARN。
+     *
+     * 実装から import せず値を書き写している。実装と同じ定数を参照すると
+     * 「実装を変えたらテストも一緒に変わる」ので検査にならない
+     * （`lambda-config.test.ts` と同じ考え方）。
+     *
+     * アカウント ID とバージョンまで固定するのは、レイヤーが**アプリと同じ
+     * 実行環境で、アプリコードより先に動く**ため。差し替わると実行ロールの
+     * 認証情報にも環境変数にも届く。名前の部分一致だけで見ていると、
+     * 提供元アカウントの取り違えを緑のまま通してしまう（PR #153 のレビュー指摘）。
+     *
+     * 上げるときは ARN を書き換えるだけで済ませず、中身を展開して
+     * `otel-instrument` があることを確かめること（手順は docs/application-signals.md）
+     */
+    const EXPECTED_LAYER_ARN =
+      'arn:aws:lambda:ap-northeast-1:615299751070:layer:AWSOpenTelemetryDistroJs:15';
+
     it.each(targets)('%s の X-Ray アクティブトレースが有効である', (functionName) => {
       // レイヤーに依存せず Lambda 単体で動くぶん。計装を外しても残している
       template.hasResourceProperties('AWS::Lambda::Function', {
@@ -538,10 +585,11 @@ describe('ApiStack', () => {
     // - aws-otel-nodejs-amd64-ver-*（汎用 ADOT）        → /opt/otel-handler
     // 前回は後者のレイヤーに前者のラッパー名を組み合わせて落ちた。
     // ラッパー名だけを見ても正誤は決まらないので、レイヤーとの組み合わせで固定する。
-    it('OCR は Application Signals のレイヤーとラッパーが揃っている', () => {
+    it.each(targets)('%s は Application Signals のレイヤーとラッパーが揃っている', (functionName) => {
       template.hasResourceProperties('AWS::Lambda::Function', {
-        FunctionName: 'dev-sakekasu-ocr-analyzer',
-        Layers: Match.arrayWith([Match.stringLikeRegexp('AWSOpenTelemetryDistroJs')]),
+        FunctionName: functionName,
+        // 提供元アカウントとバージョンまで込みで固定する
+        Layers: [EXPECTED_LAYER_ARN],
         Environment: {
           Variables: Match.objectLike({
             AWS_LAMBDA_EXEC_WRAPPER: '/opt/otel-instrument',
@@ -550,35 +598,80 @@ describe('ApiStack', () => {
       });
     });
 
-    it('OCR の実行ロールに Application Signals の権限が付いている', () => {
-      // レイヤーが起動してもこの権限が無いとテレメトリが送れず、
-      // 「動いているのに何も出ない」状態になる
-      template.hasResourceProperties('AWS::IAM::Role', {
-        ManagedPolicyArns: Match.arrayWith([
-          Match.objectLike({
-            'Fn::Join': Match.arrayWith([
-              Match.arrayWith([
-                Match.stringLikeRegexp(
-                  'CloudWatchLambdaApplicationSignalsExecutionRolePolicy',
-                ),
-              ]),
-            ]),
+    // レイヤーには Bedrock のリクエスト本文をスパンに載せる仕組みがあり、
+    // `AGENT_OBSERVABILITY_ENABLED=true` が入ると既定で有効になる。OCR の
+    // 本文には base64 の画像が入っているので、明示的に切っておく。
+    // 文書だけの取り決めにすると、環境変数を足す人が読んでいることに賭けることになる
+    it.each(targets)('%s は GenAI の本文キャプチャを明示的に切っている', (functionName) => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: functionName,
+        Environment: {
+          Variables: Match.objectLike({
+            OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: 'false',
           }),
-        ]),
+        },
       });
     });
 
-    // 前回は2関数へ同時に入れて両方止め、画像アップロードの動線ごと失った。
-    // OCR で様子を見てから広げる。広げるときにこのテストを書き換える
-    it('presigned-url にはまだ計装を入れていない', () => {
-      const functions = template.findResources('AWS::Lambda::Function', {
-        Properties: { FunctionName: 'dev-sakekasu-presigned-url' },
-      });
-      const [fn] = Object.values(functions);
+    it.each(targets)('%s の実行ロールに Application Signals の権限が付いている', (functionName) => {
+      // レイヤーが起動してもこの権限が無いとテレメトリが送れず、
+      // 「動いているのに何も出ない」状態になる。
+      //
+      // ロールは関数から引く。AWS::IAM::Role を型だけで探すと、どれか1つの
+      // ロールに付いていれば通ってしまい、関数を増やしたときの付け忘れを
+      // 素通りさせる
+      const role = executionRoleOf(template, functionName);
 
-      expect(fn).toBeDefined();
-      expect(fn.Properties?.Environment?.Variables?.AWS_LAMBDA_EXEC_WRAPPER).toBeUndefined();
-      expect(fn.Properties?.Layers ?? []).toHaveLength(0);
+      expect(
+        JSON.stringify(role.Properties?.ManagedPolicyArns ?? []),
+        `${functionName} の実行ロールに Application Signals の管理ポリシーが無い`,
+      ).toContain('CloudWatchLambdaApplicationSignalsExecutionRolePolicy');
+    });
+
+    // 外から持ってきたロールに addManagedPolicy を打つと、CDK は**何も言わずに
+    // 捨てる**（実測で確認）。合成は成功し、レイヤーもラッパーも載るので、
+    // 関数は起動するのにテレメトリだけ出ない。3つの壊れ方のうち一番見つけにくい
+    // ものなので、合成時に落ちることを固定する（PR #153 のレビュー指摘）
+    it('外部から持ってきたロールの関数には計装を入れさせない', () => {
+      const app = new cdk.App();
+      const stack = new cdk.Stack(app, 'RoleGuardStack', {
+        env: { account: '111122223333', region: 'ap-northeast-1' },
+      });
+      const fn = new NodejsFunction(stack, 'ImportedRoleFunction', {
+        runtime: Runtime.NODEJS_22_X,
+        entry: path.join(
+          path.dirname(url.fileURLToPath(import.meta.url)),
+          '../lambda/presigned-url/index.ts',
+        ),
+        handler: 'handler',
+        role: cdk.aws_iam.Role.fromRoleArn(
+          stack,
+          'ExternalRole',
+          'arn:aws:iam::111122223333:role/external',
+        ),
+      });
+
+      expect(() => enableApplicationSignals(fn, 'ImportedRole')).toThrow(
+        /テレメトリだけ出ない/,
+      );
+
+      // 落ちるだけでなく、関数が手つかずで残ることまで見る（PR #153 のレビュー指摘）。
+      //
+      // construct への変更は取り消せないので、検査より先にレイヤーや環境変数を
+      // 足していると、例外を握り潰した呼び出し元に「レイヤーは載っているのに
+      // 権限だけ無い」関数が残る。それは計装が壊れた状態そのもの
+      const guardTemplate = Template.fromStack(stack);
+      const [synthesized] = Object.values(
+        guardTemplate.findResources('AWS::Lambda::Function'),
+      );
+
+      expect(synthesized.Properties?.Layers ?? [], 'レイヤーが載ってしまっている').toHaveLength(
+        0,
+      );
+      expect(
+        synthesized.Properties?.Environment?.Variables?.AWS_LAMBDA_EXEC_WRAPPER,
+        '起動ラッパーが設定されてしまっている',
+      ).toBeUndefined();
     });
 
     // ラッパーを指定した関数には必ずレイヤーが要る。片方だけの状態が
