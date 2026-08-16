@@ -13,6 +13,53 @@ if [ "$remote" != "true" ] && [ "$remote" != "1" ]; then
   exit 0
 fi
 
+# クラウドのコンテナには AWS CLI が入っていない（Issue #162）。使い捨てのコンテナなので
+# 毎セッション導入が要る。SSO のデバイスコードフローは v1 では動かないため、
+# 「入っているか」ではなく「v2 が入っているか」で判定する。
+# 環境キャッシュから再開したセッションには /usr/local/bin/aws が残っている場合がある。
+ensure_aws_cli_v2() {
+  if command -v aws > /dev/null 2>&1; then
+    # v1 はバージョンを stderr に出すため 2>&1 でまとめて受ける
+    version=$(aws --version 2>&1 || true)
+    case "$version" in
+      aws-cli/2.*)
+        echo "AWS CLI already installed: $version"
+        return 0
+        ;;
+      *)
+        echo "Found non-v2 AWS CLI ($version). Installing v2."
+        ;;
+    esac
+  fi
+
+  case "$(uname -m)" in
+    x86_64) arch=x86_64 ;;
+    aarch64 | arm64) arch=aarch64 ;;
+    *)
+      echo "Unsupported architecture: $(uname -m)" >&2
+      return 1
+      ;;
+  esac
+
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+
+  echo "Installing AWS CLI v2 ($arch)..."
+  curl -fsSL -o "$tmp/awscliv2.zip" "https://awscli.amazonaws.com/awscli-exe-linux-$arch.zip"
+  unzip -q "$tmp/awscliv2.zip" -d "$tmp"
+  # --update は既存インストールの有無にかかわらず通る
+  "$tmp/aws/install" --update
+
+  rm -rf "$tmp"
+  trap - EXIT
+
+  # 直前まで aws が無かった場合、シェルが「見つからない」を覚えているため消す
+  hash -r
+  echo "AWS CLI installed: $(aws --version 2>&1)"
+}
+
+ensure_aws_cli_v2
+
 mkdir -p ~/.aws
 
 # ガードをすり抜けた場合の保険。上書き前に必ず退避する

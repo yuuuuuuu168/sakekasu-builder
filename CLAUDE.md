@@ -10,7 +10,7 @@
 
 AWS環境の確認が必要になったら、次の手順で認証を依頼する。
 
-1. `bash scripts/setup-aws-profile.sh` を実行してプロファイルを配置する（未実行の場合のみ）
+1. `bash scripts/setup-aws-profile.sh` を実行して AWS CLI v2 の導入とプロファイル配置をする（未実行の場合のみ）
 2. `aws sso login --profile verify --use-device-code` を実行する
 3. 表示された確認URLとコードをそのままユーザーに提示し、承認完了を待ってから続行する
 4. 以降のAWS CLI操作には必ず `--profile verify` を付ける

@@ -36,6 +36,7 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 ## AWS の確認作業（verify プロファイル）
 
 - [scripts/setup-aws-profile.sh](../scripts/setup-aws-profile.sh) が `~/.aws/config` に `verify` プロファイルを書き出す。認証は毎セッション `aws sso login --profile verify --use-device-code` で取得し、長期キーは VM にもリポジトリにも置かない
+- クラウドのコンテナには AWS CLI が入っていないため、同じスクリプトが先に v2 を導入する（v2 が入っていれば飛ばす）。SSO のデバイスコードフローは v1 では動かないので、有無ではなくバージョンで判定している。SessionStart フックではなくこちらに置いたのは、AWS を触らないセッションにまで 70MB 超のダウンロードを負わせないため
 - 参照する Permission Set は `AgentVerifyAccess`。作成手順と権限の考え方は [agent-verify-permission-set.md](agent-verify-permission-set.md) にまとめてある
 - このスクリプトも `$CLAUDE_CODE_REMOTE` を見てクラウド VM でだけ動く。ローカルの `~/.aws/config` を上書きしないため
 - 変更操作は [scripts/deny-aws-writes.sh](../scripts/deny-aws-writes.sh)（`PreToolUse` フック）が止める。読み取り操作だけを通す許可リスト方式で、`get-` / `list-` / `describe-` などの接頭辞と、`sso login` / `logs start-query` / `s3 ls` のような明示リストに載るものだけが通る。`invoke` や `assume-role` のように動詞が read でも write でもない操作を数え漏らさないため、拒否リストではなく許可リストにしている
