@@ -164,19 +164,31 @@ type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
  * 形式ごとの先頭バイト（Issue #119）。
  *
  * WebP だけは離れた2区間を見る必要がある（`RIFF` + 4バイトの長さ + `WEBP`）ため、
- * 位置つきの区間の集まりとして持つ
+ * 位置つきの区間の集まりとして持つ。同じ形式に複数の版がある GIF は、
+ * 版ごとに別の項目として並べる（先に一致したものを採る）
  */
 const IMAGE_SIGNATURES: {
   mediaType: ImageMediaType;
   segments: { offset: number; bytes: readonly number[] }[];
 }[] = [
+  // JPEG は SOI（FF D8）+ 次のマーカーの開始（FF）まで。4バイト目のマーカー種別は
+  // 見ない。JFIF（E0）と Exif（E1）以外に、量子化テーブルから始まるもの（DB）や
+  // Adobe の APP14（EE）も正当な JPEG なので、そこまで縛ると本物を弾く
   { mediaType: 'image/jpeg', segments: [{ offset: 0, bytes: [0xff, 0xd8, 0xff] }] },
   {
     mediaType: 'image/png',
     segments: [{ offset: 0, bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] }],
   },
-  // GIF87a / GIF89a のどちらも通す
-  { mediaType: 'image/gif', segments: [{ offset: 0, bytes: [0x47, 0x49, 0x46, 0x38] }] },
+  // GIF の版は "GIF87a" と "GIF89a" の2つだけ。`GIF8` までで切ると、
+  // 続く2バイトが何であっても通ってしまう
+  {
+    mediaType: 'image/gif',
+    segments: [{ offset: 0, bytes: [0x47, 0x49, 0x46, 0x38, 0x37, 0x61] }], // "GIF87a"
+  },
+  {
+    mediaType: 'image/gif',
+    segments: [{ offset: 0, bytes: [0x47, 0x49, 0x46, 0x38, 0x39, 0x61] }], // "GIF89a"
+  },
   {
     mediaType: 'image/webp',
     segments: [
