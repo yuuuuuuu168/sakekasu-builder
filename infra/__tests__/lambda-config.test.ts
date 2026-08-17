@@ -3,8 +3,9 @@
 // - ランタイム（Issue #112）: 廃止対応は「気づいたときには更新がブロックされて
 //   いる」種類の作業。Node.js 20 のときは AWS Health の通知が来るまで誰も
 //   気づいていなかった。
-// - ログ保持期間（Issue #127）: 既定は無期限。本アプリのログには利用者の
-//   Cognito sub が入りうるため、放置すると残り続ける。
+// - ログ保持期間（Issue #127 / #129）: 既定は無期限。本アプリのログには利用者の
+//   Cognito sub が入りうるため、放置すると残り続ける。保持期間は明示的な
+//   LogGroup で設定しているので、ロググループ側を見る。
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -235,21 +236,57 @@ describe('Lambda のランタイム', () => {
     }
   });
 
-  // 保持期間は Lambda リソースではなく Custom::LogRetention に出る。
-  // 関数の Properties を見ても分からないので、そちらを検査する
+  /**
+   * そのスタックで自前の Lambda 向けに作っているロググループ。
+   *
+   * `/aws/lambda/` で絞るのは、Lambda 以外のロググループ（将来足したもの）を
+   * 巻き込まないため。名前が既定から外れたロググループはここで落ちるので、
+   * 絞ったぶんの見落としは下の照合が拾う
+   */
+  const lambdaLogGroups = (name: string) =>
+    Object.entries(templates[name].findResources('AWS::Logs::LogGroup')).filter(
+      ([, resource]) =>
+        typeof resource.Properties?.LogGroupName === 'string'
+        && resource.Properties.LogGroupName.startsWith('/aws/lambda/'),
+    );
+
+  // Issue #129 で Custom::LogRetention から明示的な LogGroup へ移した。
+  // ロググループ名が `/aws/lambda/<関数名>` のままであることが移行の前提
+  // （変わると docs/ の調査コマンドと運用手順が全部変わり、過去のログも
+  // 旧グループに取り残される）なので、名前ごと突き合わせる。
+  //
+  // 集合で比べているため、指定漏れ（関数はあるのにロググループが無い）も
+  // 余り（対応する関数が無いロググループ）も同時に捕まえられる
+  it.each(Object.keys(templates))(
+    '%s スタックの自前 Lambda に /aws/lambda/<関数名> のロググループがある',
+    (name) => {
+      const functionNames = Object.values(
+        templates[name].findResources('AWS::Lambda::Function'),
+      )
+        .map((resource) => resource.Properties?.FunctionName)
+        .filter((functionName): functionName is string => typeof functionName === 'string');
+
+      expect(
+        functionNames.length,
+        `${name} スタックに自前の Lambda が1つも見つからない（セットアップの誤りを疑う）`,
+      ).toBeGreaterThan(0);
+
+      expect(lambdaLogGroups(name).map(([, resource]) => resource.Properties.LogGroupName).sort())
+        .toEqual(functionNames.map((functionName) => `/aws/lambda/${functionName}`).sort());
+    },
+  );
+
   it.each(Object.keys(templates))(
     `%s スタックのロググループが ${EXPECTED_RETENTION_DAYS} 日で期限切れになる`,
     (name) => {
-      const retentions = Object.entries(
-        templates[name].findResources('Custom::LogRetention'),
-      );
+      const logGroups = lambdaLogGroups(name);
 
       expect(
-        retentions.length,
-        `${name} スタックに Custom::LogRetention が無い（logRetention の指定漏れを疑う）`,
+        logGroups.length,
+        `${name} スタックに Lambda のロググループが無い（logGroup の指定漏れを疑う）`,
       ).toBeGreaterThan(0);
 
-      for (const [logicalId, resource] of retentions) {
+      for (const [logicalId, resource] of logGroups) {
         expect(
           resource.Properties.RetentionInDays,
           `${logicalId} の保持期間`,
@@ -258,22 +295,22 @@ describe('Lambda のランタイム', () => {
     },
   );
 
-  // 上のテストは Custom::LogRetention が「在る」ものしか見ない。関数を足して
-  // logRetention を書き忘れるとリソース自体が生まれず、素通りしてしまう。
-  // 関数の数と突き合わせて、取りこぼしを捕まえる
-  it.each(Object.keys(templates))(
-    '%s スタックの自前 Lambda の数だけ保持期間の設定がある',
-    (name) => {
-      const functions = Object.values(
-        templates[name].findResources('AWS::Lambda::Function'),
-      ).filter((resource) => resource.Properties?.FunctionName !== undefined);
-      const retentions = Object.keys(
-        templates[name].findResources('Custom::LogRetention'),
-      );
+  // スタックを消したときにログまで道連れにしない（Issue #129）。保持期間で
+  // 自然に消える以上、削除まで CloudFormation に任せる理由が無い。
+  // また、この移行は `cdk import` で既存のロググループを取り込む前提なので、
+  // Retain が外れると取り込んだ実物を消しにいく形になる
+  it.each(Object.keys(templates))('%s スタックのロググループを残して消す', (name) => {
+    for (const [logicalId, resource] of lambdaLogGroups(name)) {
+      expect(resource.DeletionPolicy, `${logicalId} の DeletionPolicy`).toBe('Retain');
+      expect(resource.UpdateReplacePolicy, `${logicalId} の UpdateReplacePolicy`).toBe('Retain');
+    }
+  });
 
-      expect(retentions).toHaveLength(functions.length);
-    },
-  );
+  // 非推奨の logRetention へ戻っていないことを見る。戻ると Custom::LogRetention
+  // とそのプロバイダー Lambda が復活し、cdk diff の警告も戻ってくる
+  it.each(Object.keys(templates))('%s スタックに Custom::LogRetention が無い', (name) => {
+    expect(Object.keys(templates[name].findResources('Custom::LogRetention'))).toEqual([]);
+  });
 
   // 上のテストは「合成したスタック」しか見られないので、新しいスタックを
   // 足した人がここに追記し忘れると素通りする。ソースを直接見ることで、
@@ -297,30 +334,50 @@ describe('Lambda のランタイム', () => {
     ).toEqual([]);
   });
 
-  // 同じ理由で、保持期間の指定漏れもソースから見る。関数を1つ足して
-  // logRetention だけ書き忘れる、が一番ありそうな漏れ方
-  it('infra/lib の NodejsFunction がすべて保持期間を指定している', () => {
+  // 同じ理由で、ロググループの指定漏れもソースから見る。関数を1つ足して
+  // logGroup だけ書き忘れる、が一番ありそうな漏れ方。
+  //
+  // 直に `new logs.LogGroup` を書く形も数としては通ってしまうため、
+  // ヘルパー経由に限定する。名前・保持期間・RemovalPolicy の3つが
+  // 揃っていることは lambdaLogGroup の側で保証している
+  it('infra/lib の NodejsFunction がすべてロググループを指定している', () => {
     let functions = 0;
-    let withRetention = 0;
+    let withLogGroup = 0;
     const files: string[] = [];
 
     for (const file of readdirSync(libDir).filter((f) => f.endsWith('.ts'))) {
       const source = readFileSync(path.join(libDir, file), 'utf8');
       const fnCount = countLive(source, /new NodejsFunction\(/);
-      // 末尾のカンマは省略できる（最後のプロパティのとき）。必須にすると
-      // 正しく書いてあるコードで落ちる
-      const retentionCount = countLive(source, /logRetention:\s*LAMBDA_LOG_RETENTION\b/);
+      const logGroupCount = countLive(source, /logGroup:\s*lambdaLogGroup\(/);
 
       functions += fnCount;
-      withRetention += retentionCount;
-      if (fnCount !== retentionCount) {
-        files.push(`${file}: NodejsFunction ${fnCount} 個に対し指定 ${retentionCount} 個`);
+      withLogGroup += logGroupCount;
+      if (fnCount !== logGroupCount) {
+        files.push(`${file}: NodejsFunction ${fnCount} 個に対し指定 ${logGroupCount} 個`);
       }
     }
 
     expect(functions, 'NodejsFunction が1つも見つからない（走査の誤りを疑う）').toBeGreaterThan(0);
-    expect(files, `保持期間の指定が足りていない:\n${files.join('\n')}`).toEqual([]);
-    expect(withRetention).toBe(functions);
+    expect(files, `ロググループの指定が足りていない:\n${files.join('\n')}`).toEqual([]);
+    expect(withLogGroup).toBe(functions);
+  });
+
+  // 非推奨の logRetention はもう使わない（Issue #129）。CDK v3 で消えるので、
+  // 新しい関数を足すときにうっかり戻すと、同じ移行をもう一度やることになる。
+  // 合成結果の側でも見ているが、合成の対象に入っていないスタック
+  // （health-global など）まで届くのはソース走査のほうだけ
+  it('infra/lib に非推奨の logRetention が残っていない', () => {
+    const offenders: string[] = [];
+
+    for (const file of readdirSync(libDir).filter((f) => f.endsWith('.ts'))) {
+      const source = readFileSync(path.join(libDir, file), 'utf8');
+      if (countLive(source, /\blogRetention:/) > 0) offenders.push(file);
+    }
+
+    expect(
+      offenders,
+      `logRetention は非推奨。lambdaLogGroup() を使うこと:\n${offenders.join('\n')}`,
+    ).toEqual([]);
   });
 
   // 予約済み同時実行数はアカウント単位で効くので、1 スタックの中だけを見ても
