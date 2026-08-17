@@ -42,11 +42,25 @@ describe('detectImageMediaType', () => {
     expect(detectImageMediaType(bytesOf(PNG))).toBe('image/png');
   });
 
-  it('4バイト目のマーカーが JFIF・Exif 以外でも JPEG と判定する', () => {
+  it('マーカー番号が JFIF・Exif 以外でも JPEG と判定する', () => {
     // 量子化テーブル（DB）から始まる JPEG も Adobe の APP14（EE）も正当な画像。
     // ここを JFIF（E0）と Exif（E1）に絞ると本物を弾く
     expect(detectImageMediaType(bytesOf([0xff, 0xd8, 0xff, 0xdb]))).toBe('image/jpeg');
     expect(detectImageMediaType(bytesOf([0xff, 0xd8, 0xff, 0xee]))).toBe('image/jpeg');
+    // FF は詰め物。その後ろにマーカー番号が続く形も規格上ある
+    expect(detectImageMediaType(bytesOf([0xff, 0xd8, 0xff, 0xff, 0xe0]))).toBe(
+      'image/jpeg',
+    );
+  });
+
+  it('マーカー番号として妥当でない4バイト目は JPEG と判定しない', () => {
+    // FF D8 FF まで真似ただけの中身。番号は C0 以上でなければならない
+    expect(detectImageMediaType(bytesOf([0xff, 0xd8, 0xff, 0x00]))).toBeNull();
+    expect(detectImageMediaType(bytesOf([0xff, 0xd8, 0xff, 0xbf]))).toBeNull();
+  });
+
+  it('SOI だけで終わるファイルは JPEG と判定しない', () => {
+    expect(detectImageMediaType(new Uint8Array([0xff, 0xd8, 0xff]))).toBeNull();
   });
 
   it('GIF89a を判定する', () => {
