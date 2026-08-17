@@ -14,7 +14,8 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 const { AuthProvider, useAuth } = await import('@/features/auth/AuthContext');
-const { saveMessages, loadMessages } = await import('../lib/chatStorage');
+const { saveMessages, loadMessages, saveSessionId, loadSessionId, createSessionId } =
+  await import('../lib/chatStorage');
 const { saveFilterState, loadFilterState, DEFAULT_FILTER_STATE } = await import(
   '@/features/records/lib/filterStorage'
 );
@@ -46,6 +47,20 @@ describe('サインアウト時の後始末', () => {
     expect(loadMessages('user-a')).toEqual([]);
     expect(amplifySignOut).toHaveBeenCalled();
     expect(result.current.user).toBeNull();
+  });
+
+  it('会話のセッションも端末から消す（続きから話せてしまうため）', async () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.user?.userId).toBe('user-a'));
+
+    saveSessionId('user-a', createSessionId());
+
+    await act(async () => {
+      await result.current.signOut();
+    });
+
+    // セッションが残ると、次の利用者が前の相談の文脈を引き当ててしまう
+    expect(loadSessionId('user-a')).toBeNull();
   });
 
   it('絞り込み条件も端末から消す（検索語に銘柄名が残るため）', async () => {

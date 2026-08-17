@@ -17,8 +17,10 @@ import {
   getCurrentUser,
   fetchUserAttributes,
 } from 'aws-amplify/auth';
-import { clearMessages } from '@/features/sommelier/lib/chatStorage';
-import { resetSommelierSession } from '@/features/sommelier/lib/runtimeSend';
+import {
+  clearMessages,
+  clearSessionId,
+} from '@/features/sommelier/lib/chatStorage';
 import { clearFilterState } from '@/features/records/lib/filterStorage';
 import { clearDownloadUrlCache } from '@/features/image/lib/downloadUrlCache';
 
@@ -128,13 +130,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     // 端末に残る利用者固有のデータを消してからサインアウトする。
-    // 相談履歴や検索語には購入・飲酒の内容が含まれるため、共有端末で
-    // 次の利用者に残さない。Runtime のセッションも切り替える
+    // 相談の表示キャッシュや検索語には購入・飲酒の内容が含まれるため、
+    // 共有端末で次の利用者に残さない。会話のセッション ID も捨てて、
+    // 次の利用者が前の会話の続きとして相談できないようにする
     if (user) {
       clearMessages(user.userId);
+      clearSessionId(user.userId);
       clearFilterState(user.userId);
     }
-    resetSommelierSession();
     // 画像の Presigned URL はメモリ上に最大 50 分残る。リロードを挟まずに
     // 次の利用者がサインインすると、前の利用者のキーで要求された URL が
     // キャッシュから返ってしまうため、ここで捨てる
@@ -144,21 +147,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await amplifySignOut();
     } finally {
       // 上の通信を待つ間に書き戻されたものを、画面を落とす直前にもう一度消す。
-      // 絞り込み条件は画面側の effect が、相談履歴は進行中の応答が確定時に、
-      // 画像 URL は表示中のカードが、それぞれ書き戻しうる（いずれも冪等）。
+      // 絞り込み条件は画面側の effect が、相談の表示キャッシュとセッション ID は
+      // 進行中の応答が確定時に、画像 URL は表示中のカードが、それぞれ
+      // 書き戻しうる（いずれも冪等）。
       //
       // finally に置くのは、サインアウトの通信が失敗しても端末にデータを
       // 残さないため。ここを飛ばすと、利用者はサインアウトしたつもりなのに
       // 画面はサインイン状態のまま、データも残るという最悪の形になる
       if (user) {
         clearMessages(user.userId);
+        clearSessionId(user.userId);
         clearFilterState(user.userId);
       }
       clearDownloadUrlCache();
-      // セッション ID は次のリクエストが来た時点で作り直されて残るため、
-      // 通信を待つ間に相談が走ると次の利用者へ引き継がれてしまう。
-      // Runtime 側の会話文脈が混ざらないよう、ここでも切り替える
-      resetSommelierSession();
       setUser(null);
     }
   }, [user]);

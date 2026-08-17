@@ -284,6 +284,72 @@ describe('SommelierChat', () => {
     expect(screen.queryByText('消える相談')).toBeNull();
   });
 
+  // エージェントは会話の文脈をセッション ID で引き当てる。画面に見えている
+  // 会話と同じものを指し続けないと、続きのつもりの相談が文脈なしで届く
+  describe('会話のセッション', () => {
+    /** 送信のたびに渡されたセッション ID を控える送信実装 */
+    function makeRecordingSend(sessionIds: string[]): SendToSommelier {
+      // eslint-disable-next-line require-yield
+      return async function* (_prompt, { sessionId }) {
+        sessionIds.push(sessionId);
+      };
+    }
+
+    async function send(text: string) {
+      fireEvent.change(screen.getByTestId('chat-input'), {
+        target: { value: text },
+      });
+      fireEvent.click(screen.getByTestId('chat-send'));
+      await waitFor(() => {
+        expect(screen.queryByTestId('chat-stop')).toBeNull();
+      });
+    }
+
+    it('同じ会話の間は同じセッション ID で送る', async () => {
+      const sessionIds: string[] = [];
+      render(<SommelierChat send={makeRecordingSend(sessionIds)} />);
+      openChat();
+
+      await send('1回目');
+      await send('2回目');
+
+      expect(sessionIds).toHaveLength(2);
+      expect(sessionIds[1]).toBe(sessionIds[0]);
+    });
+
+    it('再マウントしても同じセッションを引き継ぐ（リロード相当）', async () => {
+      const sessionIds: string[] = [];
+      const { unmount } = render(
+        <SommelierChat send={makeRecordingSend(sessionIds)} />,
+      );
+      openChat();
+      await send('前回の相談');
+      unmount();
+
+      render(<SommelierChat send={makeRecordingSend(sessionIds)} />);
+      openChat();
+      await send('続き');
+
+      // 画面には前回の会話が残るので、文脈も同じ会話を指し続ける
+      expect(sessionIds[1]).toBe(sessionIds[0]);
+    });
+
+    it('「新しい相談」の後は別のセッションで送る', async () => {
+      const sessionIds: string[] = [];
+      render(<SommelierChat send={makeRecordingSend(sessionIds)} />);
+      openChat();
+      await send('前の相談');
+
+      fireEvent.click(screen.getByTestId('chat-reset'));
+      await waitFor(() => {
+        expect(screen.getByTestId('chat-empty-state')).toBeTruthy();
+      });
+      await send('新しい相談');
+
+      expect(sessionIds[1]).not.toBe(sessionIds[0]);
+    });
+  });
+
   it('「新しい相談」で会話を破棄できる', async () => {
     render(<SommelierChat send={makeSend('応答')} />);
     openChat();
