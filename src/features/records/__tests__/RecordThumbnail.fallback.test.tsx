@@ -91,6 +91,27 @@ describe('一覧サムネイルのサムネ優先とフォールバック', () =
     });
   });
 
+  it('表示対象の画像が変わったらサムネイル優先に戻る', async () => {
+    const { rerender } = render(<RecordCard record={record} {...defaultProps} />);
+
+    fireEvent.error(screen.getByRole('img', { name: /獺祭の画像/ }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole('img', { name: /獺祭の画像/ }).getAttribute('src'),
+      ).toContain('user123/purchase/rec-001/label.jpg');
+    });
+
+    const edited: UnifiedRecord = {
+      ...record,
+      imageKeys: ['user123/purchase/rec-001/bottle.jpg'],
+    };
+    rerender(<RecordCard record={edited} {...defaultProps} />);
+
+    expect(
+      screen.getByRole('img', { name: /獺祭の画像/ }).getAttribute('src'),
+    ).toContain('thumb_bottle.jpg');
+  });
+
   it('サムネイルの URL 取得自体が失敗した場合も原画へフォールバックする', () => {
     failingKeys.add('user123/purchase/rec-001/thumb_label.jpg');
 
