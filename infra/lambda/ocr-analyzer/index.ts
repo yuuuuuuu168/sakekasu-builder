@@ -174,14 +174,24 @@ const IMAGE_SIGNATURES: {
   extraCheck?: (bytes: Uint8Array) => boolean;
 }[] = [
   {
-    // JPEG は SOI（FF D8）+ 次のマーカーの開始（FF）。4バイト目はマーカー番号で、
+    // JPEG は SOI（FF D8）+ 次のマーカーの開始（FF）。続くのはマーカー番号で、
     // 値は一つに定まらない。JFIF（E0）や Exif（E1）に絞ると、量子化テーブルから
     // 始まるもの（DB）や Adobe の APP14（EE）といった正当な JPEG を弾く。
-    // 番号として妥当な範囲（C0 以上）かだけを見る。FF は詰め物で、その後ろに
-    // 番号が続く形も規格上あるので、そのまま範囲に含まれていてよい
+    // 番号として妥当な範囲（C0 以上）かだけを見る。
+    //
+    // マーカー番号の前には詰め物の FF がいくつでも入れられる（ISO/IEC 10918-1
+    // B.1.1.2）。FF 自体を番号として認めると `FF D8 FF FF 00` のように
+    // 番号が妥当でない列まで通るので、詰め物は読み飛ばしてから番号を見る
     mediaType: 'image/jpeg',
     segments: [{ offset: 0, bytes: [0xff, 0xd8, 0xff] }],
-    extraCheck: (bytes) => (bytes[3] ?? 0x00) >= 0xc0,
+    extraCheck: (bytes) => {
+      let index = 3;
+      while (bytes[index] === 0xff) {
+        index += 1;
+      }
+      // 末尾まで詰め物が続いた場合は undefined になり、番号が無いので通さない
+      return (bytes[index] ?? 0x00) >= 0xc0;
+    },
   },
   {
     mediaType: 'image/png',

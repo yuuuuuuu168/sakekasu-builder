@@ -53,10 +53,22 @@ describe('detectImageMediaType', () => {
     );
   });
 
-  it('マーカー番号として妥当でない4バイト目は JPEG と判定しない', () => {
+  it('マーカー番号として妥当でなければ JPEG と判定しない', () => {
     // FF D8 FF まで真似ただけの中身。番号は C0 以上でなければならない
     expect(detectImageMediaType(bytesOf([0xff, 0xd8, 0xff, 0x00]))).toBeNull();
     expect(detectImageMediaType(bytesOf([0xff, 0xd8, 0xff, 0xbf]))).toBeNull();
+  });
+
+  it('詰め物の後ろの番号が妥当でなければ JPEG と判定しない', () => {
+    // 詰め物の FF を番号として認めると、この2つが通ってしまう
+    expect(detectImageMediaType(bytesOf([0xff, 0xd8, 0xff, 0xff, 0x00]))).toBeNull();
+    expect(detectImageMediaType(bytesOf([0xff, 0xd8, 0xff, 0xff, 0xbf]))).toBeNull();
+  });
+
+  it('詰め物のまま終わるファイルは JPEG と判定しない', () => {
+    expect(
+      detectImageMediaType(new Uint8Array([0xff, 0xd8, 0xff, 0xff, 0xff])),
+    ).toBeNull();
   });
 
   it('SOI だけで終わるファイルは JPEG と判定しない', () => {
