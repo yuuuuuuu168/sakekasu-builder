@@ -126,7 +126,17 @@ class TestRecentMessages:
 
     @pytest.mark.parametrize(
         "session_id",
-        [None, "", "セッション", "-leading-hyphen", "a" * 101, "sess/../other"],
+        [
+            None,
+            "",
+            "セッション",
+            "-leading-hyphen",
+            # 短すぎる値。Runtime のヘッダー検査を通らないので実際には
+            # 届かないが、記憶側でも下限を持たせている
+            "abc123",
+            "a" * 101,
+            "sess/../other",
+        ],
     )
     def test_形式の合わないセッションidでは引かない(self, session_id):
         # セッションが決まらないまま actorId だけで引くと、別の相談の
@@ -336,7 +346,7 @@ class TestRemember:
 
     @pytest.mark.parametrize(
         "session_id",
-        [None, "", "セッション", "-leading-hyphen", "a" * 101],
+        [None, "", "セッション", "-leading-hyphen", "abc123", "a" * 101],
     )
     def test_形式の合わないセッションidは付けずに残す(self, session_id):
         memory, client = build()

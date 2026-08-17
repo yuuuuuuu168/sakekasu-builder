@@ -75,8 +75,16 @@ _ROLE_BY_EVENT_ROLE = {"USER": "user", "ASSISTANT": "assistant"}
 # 区切り文字を弾いて他人の棚を指せないようにする
 _ACTOR_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 # sessionId は AgentCore の制約（先頭が英数字・以降は英数字と -_・最大100文字）に合わせる。
-# クライアントから届くヘッダー由来の値なので、そのまま API に渡さない
+# クライアントから届くヘッダー由来の値なので、そのまま API に渡さない。
+# 上限が 100 なのは Memory 側の制約。Runtime のセッションヘッダーは 256 まで
+# 通るため、長すぎる値は「記憶に紐づけられない値」としてここで落ちる
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$")
+# セッション ID の最小長。Runtime のセッションヘッダーが 33 文字以上を
+# 要求するので、実際にはここへ短い値が届く前に弾かれている。
+# それでも見るのは、フロント（sessionId.ts）と同じ下限をこちら側でも
+# 持たせるため。将来 Runtime を介さない呼び出し経路が増えても、
+# エントロピーの無いセッション ID で記憶を引かせない
+_MIN_SESSION_ID_LENGTH = 33
 
 # 比較のために時刻が読めないイベントへ与える値（最も古いものとして扱う）
 _OLDEST_TIMESTAMP = datetime.min.replace(tzinfo=timezone.utc)
@@ -89,7 +97,11 @@ def _valid_actor_id(actor_id: Optional[str]) -> Optional[str]:
 
 
 def _valid_session_id(session_id: Optional[str]) -> Optional[str]:
-    if isinstance(session_id, str) and _SESSION_ID_PATTERN.fullmatch(session_id):
+    if (
+        isinstance(session_id, str)
+        and len(session_id) >= _MIN_SESSION_ID_LENGTH
+        and _SESSION_ID_PATTERN.fullmatch(session_id)
+    ):
         return session_id
     return None
 

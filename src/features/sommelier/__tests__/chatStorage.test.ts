@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
+  beginMessagesWrite,
   loadMessages,
   saveMessages,
   clearMessages,
-  createSessionId,
   loadSessionId,
   saveSessionId,
   clearSessionId,
   MAX_STORED_MESSAGES,
 } from '../lib/chatStorage';
+import { createSessionId } from '../lib/sessionId';
 import type { ChatMessage } from '../types';
 
 const message = (id: string, content: string): ChatMessage => ({
@@ -136,6 +137,36 @@ describe('相談履歴の保存', () => {
 
     expect(loadMessages('user-a')).toEqual([]);
   });
+
+  // 応答の保存は受信し終えてから行うので、サインアウトや「新しい相談」の
+  // 後始末と競合する。始めた時点の世代を控えておいて、その後に消されて
+  // いたら書き戻さない
+  it('保存を始めた後に消されていたら書き戻さない', () => {
+    const writeToken = beginMessagesWrite();
+    clearMessages('user-a');
+
+    saveMessages('user-a', [message('m1', '消したはずの相談')], writeToken);
+
+    expect(localStorage.getItem('sakekasu:sommelier-chat:user-a')).toBeNull();
+  });
+
+  it('消した後に始めた保存は書き戻す（次の会話まで止めない）', () => {
+    clearMessages('user-a');
+    const writeToken = beginMessagesWrite();
+
+    saveMessages('user-a', [message('m1', '新しい相談')], writeToken);
+
+    expect(loadMessages('user-a')).toHaveLength(1);
+  });
+
+  it('他のユーザーを消しても、こちらの保存は止めない', () => {
+    const writeToken = beginMessagesWrite();
+    clearMessages('user-b');
+
+    saveMessages('user-a', [message('m1', '相談')], writeToken);
+
+    expect(loadMessages('user-a')).toHaveLength(1);
+  });
 });
 
 // 会話の文脈はエージェント側の記憶にあり、セッション ID が唯一の手がかり。
@@ -185,6 +216,23 @@ describe('相談セッションの保存', () => {
     localStorage.setItem('sakekasu:sommelier-session:user-a', stored);
 
     expect(loadSessionId('user-a')).toBeNull();
+  });
+
+  // 読む側だけで検査していると、端末には何でも置ける一方で読めるのは
+  // 正しい形の値だけ、という非対称ができる。その隙間は「読めてしまう形の値を
+  // 仕込む」ことに使えるので、書く側でも同じ検査を通す
+  it.each([
+    ['短すぎる値', 'too-short'],
+    ['使えない文字を含む値', `セッション${'a'.repeat(40)}`],
+    ['改行を含む値', `abc${'a'.repeat(40)}\r\nX-Injected: 1`],
+    ['長すぎる値', 'a'.repeat(101)],
+  ])('形式の合わない値は保存しない（%s）', (_label, sessionId) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    saveSessionId('user-a', sessionId);
+
+    expect(localStorage.getItem('sakekasu:sommelier-session:user-a')).toBeNull();
+    vi.mocked(console.error).mockRestore();
   });
 
   it('削除するとセッションが引き継がれなくなる', () => {

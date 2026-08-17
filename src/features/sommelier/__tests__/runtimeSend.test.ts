@@ -6,7 +6,7 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 const { runtimeSend } = await import('../lib/runtimeSend');
-const { isAbortError } = await import('../lib/errors');
+const { isAbortError, SommelierError } = await import('../lib/errors');
 
 /** SSE 形式のレスポンスを組み立てる（実際の Runtime と同じ形） */
 function sseResponse(lines: string[], init: ResponseInit = {}) {
@@ -127,6 +127,22 @@ describe('runtimeSend', () => {
     );
 
     expect('images' in JSON.parse(fetchMock.mock.calls[0][1].body)).toBe(false);
+  });
+
+  // セッション ID はそのまま HTTP ヘッダーの値になる。呼び出し側は作りたての
+  // 値か検証済みの値しか渡さない作りだが、渡された側でも確かめる
+  it.each([
+    ['改行を含む値', `abc${'a'.repeat(40)}\r\nX-Injected: 1`],
+    ['短すぎる値', 'too-short'],
+    ['空の値', ''],
+  ])('形式の合わないセッション ID では呼び出さない（%s）', async (_label, id) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      collect(runtimeSend('相談', { signal, sessionId: id })),
+    ).rejects.toBeInstanceOf(SommelierError);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('セッション ID が変われば別の会話として送る', async () => {
