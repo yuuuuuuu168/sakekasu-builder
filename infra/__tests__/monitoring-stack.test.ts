@@ -175,10 +175,14 @@ describe('MonitoringStack', () => {
     // 欠損に意味がある指標は個別に扱う。
     // - カナリア: 間隔が長く、空白を「異常なし」と扱うと復旧を誤検知する
     // - 実行回数: 記録が無い＝動いていないので、欠損そのものが異常
+    // - SLO の達成率: 30日の rolling で動きが遅い。値が出なくなったときに
+    //   「異常なし」と扱うと、未達のまま復旧したことになってしまう（カナリアと同じ理由）
     const exceptions = new Set([
       'dev-sakekasu-sommelier-canary',
       'dev-sakekasu-watcher-silent-health-check',
       'dev-sakekasu-watcher-silent-sommelier-canary',
+      'dev-sakekasu-ocr-slo-availability',
+      'dev-sakekasu-ocr-slo-latency',
     ]);
 
     const alarms = template.findResources('AWS::CloudWatch::Alarm');
@@ -474,6 +478,54 @@ describe('MonitoringStack', () => {
         expect(slo.Properties?.Sli, `${slo.Properties?.Name} に period-based の定義が混ざっている`)
           .toBeUndefined();
       }
+    });
+
+    // SLO を割ったことに気づけないと、定義しただけで終わる。
+    // ディメンションが SLO 名と一致していないとアラームは INSUFFICIENT_DATA の
+    // まま居座り、監視が入っているように見えて何も鳴らない
+    it.each([
+      ['dev-sakekasu-ocr-slo-availability', 'dev-sakekasu-ocr-analyzer-availability'],
+      ['dev-sakekasu-ocr-slo-latency', 'dev-sakekasu-ocr-analyzer-latency'],
+    ])('%s は %s の達成率を見ている', (alarmName, sloName) => {
+      template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        AlarmName: alarmName,
+        Namespace: 'AWS/ApplicationSignals',
+        MetricName: 'AttainmentRate',
+        Dimensions: [{ Name: 'SloName', Value: sloName }],
+      });
+    });
+
+    // 「下回ったら異常」。既定は「以上で異常」なので、指定を落とすと
+    // 達成率が高いときに鳴る逆立ちしたアラームになる
+    it.each(['dev-sakekasu-ocr-slo-availability', 'dev-sakekasu-ocr-slo-latency'])(
+      '%s は目標を下回ったときに鳴る',
+      (alarmName) => {
+        template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+          AlarmName: alarmName,
+          ComparisonOperator: 'LessThanThreshold',
+          Threshold: 90,
+          // 値が出なくなったときに「復旧した」と判定させない
+          TreatMissingData: 'missing',
+        });
+      },
+    );
+
+    // SLO の目標とアラームのしきい値が食い違うと、SLO 上は未達なのに
+    // アラームは鳴らない（あるいはその逆）状態が黙って生まれる
+    it('SLO の目標とアラームのしきい値が一致している', () => {
+      const goals = Object.values(
+        template.findResources('AWS::ApplicationSignals::ServiceLevelObjective'),
+      ).map((slo) => slo.Properties?.Goal?.AttainmentGoal);
+
+      const thresholds = Object.values(
+        template.findResources('AWS::CloudWatch::Alarm', {
+          Properties: { MetricName: 'AttainmentRate' },
+        }),
+      ).map((alarm) => alarm.Properties?.Threshold);
+
+      expect(goals.length).toBeGreaterThan(0);
+      expect(thresholds.length).toBe(goals.length);
+      expect(new Set([...goals, ...thresholds]).size, '目標としきい値が食い違っている').toBe(1);
     });
 
     // 日に数回しか呼ばれないので、1時間窓にするとほとんどが「データ無し」に

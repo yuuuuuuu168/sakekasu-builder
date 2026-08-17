@@ -20,6 +20,17 @@ import { applyRoleBoundary } from './role-boundary.js';
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 
+/**
+ * SLO の目標達成率（Issue #86）。
+ *
+ * SLO の定義とアラームのしきい値で同じ値を使う。別々に書くと、片方だけ
+ * 動かしたときに「SLO は 95% を目標にしているのにアラームは 90% で鳴る」
+ * のような食い違いが黙って生まれる。
+ *
+ * 90% にしている理由は `addOcrServiceLevelObjectives()` の説明を参照。
+ */
+const SLO_ATTAINMENT_GOAL = 90;
+
 export interface MonitoringStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
   envName: string;
@@ -92,6 +103,7 @@ export class MonitoringStack extends cdk.Stack {
     // SLO はここで作る。API スタックに置くと、エラーバジェットのアラームを
     // 足すときに通知先の SNS を参照して循環参照になる。
     this.addOcrServiceLevelObjectives(props.envName);
+    // アラームは通知経路（alertTopic）を作ってから。addAlarm がそれを参照する
 
     // --- 通知経路 ---
 
@@ -235,6 +247,8 @@ export class MonitoringStack extends cdk.Stack {
       threshold: 1,
       evaluationPeriods: 1,
     });
+
+    this.addOcrSloAlarms(prefix, props.envName);
 
     // --- サービス正常性 ---
 
@@ -597,7 +611,7 @@ export class MonitoringStack extends cdk.Stack {
       name: `${serviceName}-availability`,
       description: 'ラベル OCR の成功率（30日で 90%）。ぽつぽつ失敗し続ける状態を見つけるためのもの',
       burnRateConfigurations,
-      goal: goal(90),
+      goal: goal(SLO_ATTAINMENT_GOAL),
       requestBasedSli: {
         requestBasedSliMetric: { keyAttributes, metricType: 'AVAILABILITY' },
       },
@@ -607,7 +621,7 @@ export class MonitoringStack extends cdk.Stack {
       name: `${serviceName}-latency`,
       description: 'ラベル OCR の所要時間（30日で 90% が 15 秒未満）。大半は Bedrock の時間',
       burnRateConfigurations,
-      goal: goal(90),
+      goal: goal(SLO_ATTAINMENT_GOAL),
       requestBasedSli: {
         comparisonOperator: 'LessThan',
         // ミリ秒。15 秒（単位の根拠はこのメソッドの説明を参照）
@@ -615,6 +629,75 @@ export class MonitoringStack extends cdk.Stack {
         requestBasedSliMetric: { keyAttributes, metricType: 'LATENCY' },
       },
     });
+  }
+
+  /**
+   * SLO を割ったときのアラーム（Issue #86）。
+   *
+   * 上の `ocr-errors` は「15分で3件以上」で鳴る。まとまって落ちたときには
+   * 効くが、ぽつぽつ失敗するのは素通りする。Issue #115 は24時間で12回中3回の
+   * 失敗だったが、このアラームは一度も鳴っていない。そこを埋める。
+   *
+   * ## バーンレートではなく達成率を見る
+   *
+   * バーンレートは「エラー率 ÷ (100% − 目標)」なので、日に数回の規模だと
+   * 1回の失敗で 3.3 まで跳ねる。必ず鳴る形は「30日で9回まで許容する」という
+   * budget の設計と噛み合わない。
+   *
+   * `AttainmentRate` は30日の成功率そのものなので、1回の失敗（90回中1回）では
+   * 動かず、失敗が積み上がったときだけ 90 を割る。狙っている信号はこちら。
+   *
+   * ## 名前空間について
+   *
+   * `AWS/ApplicationSignals` と `AWS/AppSignals` の両方に、同じメトリクス名・
+   * 同じディメンションで**同じ値**が出る（実測で確認）。別名と思われる。
+   * サービスの正式名に合うほうを使う。片方が将来消えるようなら、そのとき
+   * アラームがデータ無しになるので気づける。
+   *
+   * ディメンションは `SloName` だけ。`applicationsignals.CfnServiceLevelObjective`
+   * に付けた `name` と一致していないと、アラームは INSUFFICIENT_DATA のまま
+   * 居座る。監視が入っているように見えて何も鳴らない状態になるので、
+   * SLO 名の組み立てはこのクラスの中で1か所に閉じてある。
+   */
+  private addOcrSloAlarms(prefix: string, envName: string): void {
+    const slos = [
+      {
+        id: 'OcrAvailabilitySloBreach',
+        sloName: `${envName}-sakekasu-ocr-analyzer-availability`,
+        alarmName: `${prefix}-ocr-slo-availability`,
+        description:
+          'OCR の成功率が30日で 90% を割りました（1回きりの失敗ではなく、失敗が積み上がっています）',
+      },
+      {
+        id: 'OcrLatencySloBreach',
+        sloName: `${envName}-sakekasu-ocr-analyzer-latency`,
+        alarmName: `${prefix}-ocr-slo-latency`,
+        description: 'OCR の所要時間が30日で 90% の呼び出しで 15 秒を超えています',
+      },
+    ];
+
+    for (const slo of slos) {
+      this.addAlarm(slo.id, {
+        alarmName: slo.alarmName,
+        description: slo.description,
+        metric: new cloudwatch.Metric({
+          namespace: 'AWS/ApplicationSignals',
+          metricName: 'AttainmentRate',
+          dimensionsMap: { SloName: slo.sloName },
+          // 値は30日の rolling なので動きが遅い。5分ごとに出ているが、
+          // そのまま見ると状態が細かく揺れるので1時間で均す
+          period: cdk.Duration.hours(1),
+          statistic: 'Average',
+        }),
+        threshold: SLO_ATTAINMENT_GOAL,
+        evaluationPeriods: 1,
+        // 目標を「下回ったら」異常。既定は「以上で異常」なので明示する
+        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+        // データが途切れても状態を保つ。既定（異常なし）だと、SLO の値が
+        // 出なくなった瞬間に「復旧した」と誤って判定されてしまう
+        treatMissingData: cloudwatch.TreatMissingData.MISSING,
+      });
+    }
   }
 
   private addAlarm(
