@@ -69,6 +69,15 @@ test('sso は login 以外すべて止める', () => {
   allows('aws sso login --profile verify --use-device-code'); // 手順そのもの
 });
 
+// agent-toolkit も6操作すべてが署名されない。返るのは AWS 側のスキルカタログだが、
+// IAM が一切届かないうえ確認作業では使わない
+test('agent-toolkit は全部止める', () => {
+  denies('aws agent-toolkit get-skill-file --skill-id x');
+  denies('aws agent-toolkit get-skill --skill-id x');
+  denies('aws agent-toolkit list-skills');
+  denies('aws agent-toolkit search-skills --query test');
+});
+
 // Cognito の利用者向け操作も IAM で認証されない。deny ポリシーが止めているのは
 // Admin* の側だけなので、こちらはこの関門でしか止まらない
 test('IAM が届かない Cognito の操作は止める', () => {

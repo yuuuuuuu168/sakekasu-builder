@@ -50,9 +50,24 @@ const READ_EXACT = new Set([
 
 // 名前は読み取りの接頭辞だが、通してはいけない操作。READ_PREFIXES より先に見る。
 //
-// 一覧は CLI 同梱の botocore モデルから機械的に出した。接頭辞で通る操作 8142 件の
-// うち、SigV4 で署名されない（モデル上 authtype: none）ものは 19 件しかなく、
-// その内訳は sso・cognito-identity・cognito-idp・agenttoolkit の4サービスだった。
+// 一覧は CLI 同梱の botocore モデルから機械的に出した。SigV4 で署名されない
+// （モデル上 authtype: none）操作を持つサービスは7つある。署名されない呼び出しには
+// IAM の認可がかからないので、そこだけはこの関門が唯一の防ぎ手になる。
+//
+//   sso              4/4 が署名なし          → サービスごと落とす（下の isRead）
+//   sso-oidc         3/4 が署名なし          → 同上。残り1つもトークンを作る側
+//   agent-toolkit    6/6 が署名なし          → 同上
+//   cognito-identity 4/23 が署名なし         → 署名なしの分だけ下に並べる
+//   cognito-idp      32/129 が署名なし       → 同上
+//   signin           1/11（create-o-auth2-token）
+//   sts              2/11（assume-role-with-saml / -web-identity）
+//
+// signin と sts の署名なし操作、および cognito の署名なし操作の残り（delete-user や
+// change-password など利用者データを書き換える側）は、名前が READ_PREFIXES に
+// 当たらないので既に落ちている。ここに並べるのは接頭辞で通ってしまう分だけ。
+//
+// サービス名は CLI から見た名前で書く。モデルのディレクトリ名とは一致しないことが
+// あり、例えば agent-toolkit はディレクトリ上 agenttoolkit になっている。
 // 新しい AWS CLI に上げたときは同じ観点で見直す。
 const DENY_EXACT = new Set([
   // Cognito Identity。ID プールのロールの一時認証情報が返る。呼び出しは
@@ -350,8 +365,13 @@ function isRead(service, operation) {
   // その利用者に割り当てられた任意のロール（AdministratorAccess を含む）の
   // 一時認証情報が返るうえ、この2サービスの呼び出しは SigV4 で署名されないため、
   // verify セッションに重ねた Deny も ReadOnlyAccess の枠も一切効かない。
-  // サービス単位で落としておけば、将来 AWS が読み取りの名前で操作を足しても素通りしない
-  if (service === 'sso' || service === 'sso-oidc') return false;
+  // サービス単位で落としておけば、将来 AWS が読み取りの名前で操作を足しても素通りしない。
+  //
+  // agent-toolkit も 6 操作すべてが署名されないので同じ扱いにする。返るのは AWS 側の
+  // スキルカタログで、資格情報も利用者データも含まないが、IAM が一切届かないうえ
+  // この確認作業では使わないため、通す理由がない。get-skill-file は外部の内容を
+  // そのままセッションに引き込む口でもある
+  if (service === 'sso' || service === 'sso-oidc' || service === 'agent-toolkit') return false;
   if (operation === 'wait' || operation === 'help') return true;
   return READ_PREFIXES.some((p) => operation.startsWith(p));
 }
