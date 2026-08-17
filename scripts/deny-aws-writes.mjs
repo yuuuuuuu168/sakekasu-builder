@@ -76,17 +76,16 @@ const codeToChar = (code) => (code <= 0x10ffff ? String.fromCodePoint(code) : ''
 //   M       … 結合文字。前の字を飾るだけで単独では字にならない
 //   Co      … 私用領域。表示のされ方が決まっておらず、字として意味を持たない
 //   Cs      … 孤立サロゲート。文字を成さない壊れた符号単位
+//   Cn      … 非文字。字として割り当てられることのない符号位置
 //
-// 線引きは「それ単独で字にならないもの」。字として成立する文字は、見た目が紛らわしく
-// ても落とさない。修飾文字（Lm の ʰ など）やキリル文字の о のような同形異字がこれに
-// あたる。落とすには同形異字の対応表が要るうえ、そうした名前も AWS CLI が
-// ParamValidation で弾いて API 呼び出しに至らないため、この関門で追う利得が薄い。
+// 線引きは「それ単独で字にならないもの」。字として成立する文字（同形異字や修飾文字）は
+// ここでは落とさず、名前を読むときに toCliName 側でまとめて扱う。
 //
 // bash が実際に落とすのは NUL だけで、他はそのまま子プロセスへ渡る。それでも
 // 落とすのは、AWS CLI のサービス名・操作名にこれらが入り得ないため。混ざった名前は
 // AWS CLI 自身が弾くので、落として照合しても新たに止まるのは元々実行できない
 // コマンドだけで済む。
-const INVISIBLE_CHARS = /[\p{Cc}\p{Cf}\p{M}\p{Co}\p{Cs}]/gu;
+const INVISIBLE_CHARS = /[\p{Cc}\p{Cf}\p{M}\p{Co}\p{Cs}\p{Cn}]/gu;
 
 function decodeAnsiC(body) {
   let out = '';
@@ -247,6 +246,29 @@ function tokenize(command, nesting = 0) {
 // 呼び出しと誤認しないため。どちらも実際に誤検知した
 const CLI_NAME = /^[a-z0-9][a-z0-9-]*$/;
 
+// 語を CLI の名前として読む。そのままの形で読めなければ、非 ASCII の文字だけを
+// 落としてもう一度見る。
+//
+// 名前に混ぜ物をして形を崩すと素通りする、という指摘が繰り返し挙がった。制御文字、
+// 結合文字、私用領域、孤立サロゲート、非文字、置換文字、同形異字、修飾文字と、
+// 使われる文字は毎回違う。Unicode の分類を継ぎ足す形だと隣が残るたびに同じ穴が
+// 開き直すので、「落とすと名前になるなら、その名前として判定する」形でまとめて閉じる。
+//
+// 落とすのを非 ASCII に限っているのは、ASCII の記号は引数として正当に使われるため。
+// すべて落とすと /usr/local/bin/aws_completer や scripts/ のような引数が名前に化け、
+// 実際に誤検知した。AWS CLI の名前に非 ASCII は入り得ないので、そちらだけ落とす。
+//
+// 落として空になる語（日本語の散文など）は名前ではないので、呼び出しと見なさない。
+// これで「aws が入っておらず…」のような文面を止めずに済む。
+//
+// 混ぜ物のある名前は AWS CLI 自身も ParamValidation で弾くので、この判定で新たに
+// 止まるのは元々実行できないコマンドだけになる
+function toCliName(word) {
+  if (CLI_NAME.test(word)) return word;
+  const ascii = word.replace(/[^\x00-\x7f]/g, '');
+  return CLI_NAME.test(ascii) ? ascii : '';
+}
+
 // tokens[i] が 'aws' のとき、そこから service と operation を読み取る
 function parseInvocation(tokens, i) {
   const words = [];
@@ -270,13 +292,13 @@ function parseInvocation(tokens, i) {
   if (words.length === 0) return { service: '', operation: '', safe: true };
   // 変数展開が絡む語は何に化けるか読めないので、呼び出しとして拒否側に倒す
   if (words[0].includes('$')) return { service: words[0], operation: '', safe: false };
-  // サービス名が CLI の形をしていなければ、そもそも呼び出しではない
-  if (!CLI_NAME.test(words[0])) return { service: '', operation: '', safe: true };
-  // 操作名が形から外れる場合は空にする。空は isRead が false を返すので拒否側に倒れる
-  const operation = words[1] ?? '';
+  // 落としても名前にならなければ、そもそも呼び出しではない
+  const service = toCliName(words[0]);
+  if (!service) return { service: '', operation: '', safe: true };
+  // 操作名が読めない場合は空にする。空は isRead が false を返すので拒否側に倒れる
   return {
-    service: words[0],
-    operation: CLI_NAME.test(operation) ? operation : '',
+    service,
+    operation: toCliName(words[1] ?? ''),
     safe: false,
   };
 }
@@ -294,8 +316,9 @@ function isRead(service, operation) {
 function findDenied(command) {
   const tokens = tokenize(command);
   for (let i = 0; i < tokens.length; i += 1) {
-    // 'aws' 単体、または 'aws' で終わるパス（/usr/local/bin/aws）を CLI 呼び出しとみなす
-    if (tokens[i] !== 'aws' && !tokens[i].endsWith('/aws')) continue;
+    // 'aws' 単体、または 'aws' で終わるパス（/usr/local/bin/aws）を CLI 呼び出しとみなす。
+    // コマンド名の位置にも混ぜ物を置けるので、こちらも落としてから見る
+    if (tokens[i] !== 'aws' && !tokens[i].endsWith('/aws') && toCliName(tokens[i]) !== 'aws') continue;
     const { service, operation, safe } = parseInvocation(tokens, i);
     if (safe || !service) continue;
     if (!isRead(service, operation)) {

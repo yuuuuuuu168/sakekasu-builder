@@ -194,12 +194,30 @@ test('私用領域や孤立サロゲートで名前を割っても止める', ()
   denies(`aws l\ud800ogs ${W}`); // 孤立サロゲート
 });
 
-// 単独で字になる文字は落とさない。落とすには同形異字の対応表が要るうえ、
-// そうした名前は AWS CLI が ParamValidation で弾いて API 呼び出しに至らない
-test('見た目が紛らわしいだけの文字は対象外', () => {
+// 名前の位置は、非 ASCII を落とすと名前になるならその名前として判定する。
+// 分類ごとの継ぎ足しでは追いつかないので、まとめて閉じている
+test('非ASCIIを混ぜて名前を隠しても止める', () => {
   const W = 'delete-log-group --log-group-name y';
-  allows(`aws l\u02b0ogs ${W}`); // 修飾文字（Lm）
-  allows(`aws l\u043egs ${W}`); // キリル文字の о
+  denies(`aws l\ufffeogs ${W}`); // 非文字 U+FFFE
+  denies(`aws l\ufdd0ogs ${W}`); // 非文字 U+FDD0
+  denies(`aws l\ufffdogs ${W}`); // 置換文字 U+FFFD
+  denies(`aws l\u02b0ogs ${W}`); // 修飾文字（Lm）
+  denies(`aws l\u043egs ${W}`); // キリル文字の о（同形異字）
+  denies(`aws lo\u{1f600}gs ${W}`); // 絵文字
+});
+
+// 落として空になる語は名前ではない。日本語の散文を止めないための境目
+test('日本語の散文は呼び出しと見なさない', () => {
+  allows('echo クラウドには aws が入っていないため手で入れる');
+  allows('echo aws の導入手順を書き直す');
+  allows('git commit -m "aws logs の設定を見直す"');
+});
+
+// ASCII の記号は引数として正当に使われるので落とさない。落とすと
+// /usr/local/bin/aws_completer や scripts/ が名前に化けて誤検知する
+test('ASCII の記号を含む引数は名前に化けない', () => {
+  allows('rm -f /usr/local/bin/aws /usr/local/bin/aws_completer');
+  allows('grep -rn "aws" scripts/');
 });
 // 結合文字はそれ自体では字にならず前の字を飾るだけなので、名前の一部になり得ない
 test('結合文字で名前を飾っても止める', () => {
