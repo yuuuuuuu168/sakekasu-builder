@@ -63,6 +63,65 @@ describe('MonitoringStack', () => {
     });
   });
 
+  /**
+   * トピックポリシーに明示的な文を1つでも置くと、SNS が暗黙に持っている
+   * 「所有アカウントからの publish を許可する」既定ポリシーが丸ごと消える。
+   * AwsHealthRule が events.amazonaws.com の文を作るため、この置き換えは必ず起きる。
+   *
+   * 実際に一度これで壊れた。全アラームが鳴っても Slack に何も届かず、
+   * EventBridge 経由の AWS Health 通知だけが生きていたので気づけなかった。
+   * アラーム経路が無言で死ぬ壊れ方なので、テストで固定する。
+   */
+  it('トピックポリシーが CloudWatch アラームからの publish を許可している', () => {
+    const policies = template.findResources('AWS::SNS::TopicPolicy');
+    const statements = Object.values(policies).flatMap(
+      (p) => (p.Properties?.PolicyDocument?.Statement ?? []) as Record<string, unknown>[],
+    );
+
+    const cloudwatchPublish = statements.filter((st) => {
+      const principal = (st.Principal as { Service?: string | string[] })?.Service;
+      const services = Array.isArray(principal) ? principal : [principal];
+      const actions = Array.isArray(st.Action) ? st.Action : [st.Action];
+      return (
+        st.Effect === 'Allow' &&
+        services.includes('cloudwatch.amazonaws.com') &&
+        actions.includes('sns:Publish')
+      );
+    });
+
+    expect(cloudwatchPublish).toHaveLength(1);
+  });
+
+  /**
+   * 条件で絞りすぎると、権限が無いのと同じ「届かない」状態になる。
+   * CloudWatch が渡すと AWS が明記しているキー以外を足していないことを見る。
+   */
+  it('CloudWatch への許可を、渡されない条件キーで絞っていない', () => {
+    const policies = template.findResources('AWS::SNS::TopicPolicy');
+    const statement = Object.values(policies)
+      .flatMap((p) => (p.Properties?.PolicyDocument?.Statement ?? []) as Record<string, unknown>[])
+      .find((st) => st.Sid === 'AllowCloudWatchAlarmsToPublish');
+
+    const conditions = (statement!.Condition ?? {}) as Record<string, Record<string, unknown>>;
+    const keys = Object.values(conditions).flatMap((byKey) => Object.keys(byKey));
+
+    expect(keys.sort()).toEqual(['aws:SourceAccount', 'aws:SourceArn']);
+  });
+
+  /**
+   * 上の2つは、アラームが本当にこのトピックへ飛ぶ場合にだけ意味がある。
+   * 宛先が別トピックに差し替わったら、許可を足しても届かない。
+   */
+  it('アラームの通知先がそのトピックである', () => {
+    const alarms = template.findResources('AWS::CloudWatch::Alarm');
+    const alarmList = Object.values(alarms);
+    expect(alarmList.length).toBeGreaterThan(0);
+
+    for (const alarm of alarmList) {
+      expect(JSON.stringify(alarm.Properties?.AlarmActions)).toContain('AlertTopic');
+    }
+  });
+
   it('Slack 通知 Lambda がトピックを購読している', () => {
     template.hasResourceProperties('AWS::SNS::Subscription', {
       Protocol: 'lambda',
