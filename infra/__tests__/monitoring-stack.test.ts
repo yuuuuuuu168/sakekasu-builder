@@ -559,22 +559,30 @@ describe('MonitoringStack', () => {
     });
 
     // 除外は「都合の悪い期間を消す」ことにもなるので、理由と範囲を固定する。
-    // 期間が伸びれば現在の実力まで評価から外れ、SLO が形だけになる
-    it('SLO は #115 の修正前の期間だけを評価から外している', () => {
-      const slos = Object.values(
-        template.findResources('AWS::ApplicationSignals::ServiceLevelObjective'),
+    // 期間が伸びれば現在の実力まで評価から外れ、SLO が形だけになる。
+    //
+    // **この除外は一時的なもの。** 履歴が30日窓から抜ける 2026-09 以降は
+    // 実装から消してよく、そのときは**このテストも一緒に消す**。
+    //
+    // 対象を名前で絞っているのは、全 SLO を舐めると「消してよい」と書いた
+    // 設定をテストが引き止めることになるため。`presigned-url` の SLO を
+    // 足したときにも、根拠の無い除外を強要してしまう（PR #166 のレビュー指摘）
+    it.each([
+      'dev-sakekasu-ocr-analyzer-availability',
+      'dev-sakekasu-ocr-analyzer-latency',
+    ])('%s は調査済みの期間だけを評価から外している', (sloName) => {
+      const [slo] = Object.values(
+        template.findResources('AWS::ApplicationSignals::ServiceLevelObjective', {
+          Properties: { Name: sloName },
+        }),
       );
+      const windows = slo?.Properties?.ExclusionWindows;
 
-      expect(slos.length).toBeGreaterThan(0);
-      for (const slo of slos) {
-        const windows = slo.Properties?.ExclusionWindows;
-
-        expect(windows, `${slo.Properties?.Name} に除外設定が無い`).toHaveLength(1);
-        expect(windows[0].StartTime).toBe('2026-08-03T00:00:00Z');
-        expect(windows[0].Window).toEqual({ Duration: 8, DurationUnit: 'DAY' });
-        // なぜ外したのかが分からない除外は、次に見た人が判断できない
-        expect(windows[0].Reason, `${slo.Properties?.Name} の除外に理由が無い`).toMatch(/#115/);
-      }
+      expect(windows, `${sloName} に除外設定が無い`).toHaveLength(1);
+      expect(windows[0].StartTime).toBe('2026-08-03T00:00:00Z');
+      expect(windows[0].Window).toEqual({ Duration: 8, DurationUnit: 'DAY' });
+      // なぜ外したのかが分からない除外は、次に見た人が判断できない
+      expect(windows[0].Reason, `${sloName} の除外に理由が無い`).toMatch(/#115/);
     });
 
     // 日に数回しか呼ばれないので、1時間窓にするとほとんどが「データ無し」に
