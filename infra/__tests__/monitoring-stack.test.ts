@@ -175,10 +175,14 @@ describe('MonitoringStack', () => {
     // 欠損に意味がある指標は個別に扱う。
     // - カナリア: 間隔が長く、空白を「異常なし」と扱うと復旧を誤検知する
     // - 実行回数: 記録が無い＝動いていないので、欠損そのものが異常
+    // - SLO の達成率: 30日の rolling で動きが遅い。値が出なくなったときに
+    //   「異常なし」と扱うと、未達のまま復旧したことになってしまう（カナリアと同じ理由）
     const exceptions = new Set([
       'dev-sakekasu-sommelier-canary',
       'dev-sakekasu-watcher-silent-health-check',
       'dev-sakekasu-watcher-silent-sommelier-canary',
+      'dev-sakekasu-ocr-slo-availability',
+      'dev-sakekasu-ocr-slo-latency',
     ]);
 
     const alarms = template.findResources('AWS::CloudWatch::Alarm');
@@ -474,6 +478,84 @@ describe('MonitoringStack', () => {
         expect(slo.Properties?.Sli, `${slo.Properties?.Name} に period-based の定義が混ざっている`)
           .toBeUndefined();
       }
+    });
+
+    // SLO を割ったことに気づけないと、定義しただけで終わる。
+    // ディメンションが SLO 名と一致していないとアラームは INSUFFICIENT_DATA の
+    // まま居座り、監視が入っているように見えて何も鳴らない
+    it.each([
+      ['dev-sakekasu-ocr-slo-availability', 'dev-sakekasu-ocr-analyzer-availability'],
+      ['dev-sakekasu-ocr-slo-latency', 'dev-sakekasu-ocr-analyzer-latency'],
+    ])('%s は %s の達成率を見ている', (alarmName, sloName) => {
+      template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        AlarmName: alarmName,
+        Namespace: 'AWS/ApplicationSignals',
+        MetricName: 'AttainmentRate',
+        Dimensions: [{ Name: 'SloName', Value: sloName }],
+      });
+    });
+
+    // 「下回ったら異常」。既定は「以上で異常」なので、指定を落とすと
+    // 達成率が高いときに鳴る逆立ちしたアラームになる
+    it.each(['dev-sakekasu-ocr-slo-availability', 'dev-sakekasu-ocr-slo-latency'])(
+      '%s は目標を下回ったときに鳴る',
+      (alarmName) => {
+        template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+          AlarmName: alarmName,
+          ComparisonOperator: 'LessThanThreshold',
+          Threshold: 90,
+          // 値が出なくなったときに「復旧した」と判定させない
+          TreatMissingData: 'missing',
+        });
+      },
+    );
+
+    // 名前がずれるとアラームは INSUFFICIENT_DATA のまま居座り、合成もデプロイも
+    // 成功する。リテラルで書いた期待値と突き合わせるのではなく、**合成結果の
+    // SLO 名そのもの**と突き合わせる。こうしておけば、名前を変えたときに
+    // 片側だけ直しても落ちる（PR #165 のレビュー指摘）
+    it('アラームは実在する SLO を指している', () => {
+      const sloNames = new Set(
+        Object.values(
+          template.findResources('AWS::ApplicationSignals::ServiceLevelObjective'),
+        ).map((slo) => slo.Properties?.Name),
+      );
+      const alarms = Object.values(
+        template.findResources('AWS::CloudWatch::Alarm', {
+          Properties: { MetricName: 'AttainmentRate' },
+        }),
+      );
+
+      expect(sloNames.size).toBeGreaterThan(0);
+      expect(alarms.length, 'SLO の数だけアラームが要る').toBe(sloNames.size);
+
+      for (const alarm of alarms) {
+        const dimension = (alarm.Properties?.Dimensions ?? []).find(
+          (d: { Name: string }) => d.Name === 'SloName',
+        );
+        expect(
+          sloNames.has(dimension?.Value),
+          `${alarm.Properties?.AlarmName} が存在しない SLO（${dimension?.Value}）を指している`,
+        ).toBe(true);
+      }
+    });
+
+    // SLO の目標とアラームのしきい値が食い違うと、SLO 上は未達なのに
+    // アラームは鳴らない（あるいはその逆）状態が黙って生まれる
+    it('SLO の目標とアラームのしきい値が一致している', () => {
+      const goals = Object.values(
+        template.findResources('AWS::ApplicationSignals::ServiceLevelObjective'),
+      ).map((slo) => slo.Properties?.Goal?.AttainmentGoal);
+
+      const thresholds = Object.values(
+        template.findResources('AWS::CloudWatch::Alarm', {
+          Properties: { MetricName: 'AttainmentRate' },
+        }),
+      ).map((alarm) => alarm.Properties?.Threshold);
+
+      expect(goals.length).toBeGreaterThan(0);
+      expect(thresholds.length).toBe(goals.length);
+      expect(new Set([...goals, ...thresholds]).size, '目標としきい値が食い違っている').toBe(1);
     });
 
     // 日に数回しか呼ばれないので、1時間窓にするとほとんどが「データ無し」に
