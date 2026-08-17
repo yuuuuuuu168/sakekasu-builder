@@ -31,6 +31,42 @@ const here = path.dirname(url.fileURLToPath(import.meta.url));
  */
 const SLO_ATTAINMENT_GOAL = 90;
 
+/**
+ * SLO の評価から外す期間（Issue #86）。
+ *
+ * 2026-08-17 に SLO を入れた時点で、可用性の達成率は 84.51%（71 リクエスト中
+ * 11 回が失敗）だった。中身を追ったところ、**11 件すべてが解消済みの問題**で、
+ * 現行のコードに起因する失敗は1件も無かった。
+ *
+ * | 日時（UTC） | 件数 | 原因 |
+ * |---|---|---|
+ * | 08-03 11:09 / 08-08 14:28 ×5 / 08-09 07:57 ×3 | 9 | Issue #115（Bedrock の 5MB 上限は base64 後の値） |
+ * | 08-10 03:52 / 04:50 | 2 | `event.arguments` が無い直接 invoke。計装の動作確認中の手動実行 |
+ *
+ * #115 は PR #117（2026-08-10 02:04Z）で修正済みで、それ以降この失敗は
+ * 一度も起きていない。つまり達成率が低いのは30日窓に履歴が残っているだけで、
+ * 放っておいても 09-09 ごろには自然に戻る。
+ *
+ * ただしその間ずっとアラームが鳴りっぱなしになる。直すものが無いのに赤が
+ * 続く状態は、通知を読まなくなるという形で監視そのものを損なう。だから
+ * 期間ごと評価から外す。
+ *
+ * 両方の SLO に同じ窓を掛けている。レイテンシー SLO が失敗した呼び出しを
+ * どう数えるかは実機で確かめていないので、片方だけ外して非対称にするより、
+ * 「既知の問題があった期間」として揃えて外すほうが説明が一貫する。
+ *
+ * **この窓は 2026-09 以降は消してよい。** 窓から履歴が抜ければ役目は終わる。
+ */
+const SLO_EXCLUSION_WINDOW = {
+  reason:
+    'Issue #115（Bedrock の 5MB 上限）の修正前の期間。11件の失敗はすべてこの中にあり、PR #117 で解消済み',
+  // 最初の失敗が 08-03 11:09Z、最後が 08-10 04:50Z。両端に余裕を持たせて
+  // 08-03 00:00Z から 8 日ぶん（08-11 00:00Z まで）を外す。修正後のデータ
+  // （08-11 以降）は残るので、達成率は現在の実力を表す
+  startTime: '2026-08-03T00:00:00Z',
+  window: { duration: 8, durationUnit: 'DAY' },
+};
+
 export interface MonitoringStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
   envName: string;
@@ -632,6 +668,7 @@ export class MonitoringStack extends cdk.Stack {
 
     new applicationsignals.CfnServiceLevelObjective(this, 'OcrAvailabilitySlo', {
       name: availability,
+      exclusionWindows: [SLO_EXCLUSION_WINDOW],
       description: 'ラベル OCR の成功率（30日で 90%）。ぽつぽつ失敗し続ける状態を見つけるためのもの',
       burnRateConfigurations,
       goal: goal(SLO_ATTAINMENT_GOAL),
@@ -642,6 +679,7 @@ export class MonitoringStack extends cdk.Stack {
 
     new applicationsignals.CfnServiceLevelObjective(this, 'OcrLatencySlo', {
       name: latency,
+      exclusionWindows: [SLO_EXCLUSION_WINDOW],
       description: 'ラベル OCR の所要時間（30日で 90% が 15 秒未満）。大半は Bedrock の時間',
       burnRateConfigurations,
       goal: goal(SLO_ATTAINMENT_GOAL),
