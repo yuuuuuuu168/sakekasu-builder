@@ -77,17 +77,42 @@ const libDir = path.join(here, '../lib');
  * 数が合ってしまい、テストが通り続けるのを防ぐため。デバッグ中に
  * コメントアウトしたまま戻し忘れる、は普通に起きる。
  *
- * ブロックコメント（元の指摘には無いが同じ抜け道になる）も除く。
+ * ブロックコメントも同じ抜け道になるので除くが、**開始と見なすのは行頭が
+ * `/*` のときだけ**にしている。ソースを1本の文字列として
+ * `/\/\*[\s\S]*?\*\//` で消す形にしていたときは、文字列リテラルの中の
+ * `/*` を開始と読み違えていた。`api-stack.ts` の
+ * `'https://*.amplifyapp.com'` がそれに当たり、そこから次にブロックコメントが
+ * 閉じるところ（232 行先の JSDoc の終わり）までが丸ごと消えて、
+ * `new NodejsFunction(` が 2 個から
+ * 0 個に見えていた。数が 0 対 0 で釣り合うため、指定漏れを見張るテストが
+ * 何も見張らないまま通り続ける状態になっていた（PR #174 の指摘）。
+ *
+ * 同じ形は `cdkd-policies.ts` の `arn:aws:iam::aws:policy/*` にもある。
+ * このリポジトリのブロックコメントはすべて行頭から始まるので、行単位で
+ * 見れば文字列の中身と取り違えずに済む。
  */
 function countLive(source: string, pattern: RegExp): number {
-  const withoutBlockComments = source.replace(/\/\*[\s\S]*?\*\//g, '');
-  return withoutBlockComments
-    .split('\n')
-    .filter((line) => {
-      const trimmed = line.trimStart();
-      if (trimmed.startsWith('//') || trimmed.startsWith('*')) return false;
-      return pattern.test(trimmed);
-    }).length;
+  let inBlockComment = false;
+  let count = 0;
+
+  for (const line of source.split('\n')) {
+    const trimmed = line.trimStart();
+
+    if (inBlockComment) {
+      if (trimmed.includes('*/')) inBlockComment = false;
+      continue;
+    }
+    if (trimmed.startsWith('/*')) {
+      // 1行で閉じるものは、そのまま次の行へ進むだけでよい
+      if (!trimmed.includes('*/')) inBlockComment = true;
+      continue;
+    }
+    if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
+
+    if (pattern.test(trimmed)) count += 1;
+  }
+
+  return count;
 }
 
 const env = { account: '111122223333', region: 'ap-northeast-1' };
@@ -332,6 +357,45 @@ describe('Lambda のランタイム', () => {
       offenders,
       `Runtime.${EXPECTED_CDK_ENUM} 以外が使われている:\n${offenders.join('\n')}`,
     ).toEqual([]);
+  });
+
+  // countLive 自身の検査。この関数が黙って 0 を返すようになると、上下の
+  // ソース走査が「数が釣り合っている」と見なして通り続ける。壊れても
+  // テストが緑のままになる種類の壊れ方なので、ここで直接押さえる
+  describe('countLive', () => {
+    it('文字列の中の /* をブロックコメントの開始と取り違えない', () => {
+      const source = [
+        "      allowedOrigins: ['https://*.amplifyapp.com'],",
+        '      new NodejsFunction(this, "A", {});',
+        '      /**',
+        '       * ここはコメント',
+        '       */',
+        '      new NodejsFunction(this, "B", {});',
+      ].join('\n');
+
+      expect(countLive(source, /new NodejsFunction\(/)).toBe(2);
+    });
+
+    it('ブロックコメントと行コメントの中は数えない', () => {
+      const source = [
+        '      /**',
+        '       * new NodejsFunction( と書いてあるがコメント',
+        '       */',
+        '      // new NodejsFunction( も同じ',
+        '      /* 1行で閉じる new NodejsFunction( */',
+        '      new NodejsFunction(this, "A", {});',
+      ].join('\n');
+
+      expect(countLive(source, /new NodejsFunction\(/)).toBe(1);
+    });
+
+    // 実ファイルでも効いていることを見る。合成結果を使わないので、
+    // 走査そのものが壊れたときにここだけが落ちる
+    it('api-stack.ts の NodejsFunction を取りこぼさない', () => {
+      const source = readFileSync(path.join(libDir, 'api-stack.ts'), 'utf8');
+
+      expect(countLive(source, /new NodejsFunction\(/)).toBe(2);
+    });
   });
 
   // 同じ理由で、ロググループの指定漏れもソースから見る。関数を1つ足して
