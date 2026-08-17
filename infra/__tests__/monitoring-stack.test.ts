@@ -4,6 +4,9 @@ import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
 
+const TEST_ACCOUNT = '111122223333';
+const TEST_REGION = 'ap-northeast-1';
+
 const RUNTIME_ARN =
   'arn:aws:bedrock-agentcore:ap-northeast-1:111122223333:runtime/sommelier_test-ABC123';
 
@@ -16,9 +19,32 @@ function flattenJoin(value: unknown): string {
   return parts.map((part) => (typeof part === 'string' ? part : '')).join(separator);
 }
 
+/**
+ * トピックポリシーから、CloudWatch アラームの publish を許可している文を拾う。
+ *
+ * `Sid` では探さない。`Sid` を変えただけで「文が無い」と誤判定してしまい、
+ * 本題と関係ない理由でテストが落ちるため。効くのは principal と action なので、
+ * ポリシーの評価と同じ見方で拾う。
+ */
+function cloudwatchPublishStatements(template: Template): Record<string, unknown>[] {
+  const policies = template.findResources('AWS::SNS::TopicPolicy');
+  return Object.values(policies)
+    .flatMap((p) => (p.Properties?.PolicyDocument?.Statement ?? []) as Record<string, unknown>[])
+    .filter((st) => {
+      const principal = (st.Principal as { Service?: string | string[] })?.Service;
+      const services = Array.isArray(principal) ? principal : [principal];
+      const actions = Array.isArray(st.Action) ? st.Action : [st.Action];
+      return (
+        st.Effect === 'Allow' &&
+        services.includes('cloudwatch.amazonaws.com') &&
+        actions.includes('sns:Publish')
+      );
+    });
+}
+
 function synth() {
   const app = new cdk.App();
-  const env = { account: '111122223333', region: 'ap-northeast-1' };
+  const env = { account: TEST_ACCOUNT, region: TEST_REGION };
 
   const authStack = new AuthStack(app, 'TestAuth', { envName: 'dev', env });
   const apiStack = new ApiStack(app, 'TestApi', {
@@ -61,6 +87,61 @@ describe('MonitoringStack', () => {
     template.hasResourceProperties('AWS::SNS::Topic', {
       TopicName: 'dev-sakekasu-alerts',
     });
+  });
+
+  /**
+   * トピックポリシーに明示的な文を1つでも置くと、SNS が暗黙に持っている
+   * 「所有アカウントからの publish を許可する」既定ポリシーが丸ごと消える。
+   * AwsHealthRule が events.amazonaws.com の文を作るため、この置き換えは必ず起きる。
+   *
+   * 実際に一度これで壊れた。全アラームが鳴っても Slack に何も届かず、
+   * EventBridge 経由の AWS Health 通知だけが生きていたので気づけなかった。
+   * アラーム経路が無言で死ぬ壊れ方なので、テストで固定する。
+   */
+  it('トピックポリシーが CloudWatch アラームからの publish を許可している', () => {
+    expect(cloudwatchPublishStatements(template)).toHaveLength(1);
+  });
+
+  /**
+   * 条件はキー名だけでなく、演算子と値まで見る。
+   *
+   * キー名しか見ないと、次のどれも素通りしてしまう。
+   *
+   * - `aws:SourceAccount` が `*`（どのアカウントからでも publish できる）
+   * - 値が空文字（条件が実質無い）
+   * - `aws:SourceArn` を `ArnLike` ではなく `StringEquals` で書く
+   *
+   * 最後のものが特に厄介で、末尾の `*` がワイルドカードではなくただの文字に
+   * なるため、どのアラームにも一致せず配信が止まる。権限が無いのと同じ
+   * 「鳴っているのに届かない」状態、つまりこのテストが防ぎたい壊れ方そのもの。
+   *
+   * 逆に条件を足しすぎても届かなくなるので、過不足なく一致することを見る。
+   * ここを変えるときは、そのキーを CloudWatch が本当に渡すのかを確認すること。
+   */
+  it('CloudWatch への許可が、届く形の条件で絞られている', () => {
+    const [statement] = cloudwatchPublishStatements(template);
+    expect(statement).toBeDefined();
+
+    expect(statement.Condition).toEqual({
+      StringEquals: { 'aws:SourceAccount': TEST_ACCOUNT },
+      ArnLike: {
+        'aws:SourceArn': `arn:aws:cloudwatch:${TEST_REGION}:${TEST_ACCOUNT}:alarm:*`,
+      },
+    });
+  });
+
+  /**
+   * 上の2つは、アラームが本当にこのトピックへ飛ぶ場合にだけ意味がある。
+   * 宛先が別トピックに差し替わったら、許可を足しても届かない。
+   */
+  it('アラームの通知先がそのトピックである', () => {
+    const alarms = template.findResources('AWS::CloudWatch::Alarm');
+    const alarmList = Object.values(alarms);
+    expect(alarmList.length).toBeGreaterThan(0);
+
+    for (const alarm of alarmList) {
+      expect(JSON.stringify(alarm.Properties?.AlarmActions)).toContain('AlertTopic');
+    }
   });
 
   it('Slack 通知 Lambda がトピックを購読している', () => {
