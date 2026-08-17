@@ -161,7 +161,7 @@ test('NUL でコマンド名やサービス名を割っても止める', () => {
 });
 
 // 不可視文字は名前の形を崩す。AWS CLI 自身も弾く形だが、関門としては
-// 素通りさせない。範囲ではなく Unicode の分類（Cc・Cf）で落としている
+// 素通りさせない。範囲ではなく Unicode の分類（Cc・Cf・M）で落としている
 test('制御文字で名前を割っても止める', () => {
   const W = 'delete-log-group --log-group-name y';
   denies(`aws $'\\x01logs' ${W}`);
@@ -183,6 +183,28 @@ test('C1 やゼロ幅の文字で名前を割っても止める', () => {
   denies(`aws \u00adlogs ${W}`); // ソフトハイフン
   denies(`aws lo\u2060gs ${W}`); // ワードジョイナ（語の途中）
   denies(`aws \ufefflogs ${W}`); // BOM
+});
+
+// 結合文字はそれ自体では字にならず前の字を飾るだけなので、名前の一部になり得ない
+test('結合文字で名前を飾っても止める', () => {
+  const W = 'delete-log-group --log-group-name y';
+  denies(`aws l\u0300ogs ${W}`); // 結合グレーブアクセント（語中）
+  denies(`aws \u0301logs ${W}`); // 結合アキュートアクセント（先頭）
+  denies(`\u0301aws logs ${W}`); // コマンド名の位置
+});
+
+// sso login は CLAUDE.md の確認手順そのものなので通す。logout は手順で使わず、
+// トークンを失効させると確認作業ごと止まるため通さない
+test('sso はログインだけ通す', () => {
+  allows('aws sso login --profile verify --use-device-code');
+  denies('aws sso logout --profile verify');
+});
+
+// AWS 自身が読み取り専用の管理ポリシー CloudWatchLogsReadOnlyAccess に入れている
+test('Logs Insights の操作は通す', () => {
+  allows('aws logs start-query --profile verify');
+  allows('aws logs stop-query --query-id x');
+  allows('aws logs start-live-tail --log-group-identifiers x');
 });
 
 // バッククォートの中の \` は閉じではない。bash は打ち消しを外してから中身を

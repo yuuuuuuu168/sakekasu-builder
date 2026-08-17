@@ -27,10 +27,18 @@ const READ_PREFIXES = [
 // 読み取りそうな名前でも実質は違うものがあるため、載せる前に実際の権限を確認する。
 // 例えば ecs execute-command はコンテナ内でコマンドを実行するので、ここには載せない。
 const READ_EXACT = new Set([
-  'sso login', 'sso logout',
+  // sso login は読み取りではないが、CLAUDE.md の確認手順そのもの
+  // （aws sso login --profile verify --use-device-code）なので通す。人の承認を
+  // 挟むデバイスコードフローで、作るのは自分のセッションだけ。
+  // 対する sso logout は手順のどこでも使わないうえ、トークンを失効させると
+  // そのセッションの確認作業ごと止まるため通さない
+  'sso login',
   'configure list', 'configure list-profiles', 'configure get',
   // logs tail は高レベルコマンドで、内部は FilterLogEvents（--follow なら StartLiveTail）
   'logs tail',
+  // Logs Insights の3つは名前が read らしくないが、AWS 自身が読み取り専用の
+  // 管理ポリシー CloudWatchLogsReadOnlyAccess に logs:StartQuery / StopQuery /
+  // StartLiveTail を入れている。verify の土台は ReadOnlyAccess なので実際に許可される
   'logs start-query', 'logs stop-query', 'logs start-live-tail',
   'dynamodb scan', 'dynamodb query',
   's3 ls',
@@ -58,9 +66,12 @@ const codeToChar = (code) => (code <= 0x10ffff ? String.fromCodePoint(code) : ''
 // ない」と判断されて素通りするため、照合の前に落とす（$'\x01logs' のような形）。
 //
 // 個別の符号位置ではなく Unicode の分類で指定している。制御文字（Cc）と書式用
-// （Cf）をまとめて覆うので、C0・DEL・C1 に加えてゼロ幅スペースや BOM、
-// ソフトハイフンも同じ規則で落ちる。範囲を継ぎ足していく形だと、隣の範囲が
-// 残るたびに同じ穴が開き直す。
+// （Cf）、結合文字（M）をまとめて覆うので、C0・DEL・C1 に加えてゼロ幅スペースや
+// BOM、ソフトハイフン、アクセント記号などの結合文字も同じ規則で落ちる。範囲を
+// 継ぎ足していく形だと、隣の範囲が残るたびに同じ穴が開き直す。
+//
+// 結合文字を入れているのは、それ自体では字にならず前の字を飾るだけで、
+// 名前の一部になり得ないため。単独で字になる文字（下記の同形異字）とは分けている。
 //
 // bash が実際に落とすのは NUL だけで、他はそのまま子プロセスへ渡る。それでも
 // 落とすのは、AWS CLI のサービス名・操作名に不可視文字が入り得ないため。混ざった
@@ -70,7 +81,7 @@ const codeToChar = (code) => (code <= 0x10ffff ? String.fromCodePoint(code) : ''
 // 目に見える偽装（キリル文字の о を使うなど）はここでは扱わない。判別には
 // 同形異字の対応表が要るうえ、そうした名前も AWS CLI が ParamValidation で
 // 弾くため、この関門で追う利得が薄い。
-const INVISIBLE_CHARS = /[\p{Cc}\p{Cf}]/gu;
+const INVISIBLE_CHARS = /[\p{Cc}\p{Cf}\p{M}]/gu;
 
 function decodeAnsiC(body) {
   let out = '';
