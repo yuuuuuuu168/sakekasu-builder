@@ -88,28 +88,46 @@ const libDir = path.join(here, '../lib');
  * 何も見張らないまま通り続ける状態になっていた（PR #174 の指摘）。
  *
  * 同じ形は `cdkd-policies.ts` の `arn:aws:iam::aws:policy/*` にもある。
- * このリポジトリのブロックコメントはすべて行頭から始まるので、行単位で
- * 見れば文字列の中身と取り違えずに済む。
+ * このリポジトリのブロックコメントはすべて行頭から始まるので、開始を行頭に
+ * 限れば文字列の中身と取り違えずに済む。
+ *
+ * 一方で、コメントが閉じたところより後ろはコードとして見る。行ごと捨てると
+ * 閉じた直後に書かれたコードを数え落とす。数え落としはこのテストにとって
+ * いちばん困る壊れ方（数が釣り合って素通りする）なので、ここは丁寧に見る。
  */
 function countLive(source: string, pattern: RegExp): number {
   let inBlockComment = false;
   let count = 0;
 
-  for (const line of source.split('\n')) {
-    const trimmed = line.trimStart();
+  for (const rawLine of source.split('\n')) {
+    let line = rawLine.trimStart();
 
+    // コメントの中にいる間は、閉じたところから後ろだけがコードになる。
+    // 閉じ記号を見つけた時点で行ごと捨てると、閉じた直後に書かれたコードを
+    // 数え落とす（PR #174 の2度目の指摘）
     if (inBlockComment) {
-      if (trimmed.includes('*/')) inBlockComment = false;
-      continue;
+      const close = line.indexOf('*/');
+      if (close === -1) continue;
+      inBlockComment = false;
+      line = line.slice(close + 2).trimStart();
     }
-    if (trimmed.startsWith('/*')) {
-      // 1行で閉じるものは、そのまま次の行へ進むだけでよい
-      if (!trimmed.includes('*/')) inBlockComment = true;
-      continue;
-    }
-    if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
 
-    if (pattern.test(trimmed)) count += 1;
+    // 行頭が `/*` のときだけ開始と見なす。ここを緩めると文字列リテラルの
+    // 中身を拾ってしまう。1行で閉じるものは後ろにコードが続きうるので、
+    // 閉じた先から見直す
+    while (line.startsWith('/*')) {
+      const close = line.indexOf('*/', 2);
+      if (close === -1) {
+        inBlockComment = true;
+        line = '';
+        break;
+      }
+      line = line.slice(close + 2).trimStart();
+    }
+
+    if (!line || line.startsWith('//') || line.startsWith('*')) continue;
+
+    if (pattern.test(line)) count += 1;
   }
 
   return count;
@@ -387,6 +405,20 @@ describe('Lambda のランタイム', () => {
       ].join('\n');
 
       expect(countLive(source, /new NodejsFunction\(/)).toBe(1);
+    });
+
+    // 閉じ記号の後ろにコードを書く形。このリポジトリには今のところ無いが、
+    // 数え落とし側に倒れるとテストが素通りするので押さえておく
+    it('コメントが閉じた後ろのコードを数え落とさない', () => {
+      const multiLine = [
+        '      /**',
+        '       * コメント',
+        '       */ new NodejsFunction(this, "A", {});',
+      ].join('\n');
+      const singleLine = '      /* コメント */ new NodejsFunction(this, "A", {});';
+
+      expect(countLive(multiLine, /new NodejsFunction\(/)).toBe(1);
+      expect(countLive(singleLine, /new NodejsFunction\(/)).toBe(1);
     });
 
     // 実ファイルでも効いていることを見る。合成結果を使わないので、
