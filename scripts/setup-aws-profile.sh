@@ -15,6 +15,11 @@ fi
 
 # AWS CLI Team の署名鍵の指紋。AWS の公式インストール手順に載っているもので、
 # 公開鍵そのものは scripts/aws-cli-public-key.asc に置いてある（鍵の期限は 2027-07-01）。
+#
+# この検証が守るのは配信経路（CDN の侵害や MITM）であって、リポジトリ自体ではない。
+# 鍵と指紋はどちらもこのリポジトリにあるため、両方を書き換える変更が入れば検証は
+# 通ってしまう。鍵を差し替える PR をレビューするときは、値をリポジトリ内で
+# 突き合わせるのではなく、AWS の公式手順の記載と照らすこと。
 AWS_CLI_KEY_FINGERPRINT=FB5DB77FD5C118B80511ADA8A6310ACC4672475C
 
 # クラウドのコンテナには AWS CLI が入っていない（Issue #162）。使い捨てのコンテナなので
@@ -70,19 +75,33 @@ ensure_aws_cli_v2() {
   chmod 700 "$GNUPGHOME"
   gpg --batch --quiet --import "$script_dir/aws-cli-public-key.asc"
 
-  # gpg の終了コードだけでは、鍵束に別の鍵が紛れ込んだ場合に通ってしまう。
-  # 機械可読な出力から指紋まで突き合わせる。grep へ直接パイプすると
-  # SIGPIPE と pipefail で誤判定し得るので、いったん変数に受ける
+  # 判定は終了コードではなく機械可読な出力で行う。終了コードは鍵束に別の鍵が
+  # 紛れ込んだ場合に通ってしまううえ、鍵が期限切れでも 0 のまま返る（実測）。
+  # grep へ直接パイプすると SIGPIPE と pipefail で誤判定し得るので変数に受ける
   verify_status=$(gpg --batch --status-fd 1 --verify "$tmp/awscliv2.zip.sig" "$tmp/awscliv2.zip" 2> /dev/null || true)
+
+  # 見るのは 2 行。GOODSIG は署名と鍵の両方が健全なときだけ出て、鍵が期限切れ
+  # なら EXPKEYSIG、失効していれば REVKEYSIG に置き換わる。VALIDSIG は署名自体の
+  # 正当性しか示さず期限切れでも出るので、これだけでは期限切れを見逃す。
+  # 一方 GOODSIG は鍵IDまでしか持たないため、指紋の照合は VALIDSIG 側で行う
+  verify_failure=""
   case "$verify_status" in
-    *"VALIDSIG $AWS_CLI_KEY_FINGERPRINT"*)
-      echo "Installer signature verified ($AWS_CLI_KEY_FINGERPRINT)."
+    *"EXPKEYSIG"* | *"KEYEXPIRED"*)
+      verify_failure="signing key has expired (update scripts/aws-cli-public-key.asc)"
       ;;
-    *)
-      echo "Signature verification failed for the AWS CLI installer. Aborting." >&2
-      return 1
-      ;;
+    *"REVKEYSIG"*) verify_failure="signing key has been revoked" ;;
+    *"GOODSIG"*) ;;
+    *) verify_failure="no good signature" ;;
   esac
+  case "$verify_status" in
+    *"VALIDSIG $AWS_CLI_KEY_FINGERPRINT"*) ;;
+    *) verify_failure="${verify_failure:-signed by an unexpected key}" ;;
+  esac
+  if [ -n "$verify_failure" ]; then
+    echo "Signature verification failed for the AWS CLI installer: $verify_failure. Aborting." >&2
+    return 1
+  fi
+  echo "Installer signature verified ($AWS_CLI_KEY_FINGERPRINT)."
   unset GNUPGHOME
 
   unzip -q "$tmp/awscliv2.zip" -d "$tmp"
