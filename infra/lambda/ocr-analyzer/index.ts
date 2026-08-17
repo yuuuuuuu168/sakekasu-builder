@@ -161,7 +161,99 @@ export function validateImageKeyAccess(sub: string, imageKey: string): void {
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
 /**
+ * 形式ごとの先頭バイト（Issue #119）。
+ *
+ * WebP だけは離れた2区間を見る必要がある（`RIFF` + 4バイトの長さ + `WEBP`）ため、
+ * 位置つきの区間の集まりとして持つ
+ */
+const IMAGE_SIGNATURES: {
+  mediaType: ImageMediaType;
+  segments: { offset: number; bytes: readonly number[] }[];
+}[] = [
+  { mediaType: 'image/jpeg', segments: [{ offset: 0, bytes: [0xff, 0xd8, 0xff] }] },
+  {
+    mediaType: 'image/png',
+    segments: [{ offset: 0, bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] }],
+  },
+  // GIF87a / GIF89a のどちらも通す
+  { mediaType: 'image/gif', segments: [{ offset: 0, bytes: [0x47, 0x49, 0x46, 0x38] }] },
+  {
+    mediaType: 'image/webp',
+    segments: [
+      { offset: 0, bytes: [0x52, 0x49, 0x46, 0x46] }, // "RIFF"
+      { offset: 8, bytes: [0x57, 0x45, 0x42, 0x50] }, // "WEBP"
+    ],
+  },
+];
+
+/**
+ * バイト列の先頭から画像形式を判定する。判定できなければ null。
+ *
+ * 短すぎるファイルは範囲外の添字が undefined になり、どの形式とも一致しない
+ */
+export function detectImageMediaType(bytes: Uint8Array): ImageMediaType | null {
+  const signature = IMAGE_SIGNATURES.find(({ segments }) =>
+    segments.every((segment) =>
+      segment.bytes.every((byte, i) => bytes[segment.offset + i] === byte),
+    ),
+  );
+  return signature?.mediaType ?? null;
+}
+
+/**
+ * S3 の ContentType から Bedrock に渡す mediaType を決める（Issue #119）。
+ *
+ * 認識できない値を `image/jpeg` に丸めない。presigned-url Lambda は
+ * ContentType を検証しているが、S3 の presigned PUT は既定で UNSIGNED-PAYLOAD
+ * なので本体バイトは署名の対象外で、そもそも署名を経ずに置かれたオブジェクトも
+ * ありうる。丸めてしまうと、なぜ jpeg 扱いなのかが後から読み取れない
+ */
+export function resolveMediaType(contentType: string | undefined): ImageMediaType {
+  const supported = IMAGE_SIGNATURES.map(({ mediaType }) => mediaType);
+  const mediaType = supported.find((type) => type === contentType);
+
+  if (!mediaType) {
+    // 利用者が置いた値なので、改行でログを分断されないよう文字列として出す
+    console.error(
+      `[OCR] Unsupported image type: contentType=${JSON.stringify((contentType ?? '').slice(0, 100))}`,
+    );
+    throw new Error('Unsupported image type');
+  }
+
+  return mediaType;
+}
+
+/**
+ * 中身が本当に画像かを、宣言された形式と突き合わせて確かめる（Issue #119）。
+ *
+ * ContentType はクライアントが送った文字列がそのまま S3 に残るだけなので、
+ * これを信じると非画像のバイナリが `image/jpeg` として Bedrock に届く。
+ * 先頭バイトを見れば、宣言とは独立に中身を判定できる。
+ *
+ * 宣言と中身が食い違う場合も落とす。この状態は Bedrock 側でも弾かれるが、
+ * 「OCR に失敗しました」しか残らず、拡張子だけ書き換えたファイルなのか
+ * 別の理由なのかが切り分けられない
+ */
+export function assertImagesAreRealImages(
+  images: { bytes: Uint8Array; mediaType: ImageMediaType }[],
+): void {
+  images.forEach((image, index) => {
+    const detected = detectImageMediaType(image.bytes);
+    if (detected !== image.mediaType) {
+      // キーには利用者の sub が入るのでログに出さない。位置だけ示す
+      console.error(
+        `[OCR] Invalid image content: index=${index} declared=${image.mediaType} detected=${detected ?? 'unknown'}`,
+      );
+      throw new Error('Invalid image content');
+    }
+  });
+}
+
+/**
  * Bedrock に渡せる大きさかを確かめる（Issue #115）。
+ *
+ * 見るのは大きさだけで、中身が画像かは見ない。そちらは
+ * `assertImagesAreRealImages()` の担当（Issue #119）。
  *
  * 上限は base64 エンコード後の長さで判定されるため、元ファイルのサイズとは
  * 4/3 のずれがある。フロント側（`imageCompressor.ts`）も同じ制限から逆算した
@@ -197,8 +289,8 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
     validateImageKeyAccess(sub, key);
   }
 
-  // S3 から画像を取得して Base64 エンコード
-  const images: { base64: string; mediaType: ImageMediaType }[] = [];
+  // S3 から画像を取得する
+  const stored: { bytes: Uint8Array; contentType: string | undefined }[] = [];
   try {
     for (const key of imageKeys) {
       const s3Response = await s3Client.send(
@@ -207,25 +299,28 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
           Key: key,
         }),
       );
-      const imageBytes = await s3Response.Body!.transformToByteArray();
-
-      // Content-Type から画像形式を判定
-      const contentType = s3Response.ContentType ?? '';
-      const mediaType: ImageMediaType =
-        contentType === 'image/jpeg' ||
-        contentType === 'image/png' ||
-        contentType === 'image/gif' ||
-        contentType === 'image/webp'
-          ? contentType
-          : 'image/jpeg';
-
-      images.push({ base64: Buffer.from(imageBytes).toString('base64'), mediaType });
+      stored.push({
+        bytes: await s3Response.Body!.transformToByteArray(),
+        contentType: s3Response.ContentType,
+      });
     }
   } catch {
     throw new Error('Failed to retrieve image from storage');
   }
 
-  // 取得の失敗と混同しないよう catch の外で大きさを見る
+  // 取得の失敗と混同しないよう catch の外で中身を見る。
+  // 宣言された形式を確かめ、先頭バイトがそれと一致するかまで見てから
+  // base64 にする。非画像を base64 化して Bedrock まで運ばないため
+  const validated = stored.map(({ bytes, contentType }) => ({
+    bytes,
+    mediaType: resolveMediaType(contentType),
+  }));
+  assertImagesAreRealImages(validated);
+
+  const images = validated.map(({ bytes, mediaType }) => ({
+    base64: Buffer.from(bytes).toString('base64'),
+    mediaType,
+  }));
   assertImagesFitBedrockLimit(images);
 
   // Bedrock Claude Haiku でマルチモーダル解析
