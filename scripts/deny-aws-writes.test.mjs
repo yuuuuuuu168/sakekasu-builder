@@ -129,6 +129,35 @@ test('読み取り操作は引用や行継続をまたいでも通す', () => {
   allows('aws logs tail \\\n/aws/lambda/x --since 30m');
 });
 
+// 置換のあとも元の引用が続いていること。引用の外に出たままにすると、
+// 元の引用を閉じる " が開き側と見なされ、後ろのコマンドを丸ごと飲み込む
+test('コマンド置換のあとに続く呼び出しを見落とさない', () => {
+  denies('echo "$(aws sts get-caller-identity)" && aws s3 rm s3://b/k');
+  denies('MSG="$(aws s3 ls)"; aws s3api delete-object --bucket x --key y');
+  denies('x="`aws sts get-caller-identity`" && aws s3 cp local s3://b/');
+  allows('echo "$(aws sts get-caller-identity)" && echo done');
+  allows('MSG="$(aws logs describe-log-groups)" && echo "$MSG"');
+});
+
+// 判定が例外で落ちると終了コードが 1 になり、フックの異常として素通りする
+test('読み切れないコマンドは拒否側に倒す', () => {
+  denies("$'\\U00110000' aws s3api delete-object --bucket x --key y");
+  // 範囲外の打ち消しでも例外にせず読み切る。aws 呼び出しが無ければ通してよい。
+  // allows は終了コードが 0 であることも見るので、落ちれば失敗する
+  allows("$'\\UFFFFFFFF' echo hello");
+  denies("$'aws logs delete-log-group --log-group-name y"); // $' の閉じ忘れ
+  denies('echo "unterminated'); // 二重引用符の閉じ忘れ
+  denies('echo $(aws logs delete-log-group --log-group-name y'); // 置換の閉じ忘れ
+});
+
+test('通常の引用は誤検知しない', () => {
+  allows("echo \"it's fine\"");
+  allows("awk '{print $1}' file.txt");
+  allows('for f in *.ts; do echo "$f"; done');
+  allows('echo `date`');
+  allows('bash -c "npm test"');
+});
+
 test('変数展開でサービス名を隠しても止める', () => {
   denies('aws $SERVICE delete-object --bucket x --key y');
   denies('aws ${SERVICE} delete-object --bucket x --key y');
