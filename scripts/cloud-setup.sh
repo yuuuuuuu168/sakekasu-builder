@@ -37,3 +37,23 @@ install_if_needed() {
 
 install_if_needed .
 install_if_needed infra
+
+# セッション開始時の運用方針。SessionStart フックの標準出力はそのまま Claude の
+# 文脈に入るので、CLAUDE.md と同じ内容をここでも一度渡しておく。CLAUDE.md は
+# 長いセッションでは押し流されるが、こちらは毎セッションの先頭に必ず載る
+cat << 'POLICY'
+
+[session policy]
+- AWS の確認が要るときは、指示を待たずに `bash scripts/aws-sso-login.sh` を実行し、
+  出力された URL とコードをそのままユーザーに提示して承認を待つ。以降の AWS CLI には
+  必ず `--profile verify` を付ける（読み取り専用）。
+- PR を作ったら、指示を待たずに subscribe_pr_activity でその PR を watch する。
+POLICY
+
+# 環境変数 SAKEKASU_AWS_LOGIN=1 を設定した環境では、AWS の確認を待たずに
+# セッション開始の時点でログインまで済ませる。既定で走らせないのは、AWS を
+# 触らないセッションにまで AWS CLI の 70MB 超のダウンロードを負わせないため
+if [ "${SAKEKASU_AWS_LOGIN:-}" = "1" ]; then
+  echo
+  bash "$(dirname "$0")/aws-sso-login.sh" || echo "AWS SSO のログイン開始に失敗した。必要になった時点で再実行する。"
+fi

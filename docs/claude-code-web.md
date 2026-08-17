@@ -10,14 +10,23 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 2. リポジトリアクセスの注意: **App のインストール範囲 ＝ セッションのアクセス範囲ではない**。セッションは連携した GitHub アカウントが見えるリポジトリ全体にアクセスできる。絞りたい場合は GitHub 側でアカウント権限を制限する
 3. 画面上部の雲アイコン → 「Add cloud environment」で環境を作る
    - **Network access**: まずはデフォルトの Trusted（GitHub / npm / PyPI / AWS SDK 系ドメインを許可済み）で開始。足りないドメインが出たら Custom に切り替えて追加する（「Also include default list of common package managers」は残す）
-   - **Environment variables**: 現時点では不要（Issue #96 で `TAVILY_API_KEY` を追加予定）
+   - **Environment variables**: 現時点では不要（Issue #96 で `TAVILY_API_KEY` を追加予定）。AWS の確認を毎セッションするなら `SAKEKASU_AWS_LOGIN=1` を入れると、セッション開始の時点で SSO ログインまで進む
    - **Setup script**: 空でよい。依存インストールはリポジトリ側の SessionStart フックで自動実行される（下記）
 
 ## 依存インストールの自動実行（リポジトリ側・設定済み）
 
 - [.claude/settings.json](../.claude/settings.json) の SessionStart フックが、セッション開始・再開のたびに [scripts/cloud-setup.sh](../scripts/cloud-setup.sh) を実行する
 - スクリプトはルートと `infra/` の `npm ci` を行う。インストール時に `package-lock.json` のハッシュを `node_modules/.package-lock.sha256` に控えておき、一致する（＝依存が変わっていない）ときだけスキップして高速起動する。ロックファイルだけ更新されたブランチでも古い依存のまま動くことはない
+- 最後に運用方針（AWS 認証の取り方、PR の watch）を標準出力に出す。SessionStart フックの標準出力はそのままセッションの文脈に入るので、毎セッションの先頭に必ず載る。同じ内容は [CLAUDE.md](../CLAUDE.md) にも書いてあるが、そちらは長いセッションでは押し流されるため二重に置いている
 - `$CLAUDE_CODE_REMOTE` がクラウド VM でだけ `true` になるため、ローカルの Claude Code セッションでは何もしない
+
+## PR の watch（都度お願いしなくてよい）
+
+- PR を作ったら指示を待たずに `subscribe_pr_activity` を呼ぶ、というのが [CLAUDE.md](../CLAUDE.md) の運用。watch しているセッションには CI の結果とレビューコメントが届き、赤ければ直して push する
+- 念押しとして [scripts/pr-watch-reminder.mjs](../scripts/pr-watch-reminder.mjs)（`PostToolUse` フック）を置いている。PR 作成ツールが成功した直後に発火し、`hookSpecificOutput.additionalContext` で PR 番号つきの指示を返す。`PostToolUse` は素の標準出力が Claude に届かない（デバッグログ行き）ので、JSON で返す必要がある
+- 番号は MCP ツールの返り値から拾う。構造化されたオブジェクトのことも、JSON を丸ごと入れた文字列のこともあるため再帰で探し、`html_url` の `/pull/<番号>` を優先する。レビューや issue の入れ子にも `number` があるため
+- 判断材料を足すだけのフックなので、入力が壊れていても異常終了させない（拾えなければ番号なしの文言を返す）
+- `.claude/settings.json` の `permissions.allow` に `mcp__github__subscribe_pr_activity` を入れてあり、watch の開始で承認プロンプトは出ない
 
 ## MCP サーバー（.mcp.json・Issue #96）
 
@@ -35,7 +44,10 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 
 ## AWS の確認作業（verify プロファイル）
 
-- [scripts/setup-aws-profile.sh](../scripts/setup-aws-profile.sh) が `~/.aws/config` に `verify` プロファイルを書き出す。認証は毎セッション `aws sso login --profile verify --use-device-code` で取得し、長期キーは VM にもリポジトリにも置かない
+- 入口は [scripts/aws-sso-login.sh](../scripts/aws-sso-login.sh) の一本。プロファイルの用意からログインの開始までをまとめてあり、AWS の確認が要るときに指示を待たず実行する。認証済みなら何もせず終わる。承認の完了は `--wait`、状態だけ見るなら `--status`
+- デバイスコードフローの `aws sso login` は、URL とコードを出したあと承認されるまで前面で待ち続ける。Bash ツールから直に実行すると出力が返らず、肝心の URL とコードをユーザーに渡せないまま固まる（渡せないので承認もされない）。そのためスクリプトはログインを `setsid nohup` で背後に回し、ログに出た URL とコードだけを拾って先に返す。ログはコードが載るので `umask 077` で置く
+- ログインまでセッション開始時に済ませたい場合は、環境設定の Environment variables に `SAKEKASU_AWS_LOGIN=1` を入れる。既定で走らせないのは、AWS を触らないセッションにまで AWS CLI の 70MB 超のダウンロードを負わせないため
+- [scripts/setup-aws-profile.sh](../scripts/setup-aws-profile.sh) が `~/.aws/config` に `verify` プロファイルを書き出す。認証は毎セッション `aws sso login --profile verify --use-device-code` で取得し、長期キーは VM にもリポジトリにも置かない。呼ぶたびに `~/.aws/config` を書き直して控えを増やすため、`aws-sso-login.sh` は AWS CLI v2 と `verify` プロファイルが揃っていないときだけ呼ぶ
 - クラウドのコンテナには AWS CLI が入っていないため、同じスクリプトが先に v2 を導入する（v2 が入っていれば飛ばす）。SSO のデバイスコードフローは v1 では動かないので、有無ではなくバージョンで判定している。SessionStart フックではなくこちらに置いたのは、AWS を触らないセッションにまで 70MB 超のダウンロードを負わせないため
 - インストーラは実行前に PGP 署名を検証する。公開鍵は [scripts/aws-cli-public-key.asc](../scripts/aws-cli-public-key.asc) に同梱し、指紋 `FB5DB77FD5C118B80511ADA8A6310ACC4672475C` まで突き合わせる。配信元と同じホストから落とすハッシュでは配信側が乗っ取られたときに検証にならないため、ハッシュではなく署名を見る（AWS はこの zip に `.sha256` を公開しておらず、`.sig` だけを出している）。判定は `gpg` の終了コードではなく `--status-fd` の出力で行う。鍵が期限切れでも終了コードは 0 のままで `VALIDSIG` も出るため、期限切れ時に消える `GOODSIG` と併せて見る。守れるのは配信経路であってリポジトリ自体ではないので、鍵を差し替える PR は AWS の公式手順の記載と照らしてレビューする
 - 参照する Permission Set は `AgentVerifyAccess`。作成手順と権限の考え方は [agent-verify-permission-set.md](agent-verify-permission-set.md) にまとめてある
@@ -46,6 +58,7 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 - 判定のテストは [scripts/deny-aws-writes.test.mjs](../scripts/deny-aws-writes.test.mjs) にある。`node --test scripts/deny-aws-writes.test.mjs` で走る。CI は infra/ のテストしか回していないので、まだ自動では走らない
 - このフックも**クラウドでだけ判定する**。`permissions.deny` に書くとリポジトリ共有のためローカルの正当な管理作業（`sso-admin create-permission-set` など）まで止まり、実際に一度それで詰まった
 - Network access は `awsapps.com` と `*.amazonaws.com` への到達が必要。認証エラーに見える失敗はまずここを疑う
+- `.claude/settings.json` の `permissions.allow` には `aws sso login` / `aws sts get-caller-identity` / `bash scripts/aws-sso-login.sh` を入れてある。ログインのたびに承認プロンプトを挟まないためで、変更操作の関門は従来どおり `deny-aws-writes.sh` と IAM 側にある
 
 ## コスト・利用枠の注意
 
