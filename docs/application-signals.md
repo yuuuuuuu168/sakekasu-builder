@@ -372,19 +372,51 @@ AWS_PROFILE=sakekasu-builder aws cloudwatch list-metrics \
   --namespace AWS/ApplicationSignals --region ap-northeast-1 --output json
 ```
 
-### 導入時点の達成率（2026-08-17）
+### 導入時点の達成率と、その調査結果（2026-08-17）
 
-SLO を作った直後の可用性は **84.51%** で、**すでに目標の 90% を割っていた**。`60/71` に一致するので、直近30日で 71 リクエスト中 11 回が失敗している。
+SLO を作った直後の可用性は **84.51%**（`60/71`）で、すでに目標を割っていた。11件すべての中身を追った結果、**現行のコードに起因する失敗は1件も無かった**。
 
-これは SLO が意図どおり働いた結果でもある。`ocr-errors`（15分で3件以上）は一度も鳴っておらず、ぽつぽつ失敗する状態が見えていなかった。Issue #115 と同じ構図なので、失敗の中身を追う価値がある。
+| 日時（UTC） | 件数 | 原因 |
+|---|---|---|
+| 08-03 11:09 / 08-08 14:28 ×5 / 08-09 07:57 ×3 | 9 | Issue #115（Bedrock の 5MB 上限は base64 後の値）。PR #117 で修正済み |
+| 08-10 03:52 / 04:50 | 2 | `event.arguments` が無い直接 invoke。計装の動作確認中の手動実行で、実利用の失敗ではない |
+
+#115 の修正（2026-08-10 02:04Z）以降、この失敗は一度も起きていない。08-11・08-12・08-16 のエラーはいずれも 0。
+
+**そのうえで、この期間は SLO の評価から外してある**（`exclusionWindows`）。直すものが無いのに約3週間アラームが鳴り続けると、通知を読まなくなるという形で監視そのものを損なうため。窓から履歴が抜ける 2026-09 以降は、除外の設定を消してよい。
+
+### 失敗の中身を調べる
+
+失敗ごとに `ERROR Invoke Error {"errorMessage":"..."}` という1行の要約が出る。これを拾えば、スタックトレース抜きで一覧できる。
 
 ```bash
-# 失敗しているスパンを見る
 AWS_PROFILE=sakekasu-builder aws logs filter-log-events \
-  --log-group-name aws/spans \
-  --start-time $(( ($(date +%s) - 86400 * 7) * 1000 )) \
-  --filter-pattern '"ocr-analyzer" "ERROR"' --region ap-northeast-1 \
-  --query 'events[].message' --output text | head -c 4000
+  --log-group-name /aws/lambda/dev-sakekasu-ocr-analyzer \
+  --start-time $(( ($(date +%s) - 86400 * 30) * 1000 )) \
+  --filter-pattern '"Invoke Error"' --region ap-northeast-1 \
+  --query 'events[].[timestamp,message]' --output text | cut -c1-170
+```
+
+**ハンドラに到達しない失敗（起動時のエラー）はこれに出ない。** 計装のレイヤーを差し替えた直後などは、こちらも見る。
+
+```bash
+AWS_PROFILE=sakekasu-builder aws logs filter-log-events \
+  --log-group-name /aws/lambda/dev-sakekasu-ocr-analyzer \
+  --start-time $(( ($(date +%s) - 86400 * 2) * 1000 )) \
+  --filter-pattern '?"INIT_REPORT" ?"Runtime.ExitError" ?"does not exist"' \
+  --region ap-northeast-1 --query 'events[].[timestamp,message]' --output text
+```
+
+Lambda のエラー数と突き合わせると、ログで説明できていない失敗が残っていないか分かる。
+
+```bash
+AWS_PROFILE=sakekasu-builder aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda --metric-name Errors \
+  --dimensions Name=FunctionName,Value=dev-sakekasu-ocr-analyzer \
+  --start-time "$(date -u -v-30d +%Y-%m-%dT%H:%M:%SZ)" \
+  --end-time "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --period 86400 --statistics Sum --region ap-northeast-1 \
+  --query 'sort_by(Datapoints,&Timestamp)[].[Timestamp,Sum]' --output text
 ```
 
 ### 実測を取り直すコマンド
