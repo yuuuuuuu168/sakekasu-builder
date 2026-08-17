@@ -150,6 +150,24 @@ test('読み切れないコマンドは拒否側に倒す', () => {
   denies('echo $(aws logs delete-log-group --log-group-name y'); // 置換の閉じ忘れ
 });
 
+// bash は NUL を語から取り除く（a$'\x00'b は ab という 1 語になる）。
+// 残してしまうと名前の形から外れて素通りする
+test('NUL でコマンド名やサービス名を割っても止める', () => {
+  denies("aws $'logs\\x00' delete-log-group --log-group-name y");
+  denies("aws $'s3\\x00' rm s3://bucket/key");
+  denies("aws $'logs\\000' delete-log-group --log-group-name y"); // 8 進
+  denies("aws $'lo\\x00gs' delete-log-group --log-group-name y"); // 語の途中
+  denies("$'aws\\x00' logs delete-log-group --log-group-name y"); // コマンド名の位置
+});
+
+// バッククォートの中の \` は閉じではない。bash は打ち消しを外してから中身を
+// 実行するので、外した形で読み直さないと入れ子の呼び出しを見落とす
+test('打ち消したバッククォートの内側も見る', () => {
+  denies('echo "`x\\`aws s3 rm s3://bucket/key\\`done`"');
+  denies('echo `x\\`aws s3 rm s3://bucket/key\\`done`');
+  denies('echo "`echo \\`aws s3 rm s3://bucket/key\\``"');
+});
+
 test('通常の引用は誤検知しない', () => {
   allows("echo \"it's fine\"");
   allows("awk '{print $1}' file.txt");
