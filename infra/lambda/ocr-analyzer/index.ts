@@ -161,6 +161,14 @@ export function validateImageKeyAccess(sub: string, imageKey: string): void {
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
 /**
+ * JPEG のマーカー番号の前に許す詰め物（FF）の数。
+ *
+ * 規格上は数に制限がないが、実際の JPEG で1バイトでも入っていること自体が稀。
+ * 上限を置かないと、FF だけのファイルで中身の長さぶん読み進めることになる
+ */
+const MAX_JPEG_FILL_BYTES = 16;
+
+/**
  * 形式ごとの先頭バイト（Issue #119）。
  *
  * WebP だけは離れた2区間を見る必要がある（`RIFF` + 4バイトの長さ + `WEBP`）ため、
@@ -186,11 +194,15 @@ const IMAGE_SIGNATURES: {
     segments: [{ offset: 0, bytes: [0xff, 0xd8, 0xff] }],
     extraCheck: (bytes) => {
       let index = 3;
-      while (bytes[index] === 0xff) {
+      const limit = index + MAX_JPEG_FILL_BYTES;
+      while (bytes[index] === 0xff && index < limit) {
         index += 1;
       }
-      // 末尾まで詰め物が続いた場合は undefined になり、番号が無いので通さない
-      return (bytes[index] ?? 0x00) >= 0xc0;
+      // 末尾まで詰め物が続いた場合は undefined になり 0x00 として扱われる。
+      // 上限まで詰め物が続いた場合は FF のまま止まる。どちらも番号に辿り着けて
+      // いないので通さない（FF は C0 以上なので、明示的に外す）
+      const marker = bytes[index] ?? 0x00;
+      return marker !== 0xff && marker >= 0xc0;
     },
   },
   {

@@ -71,6 +71,22 @@ describe('detectImageMediaType', () => {
     ).toBeNull();
   });
 
+  it('詰め物が上限（16バイト）まではマーカー番号に辿り着く', () => {
+    const fill = new Array(16).fill(0xff);
+
+    expect(detectImageMediaType(bytesOf([0xff, 0xd8, 0xff, ...fill, 0xe0]))).toBe(
+      'image/jpeg',
+    );
+  });
+
+  it('詰め物が上限を超えるファイルは JPEG と判定しない', () => {
+    // FF だけのファイルで中身の長さぶん読み進めないよう、途中で打ち切る。
+    // 打ち切った位置は FF なので、番号として妥当な範囲に入っていても通さない
+    const fill = new Array(17).fill(0xff);
+
+    expect(detectImageMediaType(bytesOf([0xff, 0xd8, 0xff, ...fill, 0xe0]))).toBeNull();
+  });
+
   it('SOI だけで終わるファイルは JPEG と判定しない', () => {
     expect(detectImageMediaType(new Uint8Array([0xff, 0xd8, 0xff]))).toBeNull();
   });
