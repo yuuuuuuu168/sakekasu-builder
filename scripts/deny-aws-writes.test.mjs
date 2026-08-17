@@ -102,6 +102,33 @@ test('語の途中や先頭に空の引用符を挟んでも見る', () => {
   denies('aws logs de""lete-log-group --log-group-name y');
 });
 
+// bash は引用や打ち消しでコマンド名そのものを隠せる。字面だけを見ると素通りする
+test('引用や打ち消しでコマンド名を隠しても止める', () => {
+  const write = 'logs delete-log-group --log-group-name y';
+  denies(`$'\\x61\\x77\\x73' ${write}`); // ANSI-C 引用（16進）
+  denies(`$'\\141\\167\\163' ${write}`); // 同（8進）
+  denies(`$'\\u0061\\u0077\\u0073' ${write}`); // 同（Unicode）
+  denies(`$"aws" ${write}`); // ロケール引用。翻訳が無ければそのまま aws になる
+});
+
+test('行継続で分けても止める', () => {
+  denies('aws \\\nlogs delete-log-group --log-group-name y');
+  denies('aws logs \\\ndelete-log-group --log-group-name y');
+});
+
+// 二重引用符の中でもコマンド置換は効く
+test('二重引用符の中のコマンド置換も見る', () => {
+  const write = 'logs delete-log-group --log-group-name y';
+  denies(`echo "$(aws ${write})"`);
+  denies(`echo "\`aws ${write}\`"`);
+  denies(`MSG="$(aws ${write})" && echo done`);
+});
+
+test('読み取り操作は引用や行継続をまたいでも通す', () => {
+  allows('echo "$(aws sts get-caller-identity)"');
+  allows('aws logs tail \\\n/aws/lambda/x --since 30m');
+});
+
 test('変数展開でサービス名を隠しても止める', () => {
   denies('aws $SERVICE delete-object --bucket x --key y');
   denies('aws ${SERVICE} delete-object --bucket x --key y');
