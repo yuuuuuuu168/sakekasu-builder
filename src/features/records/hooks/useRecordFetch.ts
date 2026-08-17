@@ -106,44 +106,61 @@ export function useRecordFetch(): UseRecordFetchReturn {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchRecords = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-
-    const results = await Promise.allSettled([
-      fetchAllPurchaseRecords(),
-      fetchAllDrinkingRecords(),
-    ]);
-
-    const allRecords: UnifiedRecord[] = [];
-    const errors: string[] = [];
-
-    // PurchaseRecord の処理
-    const purchaseResult = results[0];
-    if (purchaseResult.status === 'fulfilled') {
-      allRecords.push(...purchaseResult.value.map(toPurchaseUnifiedRecord));
-    } else {
-      console.error('PurchaseRecord list failed:', purchaseResult.reason);
-      errors.push('購入記録の取得に失敗しました');
-    }
-
-    // DrinkingRecord の処理
-    const drinkingResult = results[1];
-    if (drinkingResult.status === 'fulfilled') {
-      allRecords.push(...drinkingResult.value.map(toDrinkingUnifiedRecord));
-    } else {
-      console.error('DrinkingRecord list failed:', drinkingResult.reason);
-      errors.push('飲酒記録の取得に失敗しました');
-    }
-
-    setRecords(allRecords);
-    setError(errors.length > 0 ? errors.join('。') : null);
-    setIsLoading(false);
-  }, []);
+  // 取得のきっかけを effect ひとつに寄せる。refetch はこの値を進めるだけで、
+  // 実際の取得と state 更新は effect の中だけで起きる。取得中に再取得や
+  // アンマウントが起きたら、古い応答は cleanup 側の cancelled で捨てる
+  const [reloadCount, setReloadCount] = useState(0);
 
   useEffect(() => {
-    fetchRecords();
-  }, [fetchRecords]);
+    let cancelled = false;
 
-  return { records, isLoading, error, refetch: fetchRecords };
+    const load = async () => {
+      setIsLoading(true);
+      setError(null);
+
+      const results = await Promise.allSettled([
+        fetchAllPurchaseRecords(),
+        fetchAllDrinkingRecords(),
+      ]);
+
+      if (cancelled) return;
+
+      const allRecords: UnifiedRecord[] = [];
+      const errors: string[] = [];
+
+      // PurchaseRecord の処理
+      const purchaseResult = results[0];
+      if (purchaseResult.status === 'fulfilled') {
+        allRecords.push(...purchaseResult.value.map(toPurchaseUnifiedRecord));
+      } else {
+        console.error('PurchaseRecord list failed:', purchaseResult.reason);
+        errors.push('購入記録の取得に失敗しました');
+      }
+
+      // DrinkingRecord の処理
+      const drinkingResult = results[1];
+      if (drinkingResult.status === 'fulfilled') {
+        allRecords.push(...drinkingResult.value.map(toDrinkingUnifiedRecord));
+      } else {
+        console.error('DrinkingRecord list failed:', drinkingResult.reason);
+        errors.push('飲酒記録の取得に失敗しました');
+      }
+
+      setRecords(allRecords);
+      setError(errors.length > 0 ? errors.join('。') : null);
+      setIsLoading(false);
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadCount]);
+
+  const refetch = useCallback(() => {
+    setReloadCount((count) => count + 1);
+  }, []);
+
+  return { records, isLoading, error, refetch };
 }

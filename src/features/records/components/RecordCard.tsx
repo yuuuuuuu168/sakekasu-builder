@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import type { RecordType, UnifiedRecord } from '../types';
 import { CATEGORY_FILTER_OPTIONS, DRINKING_STATUS_DISPLAY } from '../types';
@@ -137,33 +137,29 @@ function RecordThumbnail({
 }) {
   const firstKey = imageKeys[0] ?? null;
   // 一覧では軽いサムネイルを優先する。サムネイルが未生成の既存記録では
-  // 読み込みに失敗するため、その場合だけ原画にフォールバックする
-  const [useOriginal, setUseOriginal] = useState(false);
-  const activeKey = firstKey && !useOriginal ? toThumbnailKey(firstKey) : firstKey;
-  const { imageUrl, isLoading, hasError } = useImageUrl(activeKey);
-  const [imgError, setImgError] = useState(false);
+  // 読み込みに失敗するため、その場合だけ原画にフォールバックする。
+  // フォールバックしたかどうかは「サムネイルが失敗したか」から毎レンダー
+  // 導出する。effect で state を書き換えると、URL 取得の結果を受けて
+  // もう一往復レンダーが走るため
+  const [thumbnailImgFailed, setThumbnailImgFailed] = useState(false);
+  const [originalImgFailed, setOriginalImgFailed] = useState(false);
+
+  const thumbnail = useImageUrl(firstKey ? toThumbnailKey(firstKey) : null);
+  // URL の取得自体に失敗した場合も原画へ切り替える。ここで諦めると
+  // サムネイル側の一時的な失敗で画像が出なくなる
+  const useOriginal = thumbnailImgFailed || thumbnail.hasError;
+  // 原画の URL はフォールバックが要るときだけ取りにいく（null なら取得しない）
+  const original = useImageUrl(useOriginal ? firstKey : null);
+
+  const { imageUrl, isLoading, hasError } = useOriginal ? original : thumbnail;
   const count = imageKeys.length;
 
-  // 表示対象の画像が変わったらフォールバック状態を戻す
-  useEffect(() => {
-    setUseOriginal(false);
-    setImgError(false);
-  }, [firstKey]);
-
-  // URL の取得自体に失敗した場合も原画へ切り替える。
-  // ここで諦めるとサムネイル側の一時的な失敗で画像が出なくなる
-  useEffect(() => {
-    if (hasError && !useOriginal) {
-      setUseOriginal(true);
-    }
-  }, [hasError, useOriginal]);
-
   const handleImgError = () => {
-    if (!useOriginal) {
-      setUseOriginal(true);
+    if (useOriginal) {
+      setOriginalImgFailed(true);
       return;
     }
-    setImgError(true);
+    setThumbnailImgFailed(true);
   };
 
   if (count === 0) {
@@ -174,7 +170,7 @@ function RecordThumbnail({
     return <ThumbnailSkeleton />;
   }
 
-  if (hasError || !imageUrl || imgError) {
+  if (hasError || !imageUrl || originalImgFailed) {
     return <ImagePlaceholder />;
   }
 
@@ -229,7 +225,10 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
     >
       <div className="flex gap-3">
         {/* サムネイル */}
+        {/* 表示対象の画像が変わったらフォールバック状態を捨てたいので、
+            先頭キーを key にして作り直す */}
         <RecordThumbnail
+          key={record.imageKeys[0] ?? 'no-image'}
           imageKeys={record.imageKeys}
           sakeName={record.sakeName}
           onClickImage={handleThumbnailClick}
