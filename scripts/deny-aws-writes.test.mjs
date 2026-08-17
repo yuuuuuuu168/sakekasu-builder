@@ -2,15 +2,33 @@
 // 実行は `node --test scripts/deny-aws-writes.test.mjs`。
 // このリポジトリの CI は infra/ のテストしか回していないため、まだ自動では走らない。
 //
-// PR #164 のセキュリティレビューで、区切り文字が引数と融合すると 2 つ目の呼び出しを
-// 見落とすと指摘された。同じ形が戻らないよう、バイパスの各形をここに固定する。
+// 関数を import せず、フックと同じように子プロセスへ JSON を流し込んでいる。
+// 「直接実行されたときだけ判定する」ガードを置くと、実行パスにシンボリックリンクが
+// 挟まったときに判定ごと素通りするため、ガードを設けずに済む形にしてある。
+//
+// PR #164 のセキュリティレビューで指摘されたバイパスの各形を、ここに固定する。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-import { findDenied } from './deny-aws-writes.mjs';
+const HOOK = fileURLToPath(new URL('./deny-aws-writes.mjs', import.meta.url));
 
-const allows = (command) => assert.equal(findDenied(command), null, `通るはず: ${command}`);
-const denies = (command) => assert.notEqual(findDenied(command), null, `止まるはず: ${command}`);
+function run(command) {
+  const result = spawnSync(process.execPath, [HOOK], {
+    input: JSON.stringify({ tool_input: { command } }),
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, `フックは常に 0 で終わる: ${result.stderr}`);
+  return result.stdout;
+}
+
+const allows = (command) => assert.equal(run(command), '', `通るはず: ${command}`);
+const denies = (command) => assert.match(
+  run(command),
+  /"permissionDecision":"deny"/,
+  `止まるはず: ${command}`,
+);
 
 test('読み取り操作は通す', () => {
   allows('aws logs tail /aws/lambda/dev-sakekasu-health-check --since 30m');
@@ -48,8 +66,7 @@ test('読み取り操作に似た綴りは通さない', () => {
   denies('aws tail');
 });
 
-// ここから下がレビュー指摘の再発防止。区切り文字が直前の引数と
-// 融合していても、2 つ目の呼び出しを見つけられること
+// 区切り文字が直前の引数と融合していても、2 つ目の呼び出しを見つけられること
 test('区切り文字が空白で挟まれていなくても後続の呼び出しを見る', () => {
   const write = 'logs delete-log-group --log-group-name y';
   denies(`aws logs tail /my-group;aws ${write}`);
@@ -59,6 +76,7 @@ test('区切り文字が空白で挟まれていなくても後続の呼び出�
   denies(`aws logs tail /g&aws ${write}`);
   denies(`aws sts get-caller-identity;aws ${write}`);
   denies(`echo $(aws ${write})`);
+  denies(`echo \`aws ${write}\``);
   denies('aws logs tail /g;aws ec2 terminate-instances --instance-ids i-0abc123');
 });
 
@@ -67,9 +85,26 @@ test('空白で区切られた形も従来どおり見る', () => {
   denies('aws logs tail /g | aws logs put-retention-policy --log-group-name y');
 });
 
-test('引用符ごしのサービス名でも見る', () => {
+// シェルは引用符をまたいだ断片を 1 語につなぐ。判定もそれに合わせること
+test('語の途中や先頭に空の引用符を挟んでも見る', () => {
   denies('aws "logs" delete-log-group --log-group-name y');
   denies("aws 'logs' delete-log-group --log-group-name y");
+  denies('aws ""s3api delete-object --bucket x --key y');
+  denies("aws ''s3api delete-object --bucket x --key y");
+  denies('aws "" s3api delete-object --bucket x --key y');
+  denies('aws s""3api delete-object --bucket x --key y');
+  denies('aws s3""api delete-object --bucket x --key y');
+  denies("aws s''3api delete-object --bucket x --key y");
+  denies('aws e""c2 terminate-instances --instance-ids i-0abc123');
+  denies('aws i""am create-user --user-name x');
+  denies('aws lo""gs delete-log-group --log-group-name y');
+  denies('aws l""ambda invoke --function-name x out.json');
+  denies('aws logs de""lete-log-group --log-group-name y');
+});
+
+test('変数展開でサービス名を隠しても止める', () => {
+  denies('aws $SERVICE delete-object --bucket x --key y');
+  denies('aws ${SERVICE} delete-object --bucket x --key y');
 });
 
 // ここから下は誤検知側。散文やパスを呼び出しと読み違えないこと
@@ -86,4 +121,14 @@ test('引数として渡されたパスは呼び出しと見なさない', () =>
 test('aws を含む無関係なコマンドは通す', () => {
   allows('npm run build');
   allows('grep -rn "aws" scripts/');
+});
+
+test('引用符で囲った引数の中の区切り文字は区切りにしない', () => {
+  allows('aws logs filter-log-events --filter-pattern "a;b" --log-group-name x');
+});
+
+test('壊れた入力では判定しない', () => {
+  const result = spawnSync(process.execPath, [HOOK], { input: 'not json', encoding: 'utf8' });
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, '');
 });

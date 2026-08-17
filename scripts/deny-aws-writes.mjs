@@ -11,8 +11,6 @@
 // 変数展開、base64、SDK 経由の操作までは見えない。本当の境界は verify プロファイルが
 // 参照する読み取り専用の Permission Set にあり、こちらはその手前の網。
 
-import { pathToFileURL } from 'node:url';
-
 // 値を取る AWS CLI のグローバルオプション。サービス名の手前で読み飛ばす
 const FLAGS_WITH_VALUE = new Set([
   '--profile', '--region', '--output', '--endpoint-url', '--query', '--color',
@@ -38,29 +36,65 @@ const READ_EXACT = new Set([
   's3 ls',
 ]);
 
-// シェルの区切り文字。空白で挟まれていなくても独立したトークンに切る
+// シェルの区切り文字。引用符の外にあるときだけ区切りとして扱う
 const SEPARATORS = ['&&', '||', ';', '|', '&', '>', '<', '(', ')', '`'];
+const SEPARATOR_CHARS = ';|&<>()`';
 
-// 引用符の中は 1 つのトークンとして扱う。区切り文字まで切っているのは、\S+ だけで
-// 分けると「読み取りコマンドの引数末尾にセミコロンを付けて次の呼び出しを続ける」形
-// （/my-group;aws … ）でセミコロンが直前の引数と融合し、2 つ目の呼び出しを
-// 見落とすため。区切りが独立トークンになれば parseInvocation がそこで打ち切る
+// コマンド文字列をシェルに近い形で語に分ける。正規表現で切っていたときは
+// 2 通りの見落としがあった。
+//
+//   1. 区切り文字が空白で挟まれていないと直前の引数と融合し、続く 2 つ目の
+//      呼び出しを見落とす（/my-group;aws … の形）
+//   2. 語の途中の引用符を落とさないため、シェルが語結合で組み立てる名前を
+//      別物として読む。bash は ""s3api も s""3api も s3api という 1 語にする
+//
+// どちらもシェルの語の作り方を写していないことが原因なので、引用符を外して
+// 隣り合う断片を 1 語にまとめ、区切りは引用符の外でだけ切るようにする
 function tokenize(command) {
   const tokens = [];
-  const re = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|&&|\|\||[;|&<>()`]|[^\s;|&<>()`]+/g;
-  let m;
-  while ((m = re.exec(command)) !== null) tokens.push(m[0]);
-  return tokens;
-}
+  // 組み立て中の語。「まだ始まっていない」と「空の語」を区別するため null 始まり
+  let word = null;
+  const add = (s) => { word = (word ?? '') + s; };
+  const flush = () => { if (word !== null) tokens.push(word); word = null; };
 
-// 引用符ごしに書かれても実行時には外れる（"s3" は s3 になる）ので、
-// サービス名・操作名を見る前に外す
-function unquote(token) {
-  const q = token[0];
-  if ((q === '"' || q === "'") && token.length >= 2 && token.endsWith(q)) {
-    return token.slice(1, -1);
+  for (let i = 0; i < command.length; i += 1) {
+    const c = command[i];
+
+    // 引用符の外のバックスラッシュは次の 1 文字を打ち消す（\; は区切りではない）
+    if (c === '\\' && i + 1 < command.length) {
+      add(command[i + 1]);
+      i += 1;
+      continue;
+    }
+
+    if (c === '"' || c === "'") {
+      // 閉じないまま終わったら残り全部が 1 語。シングルクォートの中では
+      // バックスラッシュは打ち消しにならない（bash と同じ）
+      let body = '';
+      let j = i + 1;
+      for (; j < command.length && command[j] !== c; j += 1) {
+        if (c === '"' && command[j] === '\\' && j + 1 < command.length) {
+          j += 1;
+          body += command[j];
+          continue;
+        }
+        body += command[j];
+      }
+      add(body);
+      i = j;
+      continue;
+    }
+
+    if (/\s/.test(c)) { flush(); continue; }
+
+    const two = command.slice(i, i + 2);
+    if (two === '&&' || two === '||') { flush(); tokens.push(two); i += 1; continue; }
+    if (SEPARATOR_CHARS.includes(c)) { flush(); tokens.push(c); continue; }
+
+    add(c);
   }
-  return token;
+  flush();
+  return tokens;
 }
 
 // 実際の AWS CLI のサービス名・操作名は英小文字・数字・ハイフンでできている。
@@ -83,10 +117,15 @@ function parseInvocation(tokens, i) {
     }
     // シェルの区切りに当たったら、その aws 呼び出しはそこで終わり
     if (SEPARATORS.includes(t)) break;
-    words.push(unquote(t));
+    // 空の語は読み飛ばす。bash は空文字を引数として渡すが、サービス名の位置に
+    // 空が来た時点でその呼び出しは成立しないので、後ろの語で判定する
+    if (t === '') { j += 1; continue; }
+    words.push(t);
     j += 1;
   }
   if (words.length === 0) return { service: '', operation: '', safe: true };
+  // 変数展開が絡む語は何に化けるか読めないので、呼び出しとして拒否側に倒す
+  if (words[0].includes('$')) return { service: words[0], operation: '', safe: false };
   // サービス名が CLI の形をしていなければ、そもそも呼び出しではない
   if (!CLI_NAME.test(words[0])) return { service: '', operation: '', safe: true };
   // 操作名が形から外れる場合は空にする。空は isRead が false を返すので拒否側に倒れる
@@ -108,7 +147,7 @@ function isRead(service, operation) {
   return READ_PREFIXES.some((p) => operation.startsWith(p));
 }
 
-export function findDenied(command) {
+function findDenied(command) {
   const tokens = tokenize(command);
   for (let i = 0; i < tokens.length; i += 1) {
     // 'aws' 単体、または 'aws' で終わるパス（/usr/local/bin/aws）を CLI 呼び出しとみなす
@@ -122,37 +161,33 @@ export function findDenied(command) {
   return null;
 }
 
-function main() {
-  let raw = '';
-  process.stdin.setEncoding('utf8');
-  process.stdin.on('data', (c) => { raw += c; });
-  process.stdin.on('end', () => {
-    let command = '';
-    try {
-      command = JSON.parse(raw)?.tool_input?.command ?? '';
-    } catch {
-      // 入力を解釈できないときは判定しない（通常の権限フローに任せる）
-      process.exit(0);
-    }
-
-    const denied = findDenied(command);
-    if (!denied) process.exit(0);
-
-    process.stdout.write(JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'deny',
-        permissionDecisionReason:
-          `クラウドセッションからの AWS 変更操作は禁止されています（検出: ${denied}）。` +
-          'verify プロファイルは読み取り専用です。変更が必要な場合は人間に依頼してください。',
-      },
-    }));
+// 判定は常に走らせる。「直接実行されたときだけ動かす」形にすると、実行パスに
+// シンボリックリンクが挟まったときに判定ごと素通りする（argv[1] は解決されず、
+// import.meta.url は解決済みなので一致しない）。テストは import ではなく
+// このスクリプトを子プロセスとして起動する形にしてある
+let raw = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (c) => { raw += c; });
+process.stdin.on('end', () => {
+  let command = '';
+  try {
+    command = JSON.parse(raw)?.tool_input?.command ?? '';
+  } catch {
+    // 入力を解釈できないときは判定しない（通常の権限フローに任せる）
     process.exit(0);
-  });
-}
+  }
 
-// フックとして呼ばれたときだけ stdin を読む。テストから import したときに
-// 標準入力待ちで固まらないようにするため
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  main();
-}
+  const denied = findDenied(command);
+  if (!denied) process.exit(0);
+
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason:
+        `クラウドセッションからの AWS 変更操作は禁止されています（検出: ${denied}）。` +
+        'verify プロファイルは読み取り専用です。変更が必要な場合は人間に依頼してください。',
+    },
+  }));
+  process.exit(0);
+});
