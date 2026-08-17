@@ -42,8 +42,27 @@ describe('detectImageMediaType', () => {
     expect(detectImageMediaType(bytesOf(PNG))).toBe('image/png');
   });
 
-  it('GIF を判定する', () => {
+  it('4バイト目のマーカーが JFIF・Exif 以外でも JPEG と判定する', () => {
+    // 量子化テーブル（DB）から始まる JPEG も Adobe の APP14（EE）も正当な画像。
+    // ここを JFIF（E0）と Exif（E1）に絞ると本物を弾く
+    expect(detectImageMediaType(bytesOf([0xff, 0xd8, 0xff, 0xdb]))).toBe('image/jpeg');
+    expect(detectImageMediaType(bytesOf([0xff, 0xd8, 0xff, 0xee]))).toBe('image/jpeg');
+  });
+
+  it('GIF89a を判定する', () => {
     expect(detectImageMediaType(bytesOf(GIF))).toBe('image/gif');
+  });
+
+  it('GIF87a を判定する', () => {
+    const gif87a = [0x47, 0x49, 0x46, 0x38, 0x37, 0x61];
+
+    expect(detectImageMediaType(bytesOf(gif87a))).toBe('image/gif');
+  });
+
+  it('GIF8 で始まっても版が 87a / 89a でなければ判定しない', () => {
+    const unknownVersion = [0x47, 0x49, 0x46, 0x38, 0x00, 0x00];
+
+    expect(detectImageMediaType(bytesOf(unknownVersion))).toBeNull();
   });
 
   it('WebP を判定する', () => {
