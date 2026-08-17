@@ -558,6 +558,25 @@ describe('MonitoringStack', () => {
       expect(new Set([...goals, ...thresholds]).size, '目標としきい値が食い違っている').toBe(1);
     });
 
+    // 除外は「都合の悪い期間を消す」ことにもなるので、理由と範囲を固定する。
+    // 期間が伸びれば現在の実力まで評価から外れ、SLO が形だけになる
+    it('SLO は #115 の修正前の期間だけを評価から外している', () => {
+      const slos = Object.values(
+        template.findResources('AWS::ApplicationSignals::ServiceLevelObjective'),
+      );
+
+      expect(slos.length).toBeGreaterThan(0);
+      for (const slo of slos) {
+        const windows = slo.Properties?.ExclusionWindows;
+
+        expect(windows, `${slo.Properties?.Name} に除外設定が無い`).toHaveLength(1);
+        expect(windows[0].StartTime).toBe('2026-08-03T00:00:00Z');
+        expect(windows[0].Window).toEqual({ Duration: 8, DurationUnit: 'DAY' });
+        // なぜ外したのかが分からない除外は、次に見た人が判断できない
+        expect(windows[0].Reason, `${slo.Properties?.Name} の除外に理由が無い`).toMatch(/#115/);
+      }
+    });
+
     // 日に数回しか呼ばれないので、1時間窓にするとほとんどが「データ無し」に
     // なる。バーンレートは窓の選び方がそのまま使い物になるかを決める
     it('SLO のバーンレートは1日窓だけを使う', () => {
