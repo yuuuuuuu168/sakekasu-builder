@@ -92,9 +92,14 @@ jobs:
           cache-dependency-path: package-lock.json
       # --ignore-scripts の理由は infra ジョブと同じ。PR のブランチをそのまま
       # checkout する以上、lock に仕込まれたインストール時スクリプトは走らせない。
-      # lint も tsc も esbuild のバイナリを要らないので、これで足りる
+      # lint も tsc も vitest も esbuild のインストール時スクリプトを要らない
+      # （バイナリは @esbuild/linux-x64 として入る）
       - run: npm ci --ignore-scripts
       - run: npm run lint
       # tsconfig.app.json はアプリ本体の設定。root の tsconfig.json は
       # プロジェクト参照だけなので、こちらを明示して検査する
       - run: npx tsc --noEmit -p tsconfig.app.json
+      # src/ に絞る。root の vitest は infra と sommelier のテストまで拾うが、
+      # それらの依存はそれぞれの node_modules にあるため import が解決できずに
+      # 落ちる。infra のテストは上のジョブが見ているので、ここは重ならない
+      - run: npx vitest run src/
