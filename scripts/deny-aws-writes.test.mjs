@@ -160,8 +160,8 @@ test('NUL でコマンド名やサービス名を割っても止める', () => {
   denies("$'aws\\x00' logs delete-log-group --log-group-name y"); // コマンド名の位置
 });
 
-// 不可視文字は名前の形を崩す。AWS CLI 自身も弾く形だが、関門としては
-// 素通りさせない。範囲ではなく Unicode の分類（Cc・Cf・M）で落としている
+// 単独では字にならない文字は名前の形を崩す。AWS CLI 自身も弾く形だが、関門
+// としては素通りさせない。範囲ではなく Unicode の分類で落としている
 test('制御文字で名前を割っても止める', () => {
   const W = 'delete-log-group --log-group-name y';
   denies(`aws $'\\x01logs' ${W}`);
@@ -185,6 +185,22 @@ test('C1 やゼロ幅の文字で名前を割っても止める', () => {
   denies(`aws \ufefflogs ${W}`); // BOM
 });
 
+// 私用領域は表示のされ方が決まっておらず、孤立サロゲートは文字を成さない。
+// どちらも単独では字にならないので、結合文字と同じ扱いで落とす
+test('私用領域や孤立サロゲートで名前を割っても止める', () => {
+  const W = 'delete-log-group --log-group-name y';
+  denies(`aws l\ue000ogs ${W}`); // 私用領域（語中）
+  denies(`\ue000aws logs ${W}`); // コマンド名の位置
+  denies(`aws l\ud800ogs ${W}`); // 孤立サロゲート
+});
+
+// 単独で字になる文字は落とさない。落とすには同形異字の対応表が要るうえ、
+// そうした名前は AWS CLI が ParamValidation で弾いて API 呼び出しに至らない
+test('見た目が紛らわしいだけの文字は対象外', () => {
+  const W = 'delete-log-group --log-group-name y';
+  allows(`aws l\u02b0ogs ${W}`); // 修飾文字（Lm）
+  allows(`aws l\u043egs ${W}`); // キリル文字の о
+});
 // 結合文字はそれ自体では字にならず前の字を飾るだけなので、名前の一部になり得ない
 test('結合文字で名前を飾っても止める', () => {
   const W = 'delete-log-group --log-group-name y';
@@ -200,11 +216,14 @@ test('sso はログインだけ通す', () => {
   denies('aws sso logout --profile verify');
 });
 
-// AWS 自身が読み取り専用の管理ポリシー CloudWatchLogsReadOnlyAccess に入れている
-test('Logs Insights の操作は通す', () => {
+// start-query と start-live-tail は AWS 自身が読み取り専用の管理ポリシー
+// CloudWatchLogsReadOnlyAccess に入れており、作るのは自分のクエリ・自分の
+// ストリームだけ。stop-query は他人が始めたクエリも止められるので通さない
+test('Logs Insights は自分の状態を作る操作だけ通す', () => {
   allows('aws logs start-query --profile verify');
-  allows('aws logs stop-query --query-id x');
   allows('aws logs start-live-tail --log-group-identifiers x');
+  allows('aws logs describe-queries');
+  denies('aws logs stop-query --query-id x');
 });
 
 // バッククォートの中の \` は閉じではない。bash は打ち消しを外してから中身を
