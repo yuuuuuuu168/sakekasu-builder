@@ -50,6 +50,12 @@ const ANSI_C_ESCAPES = {
   r: '\r', t: '\t', v: '\v', '\\': '\\', "'": "'", '"': '"', '?': '?',
 };
 
+// 数値指定の打ち消しを文字に直す。bash に合わせて 2 つは文字にしない。
+//   - NUL は語から取り除かれる（a$'\x00'b は bash では ab という 1 語）。
+//     落とさずに残すと logs\0 のような語ができ、名前の形から外れて素通りする
+//   - \U は 8 桁取れるので Unicode の範囲を超え得る。超える値を渡すと例外になる
+const codeToChar = (code) => (code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '');
+
 function decodeAnsiC(body) {
   let out = '';
   for (let i = 0; i < body.length; i += 1) {
@@ -63,17 +69,14 @@ function decodeAnsiC(body) {
     if (radix16) {
       const h = digits(new RegExp(`^[0-9a-fA-F]{1,${radix16}}`));
       if (h) {
-        // \U は 8 桁取れるので Unicode の範囲を超え得る。超える値で
-        // String.fromCodePoint を呼ぶと例外になるため、その場合は文字を落とす
-        const code = parseInt(h, 16);
-        if (code <= 0x10ffff) out += String.fromCodePoint(code);
+        out += codeToChar(parseInt(h, 16));
         i += h.length;
         continue;
       }
     }
     if (c >= '0' && c <= '7') {
       const o = (body.slice(i).match(/^[0-7]{1,3}/) ?? [''])[0];
-      out += String.fromCharCode(parseInt(o, 8));
+      out += codeToChar(parseInt(o, 8));
       i += o.length - 1;
       continue;
     }
@@ -119,6 +122,14 @@ function tokenize(command, nesting = 0) {
     for (; j < command.length; j += 1) {
       const ch = command[j];
       if (isBacktick) {
+        // バッククォートの中では \` と \\ が打ち消し。閉じと取り違えないよう読み飛ばす。
+        // bash は打ち消しを外してから中身を実行するので、外した形で本体に積む。
+        // 外さずに積むと、入れ子のバッククォートが復元されず中の呼び出しを見落とす
+        if (ch === '\\' && (command[j + 1] === '`' || command[j + 1] === '\\')) {
+          body += command[j + 1];
+          j += 1;
+          continue;
+        }
         if (ch === '`') break;
       } else if (ch === '(') {
         depth += 1;
