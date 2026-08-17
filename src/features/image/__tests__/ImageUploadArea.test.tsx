@@ -72,6 +72,20 @@ describe('ImageUploadArea', () => {
     expect(mockCreateObjectURL).toHaveBeenCalledWith(file);
   });
 
+  // オブジェクト URL は state を経由せず img へ直接渡し、破棄時に解放する
+  it('プレビュー画像にオブジェクト URL が渡り、破棄時に解放される', () => {
+    const file = new File(['img'], 'sake.jpg', { type: 'image/jpeg' });
+    const { unmount } = renderUploadArea({ imageFile: file });
+
+    expect(screen.getByAltText('選択された画像 1')).toHaveAttribute(
+      'src',
+      'blob:mock-preview-url',
+    );
+
+    unmount();
+    expect(mockRevokeObjectURL).toHaveBeenCalledWith('blob:mock-preview-url');
+  });
+
   // 要件 1.7: プレビュー表示時に削除ボタンが表示される
   it('プレビュー表示時に削除ボタンが表示される', () => {
     const file = new File(['img'], 'sake.jpg', { type: 'image/jpeg' });
