@@ -370,15 +370,18 @@ function PreviewItem({
   onDelete: () => void;
   disabled: boolean;
 }) {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
 
+  // オブジェクト URL は React の外の資源なので、state に持たず img へ直接渡す。
+  // state 経由にすると effect 内の setState で1レンダー余計に回る。
+  // 解放は cleanup で行い、作り直しも同じ effect が受け持つ（StrictMode の
+  // 二重マウントでも作り直されるため、解放済みの URL が残らない）
   useEffect(() => {
     const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
+    const img = imgRef.current;
+    if (img) img.src = url;
     return () => URL.revokeObjectURL(url);
   }, [file]);
-
-  if (!previewUrl) return null;
 
   return (
     <motion.div
@@ -389,7 +392,7 @@ function PreviewItem({
       data-testid={`image-preview-${index}`}
     >
       <img
-        src={previewUrl}
+        ref={imgRef}
         alt={`選択された画像 ${index + 1}`}
         className="h-24 w-24 rounded-lg border border-border object-cover"
       />
