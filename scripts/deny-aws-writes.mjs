@@ -54,14 +54,23 @@ const ANSI_C_ESCAPES = {
 // 超え得るが、超える値を String.fromCodePoint に渡すと例外になる
 const codeToChar = (code) => (code <= 0x10ffff ? String.fromCodePoint(code) : '');
 
-// 語から取り除く制御文字。取り除かないと、名前に混ぜるだけで形が崩れて
-// 「CLI 呼び出しではない」と判断され素通りする（$'\x01logs' のような形）。
+// 語から取り除く不可視文字。混ぜるだけで名前の形が崩れ、「CLI 呼び出しでは
+// ない」と判断されて素通りするため、照合の前に落とす（$'\x01logs' のような形）。
 //
-// bash が実際に落とすのは NUL だけで、他の制御文字はそのまま子プロセスへ渡る。
-// それでも取り除くのは、AWS CLI のサービス名・操作名に制御文字が入り得ないため。
-// 混ざった名前は AWS CLI 自身が ParamValidation で弾くので、取り除いて照合しても
-// 新たに止まるのは元々実行できないコマンドだけで済む
-const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
+// 個別の符号位置ではなく Unicode の分類で指定している。制御文字（Cc）と書式用
+// （Cf）をまとめて覆うので、C0・DEL・C1 に加えてゼロ幅スペースや BOM、
+// ソフトハイフンも同じ規則で落ちる。範囲を継ぎ足していく形だと、隣の範囲が
+// 残るたびに同じ穴が開き直す。
+//
+// bash が実際に落とすのは NUL だけで、他はそのまま子プロセスへ渡る。それでも
+// 落とすのは、AWS CLI のサービス名・操作名に不可視文字が入り得ないため。混ざった
+// 名前は AWS CLI 自身が弾くので、落として照合しても新たに止まるのは元々実行
+// できないコマンドだけで済む。
+//
+// 目に見える偽装（キリル文字の о を使うなど）はここでは扱わない。判別には
+// 同形異字の対応表が要るうえ、そうした名前も AWS CLI が ParamValidation で
+// 弾くため、この関門で追う利得が薄い。
+const INVISIBLE_CHARS = /[\p{Cc}\p{Cf}]/gu;
 
 function decodeAnsiC(body) {
   let out = '';
@@ -112,10 +121,10 @@ function tokenize(command, nesting = 0) {
   // 二重引用符の内側か。$"…" もロケール変換が働かない限り同じ扱いになる
   let inDoubleQuote = false;
   const add = (s) => { word = (word ?? '') + s; };
-  // 制御文字は語を確定するときにまとめて落とす。打ち消しの表記（\x01）でも
+  // 不可視文字は語を確定するときにまとめて落とす。打ち消しの表記（\x01）でも
   // 名前付きの打ち消し（\a や \n）でも、引用の中の生の文字でも同じ経路を通る
   const flush = () => {
-    if (word !== null) tokens.push(word.replace(CONTROL_CHARS, ''));
+    if (word !== null) tokens.push(word.replace(INVISIBLE_CHARS, ''));
     word = null;
   };
   const openDoubleQuote = () => { inDoubleQuote = true; word = word ?? ''; };
