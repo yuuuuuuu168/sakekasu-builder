@@ -33,9 +33,9 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 
 ## 先に片付けること
 
-[#129](https://github.com/yuuuuuuu168/sakekasu-builder/issues/129)（`logRetention` → `logGroup`）を先に済ませる。
+[#129](https://github.com/yuuuuuuu168/sakekasu-builder/issues/129)（`logRetention` → `logGroup`）を先に済ませる。コードは対応済みだが、**既存のロググループを `cdk import` で取り込む手作業が残っている**（手順は [log-group-import.md](log-group-import.md)）。それが終わるまでは `Custom::LogRetention` が実物として残る。
 
-移行対象のスタックには `Custom::LogRetention` が6個ある（api 2 / auth 1 / monitoring 3）。取り込みは問題なく通るが、CloudFormation へ戻すときに引っかかる。CFn は Lambda 実装のカスタムリソースを IMPORT できないため、`cdkd export --include-non-importable` による2フェーズ移行（フェーズ2で CFn が再 CREATE し、`onCreate` が呼び直される）が必要になる。#129 が終われば `Custom::LogRetention` そのものが消えるので、戻し手順が素直になる。
+移行対象のスタックには `Custom::LogRetention` が6個あった（api 2 / auth 1 / monitoring 3）。取り込みは問題なく通るが、CloudFormation へ戻すときに引っかかる。CFn は Lambda 実装のカスタムリソースを IMPORT できないため、`cdkd export --include-non-importable` による2フェーズ移行（フェーズ2で CFn が再 CREATE し、`onCreate` が呼び直される）が必要になる。#129 が終われば `Custom::LogRetention` そのものが消えるので、戻し手順が素直になる。
 
 ## 移行対象
 
@@ -58,14 +58,14 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | --- | --- | --- |
 | AppSync GraphQLApi / Schema / DataSource / Resolver | 22 | SDK Provider |
 | CloudWatch Alarm | 22 | SDK Provider |
-| IAM Role / Policy | 28 | SDK Provider |
-| Lambda Function / Permission | 13 | SDK Provider |
+| IAM Role / Policy | 22 | SDK Provider |
+| Lambda Function / Permission | 10 | SDK Provider |
 | DynamoDB Table | 2 | SDK Provider |
 | Cognito UserPool | 1 | SDK Provider |
 | Events Rule | 4 | SDK Provider |
 | SNS Topic / Subscription / TopicPolicy | 3 | SDK Provider |
 | S3 Bucket | 1 | SDK Provider |
-| Custom::LogRetention | 6 | SDK Provider |
+| Logs LogGroup | 6 | SDK Provider |
 | AppSync FunctionConfiguration | 4 | 一覧になし → Cloud Control API |
 | Cognito UserPoolClient | 2 | 同上 |
 | Logs MetricFilter | 2 | 同上 |

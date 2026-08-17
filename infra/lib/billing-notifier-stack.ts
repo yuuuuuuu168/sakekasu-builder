@@ -11,7 +11,7 @@ import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
-import { LAMBDA_LOG_RETENTION } from './log-retention.js';
+import { lambdaLogGroup } from './log-retention.js';
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 
@@ -49,10 +49,11 @@ export class BillingNotifierStack extends cdk.Stack {
 
     // --- 毎日のレポート本体 ---
 
+    const billingNotifierFunctionName = `${prefix}-notifier`;
     const billingNotifier = new NodejsFunction(this, 'BillingNotifierFunction', {
-      functionName: `${prefix}-notifier`,
+      functionName: billingNotifierFunctionName,
       runtime: Runtime.NODEJS_22_X,
-      logRetention: LAMBDA_LOG_RETENTION,
+      logGroup: lambdaLogGroup(this, 'BillingNotifierLogGroup', billingNotifierFunctionName),
       entry: path.join(here, '../lambda/billing-notifier/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(60),
@@ -95,10 +96,11 @@ export class BillingNotifierStack extends cdk.Stack {
       displayName: '酒カス 利用料金レポートの監視',
     });
 
+    const slackNotifierFunctionName = `${prefix}-slack-notifier`;
     const slackNotifier = new NodejsFunction(this, 'SlackNotifierFunction', {
-      functionName: `${prefix}-slack-notifier`,
+      functionName: slackNotifierFunctionName,
       runtime: Runtime.NODEJS_22_X,
-      logRetention: LAMBDA_LOG_RETENTION,
+      logGroup: lambdaLogGroup(this, 'SlackNotifierLogGroup', slackNotifierFunctionName),
       entry: path.join(here, '../lambda/slack-notifier/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(15),
