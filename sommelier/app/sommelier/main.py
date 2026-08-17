@@ -657,13 +657,23 @@ def _query_owner_items(table, owner_sub: str) -> list:
     return items
 
 
-def _build_tools(owner_sub: str) -> list:
+def _build_tools(owner_sub: str, search_enabled: Optional[bool] = None) -> list:
     """owner_sub をクロージャで固定した Tool 群を生成する。
 
     リクエストごとに生成することで、マルチユーザー環境での sub の混線を防ぐ。
     Web 検索の回数上限も、同じくクロージャに持たせてリクエスト単位で数える。
+
+    search_enabled を省略したときは今の設定（API キーの有無）に従う。
+    呼び出し側が渡すのは、システムプロンプトと同じ判断で組み立てるため。
     """
+    if search_enabled is None:
+        search_enabled = _web_search.enabled
+
     remaining_searches = MAX_SEARCH_CALLS_PER_REQUEST
+    # 検索回数の判定と減算をひとまとめにするロック。Strands は1回の応答に
+    # 複数の tool_use が並んだとき、同期ツールをスレッドプールで並行に呼ぶ。
+    # 判定と減算が分かれていると、どちらも上限前の値を読んで全部通ってしまう
+    search_budget_lock = threading.Lock()
 
     @tool
     def list_my_purchase_records(
@@ -765,16 +775,17 @@ def _build_tools(owner_sub: str) -> list:
             検索できなかったときは error を返す。
         """
         nonlocal remaining_searches
-        if remaining_searches <= 0:
-            return {
-                "error": (
-                    f"この相談で使える検索回数（{MAX_SEARCH_CALLS_PER_REQUEST}回）を"
-                    "使い切りました。これ以上は調べられません"
-                )
-            }
         # 失敗した検索も1回として数える。数えないと、失敗し続ける状況で
         # 上限が効かなくなる（コスト保護としては失敗も呼び出しのうち）
-        remaining_searches -= 1
+        with search_budget_lock:
+            if remaining_searches <= 0:
+                return {
+                    "error": (
+                        f"この相談で使える検索回数（{MAX_SEARCH_CALLS_PER_REQUEST}回）を"
+                        "使い切りました。これ以上は調べられません"
+                    )
+                }
+            remaining_searches -= 1
 
         result = _web_search.search(query, max_results)
         if "error" in result:
@@ -784,7 +795,7 @@ def _build_tools(owner_sub: str) -> list:
     tools = [list_my_purchase_records, list_my_drinking_records]
     # API キーが未設定なら検索ツール自体を渡さない。渡したうえで毎回
     # エラーを返すより、初めから無いほうがモデルは迷わない
-    if _web_search.enabled:
+    if search_enabled:
         tools.append(search_web)
     return tools
 
@@ -965,7 +976,11 @@ async def invoke(payload, context):
             yield f"相談内容が長すぎます。{MAX_PROMPT_LENGTH}文字以内でお願いします。"
             return
 
-    tools = _build_tools(owner_sub)
+    # ツールとシステムプロンプトは同じ判断で組み立てる。それぞれが別々に
+    # 設定を読むと、「検索ツールは渡したが、検索結果を指示として扱わない
+    # 注意書きは無い」組み合わせが将来生まれうる
+    search_enabled = _web_search.enabled
+    tools = _build_tools(owner_sub, search_enabled=search_enabled)
 
     # 直前までの会話を渡して文脈を引き継ぐ。Runtime はリクエストごとに
     # 状態を持たないため、履歴はクライアントから受け取る
@@ -978,7 +993,7 @@ async def invoke(payload, context):
 
     agent = Agent(
         model=load_model(),
-        system_prompt=_build_system_prompt(preferences),
+        system_prompt=_build_system_prompt(preferences, search_enabled=search_enabled),
         tools=tools,
         messages=history,
     )

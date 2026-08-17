@@ -218,6 +218,13 @@ class Test検索結果の扱い:
         assert len(got["results"]) == 1
         assert got["results"][0]["url"] == "https://example.com/sake"
 
+    def test_URLとして読めない結果が混ざっても落ちない(self):
+        payload = {"results": [result(url="https://[::1/path"), result()]}
+
+        got = build(payload=payload).search("獺祭")
+
+        assert len(got["results"]) == 1
+
     def test_想定外の形の応答でも落ちない(self):
         payload = {"results": ["ただの文字列", None, result()]}
 
@@ -265,6 +272,29 @@ class Test出典URLの検証:
 
     def test_エンティティ経由で山括弧に戻る値は通さない(self):
         assert _safe_url("https://example.com/&lt;/web_data&gt;") is None
+
+    @pytest.mark.parametrize(
+        "deceptive",
+        [
+            "https://sake-awards.jp@attacker.example/path",
+            "https://sake-awards.jp:pass@attacker.example/",
+            "https://@attacker.example/",
+        ],
+    )
+    def test_user_host形式は通さない(self, deceptive):
+        # 表示は信頼できるドメインなのに、実際の接続先は @ の後ろになる。
+        # 出典はそのままリンクになるので、通すと出典自体を偽装できる
+        assert _safe_url(deceptive) is None
+
+    def test_パスやクエリのアットマークは残す(self):
+        url = "https://example.com/users/@sake?to=a@example.com"
+
+        assert _safe_url(url) == url
+
+    def test_URLとして読めない値でも例外を投げない(self):
+        # 閉じていない IPv6 の括弧は urlsplit が ValueError を投げる。
+        # ここで落とすと検索どころか相談ごと止まる
+        assert _safe_url("https://[::1/path") is None
 
     def test_クエリ文字列は壊さない(self):
         url = "https://example.com/search?q=%E7%8D%BA%E7%A5%AD&page=2#top"

@@ -8,6 +8,8 @@ main.py が持つ責務のほう。
 - 検索が使えないときにツールもプロンプトも出さないか
 """
 
+import asyncio
+
 import pytest
 
 import main
@@ -70,6 +72,17 @@ class Test検索ツールを渡すかどうか:
         assert "search_web" in names
 
 
+    def test_渡された判断がツールの有無を決める(self, monkeypatch):
+        # invoke は設定を1回だけ読んで、ツールとシステムプロンプトの
+        # 両方に同じ判断を渡す。別々に読むと「ツールはあるが注意書きが無い」
+        # 組み合わせが生まれうる
+        monkeypatch.setattr(main, "_web_search", FakeWebSearch(enabled=True))
+
+        names = [t.tool_name for t in _build_tools(OWNER_SUB, search_enabled=False)]
+
+        assert "search_web" not in names
+
+
 class Test検索回数の上限:
     def test_上限までは検索できる(self, search_tool):
         tool, fake = search_tool()
@@ -95,6 +108,27 @@ class Test検索回数の上限:
 
         for _ in range(MAX_SEARCH_CALLS_PER_REQUEST + 2):
             tool(query="獺祭")
+
+        assert len(fake.calls) == MAX_SEARCH_CALLS_PER_REQUEST
+
+    def test_判定と減算は同時に走っても取りこぼさない(self, search_tool):
+        # Strands は1回の応答に複数の tool_use が並ぶと、同期ツールを
+        # スレッドプールで並行に呼ぶ。判定と減算が分かれていると、
+        # どれも上限前の値を読んで全部通ってしまう
+        import threading
+
+        tool, fake = search_tool()
+        barrier = threading.Barrier(8)
+
+        def call():
+            barrier.wait()
+            tool(query="獺祭")
+
+        threads = [threading.Thread(target=call) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
         assert len(fake.calls) == MAX_SEARCH_CALLS_PER_REQUEST
 
@@ -198,6 +232,36 @@ class Test検索結果の無害化:
         got = tool(query="獺祭")
 
         assert got["results"][0]["snippet"] == f"<web_data>{'あ' * MAX_SNIPPET_LENGTH}</web_data>"
+
+
+class Testツールと注意書きの一致:
+    """検索ツールを渡すなら、検索結果を指示として扱わない注意書きも必ず渡す。
+
+    片方だけになると、モデルは外部サイトの文章を疑わずに読むことになる。
+    invoke が設定を1回だけ読んで両方に配っているかを確かめる。
+    """
+
+    def test_invokeは同じ判断でツールと注意書きを組み立てる(self, monkeypatch):
+        from tests.test_invoke_memory import FakeAgent, FakeContext
+
+        monkeypatch.setattr(main, "Agent", FakeAgent)
+        monkeypatch.setattr(main, "load_model", lambda: object())
+        monkeypatch.setattr(main, "_get_owner_sub", lambda context: OWNER_SUB)
+        monkeypatch.setattr(main, "_web_search", FakeWebSearch())
+
+        async def collect():
+            return [
+                chunk
+                async for chunk in main.invoke(
+                    {"prompt": "獺祭の新酒はもう出た？"}, FakeContext()
+                )
+            ]
+
+        asyncio.run(collect())
+
+        kwargs = FakeAgent.last_kwargs
+        assert any(t.tool_name == "search_web" for t in kwargs["tools"])
+        assert "# Web 検索（search_web）" in kwargs["system_prompt"]
 
 
 class Test検索のシステムプロンプト:

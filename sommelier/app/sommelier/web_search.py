@@ -104,9 +104,19 @@ def _safe_url(value) -> Optional[str]:
     if len(encoded) > MAX_URL_LENGTH:
         return None
 
-    parsed = urllib.parse.urlsplit(encoded)
+    try:
+        parsed = urllib.parse.urlsplit(encoded)
+    except ValueError:
+        # 閉じていない IPv6 の括弧など、そもそも URL として読めないもの。
+        # ここで例外を投げると相談ごと落ちるので、捨てて次の結果へ進む
+        return None
     # javascript: や data: を弾く。出典として出す以上、開ける先は Web だけでよい
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return None
+    # user@host の形は弾く。https://有名な酒屋.jp@attacker.example/... のように
+    # 「表示は信頼できるドメイン、実際の接続先は別」を作れてしまう。
+    # 出典はそのままリンクになるので、これを通すと出典自体が偽装できる
+    if "@" in parsed.netloc:
         return None
 
     # percent-encode をすり抜けて山括弧に戻る表記（&lt; や全角）が

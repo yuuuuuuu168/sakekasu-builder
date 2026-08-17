@@ -17,6 +17,28 @@ import type { ReactNode } from 'react';
 const URL_PATTERN = /https?:\/\/[^\s<>"'）」』]+/g;
 const TRAILING_CHARS = /[.,;:!?、。）)\]】]+$/;
 
+// リンクにする URL の長さの上限。`web_search.py` の MAX_URL_LENGTH と揃える。
+// 検索結果の url 欄は向こうで検証済みだが、ここに来るのはモデルが書いた
+// 本文なので、長いクエリ文字列に文脈を詰めた URL も現れうる
+const MAX_URL_LENGTH = 500;
+
+/**
+ * リンクとして描画してよい URL かを見る。
+ *
+ * 検索結果の url 欄は `web_search.py` の `_safe_url()` を通っているが、
+ * ここに流れてくるのはモデルが書いた本文で、検索結果の抜粋に載っていた
+ * URL をそのまま書き写すこともある。上流の検証は当てにせず、描画側でも
+ * 同じ線引きをしておく。
+ */
+function isRenderableUrl(url: string): boolean {
+  // 句読点を削った結果スキームだけになったものはリンクにしない
+  if (url.length <= 'https://'.length || url.length > MAX_URL_LENGTH) return false;
+  // user@host の形は弾く。表示は信頼できるドメインなのに、実際の接続先は
+  // アットマークの後ろになる（出典を装ったフィッシングの形）
+  const host = url.replace(/^https?:\/\//i, '').split('/')[0];
+  return !host.includes('@');
+}
+
 export function linkifyText(text: string): ReactNode {
   if (!text) return text;
 
@@ -29,8 +51,8 @@ export function linkifyText(text: string): ReactNode {
   let match = pattern.exec(text);
   while (match !== null) {
     const url = match[0].replace(TRAILING_CHARS, '');
-    // 句読点を削った結果スキームだけになったものはリンクにしない
-    if (url.length > 'https://'.length) {
+    // リンクにしなかった URL は、そのまま地の文として残る（lastIndex を進めない）
+    if (isRenderableUrl(url)) {
       if (match.index > lastIndex) {
         nodes.push(text.slice(lastIndex, match.index));
       }

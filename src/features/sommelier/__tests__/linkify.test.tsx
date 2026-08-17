@@ -52,6 +52,40 @@ describe('linkifyText', () => {
     expect(screen.queryByRole('link')).toBeNull();
   });
 
+  it('user@host の形はリンクにせず、文字列のまま残す', () => {
+    // 表示は信頼できるドメインなのに、実際の接続先はアットマークの後ろになる。
+    // 出典を装ったフィッシングの形なので、開ける状態にしない
+    const text = '出典 https://sake-awards.jp@attacker.example/path です';
+    const { container } = render(<div>{linkifyText(text)}</div>);
+
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(container.textContent).toBe(text);
+  });
+
+  it('長すぎる URL はリンクにしない', () => {
+    // 本文はモデルが書くので、文脈を詰め込んだ長い URL も現れうる。
+    // クリックできる形にしなければ、中身が外へ出ることはない
+    const long = `https://example.com/?q=${'a'.repeat(600)}`;
+    const { container } = render(<div>{linkifyText(long)}</div>);
+
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(container.textContent).toBe(long);
+  });
+
+  it('上限内の URL はリンクにする', () => {
+    const url = `https://example.com/?q=${'a'.repeat(400)}`;
+    render(<div>{linkifyText(url)}</div>);
+
+    expect(link(url).getAttribute('href')).toBe(url);
+  });
+
+  it('パスやクエリのアットマークはリンクのまま残す', () => {
+    const url = 'https://example.com/users/@sake';
+    render(<div>{linkifyText(url)}</div>);
+
+    expect(link(url).getAttribute('href')).toBe(url);
+  });
+
   it('URL が無ければそのまま返す', () => {
     expect(linkifyText('今夜は燗酒がおすすめです')).toBe('今夜は燗酒がおすすめです');
     expect(linkifyText('')).toBe('');
