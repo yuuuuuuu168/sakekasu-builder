@@ -40,6 +40,9 @@ const READ_EXACT = new Set([
 const SEPARATORS = ['&&', '||', ';', '|', '&', '>', '<', '(', ')', '`'];
 const SEPARATOR_CHARS = ';|&<>()`';
 
+// 読み切れなかったコマンドを表す。判定できないものは通さず拒否側に倒す
+class UnparsableCommand extends Error {}
+
 // ANSI-C 引用（$'…'）の中の打ち消しを実際の文字に戻す。bash はここで \x61 の
 // ような表記を解釈するため、字面のまま読むとコマンド名を見落とす
 const ANSI_C_ESCAPES = {
@@ -59,7 +62,14 @@ function decodeAnsiC(body) {
     const radix16 = { x: 2, u: 4, U: 8 }[c];
     if (radix16) {
       const h = digits(new RegExp(`^[0-9a-fA-F]{1,${radix16}}`));
-      if (h) { out += String.fromCodePoint(parseInt(h, 16)); i += h.length; continue; }
+      if (h) {
+        // \U は 8 桁取れるので Unicode の範囲を超え得る。超える値で
+        // String.fromCodePoint を呼ぶと例外になるため、その場合は文字を落とす
+        const code = parseInt(h, 16);
+        if (code <= 0x10ffff) out += String.fromCodePoint(code);
+        i += h.length;
+        continue;
+      }
     }
     if (c >= '0' && c <= '7') {
       const o = (body.slice(i).match(/^[0-7]{1,3}/) ?? [''])[0];
@@ -83,7 +93,9 @@ function decodeAnsiC(body) {
 //
 // どれもシェルの語の作り方を写していないことが原因なので、引用と打ち消しを
 // 解いてから語をつなぐ。区切りは引用の外でだけ切る
-function tokenize(command) {
+function tokenize(command, nesting = 0) {
+  if (nesting > 32) throw new UnparsableCommand('コマンド置換の入れ子が深すぎる');
+
   const tokens = [];
   // 組み立て中の語。「まだ始まっていない」と「空の語」を区別するため null 始まり
   let word = null;
@@ -93,29 +105,52 @@ function tokenize(command) {
   const flush = () => { if (word !== null) tokens.push(word); word = null; };
   const openDoubleQuote = () => { inDoubleQuote = true; word = word ?? ''; };
 
+  const isSubstitution = (i) => command[i] === '`' || (command[i] === '$' && command[i + 1] === '(');
+
+  // コマンド置換の中身を切り出し、同じ規則で読み直して区切りで挟んで足す。
+  // 引用の状態には触らないので、置換のあとも元の引用が続いているものとして読める。
+  // 以前は引用の外に出る形にしていたが、それだと元の引用を閉じる " が開き側と
+  // 見なされ、後ろのコマンドをまるごと 1 語に飲み込んでいた
+  const consumeSubstitution = (start) => {
+    const isBacktick = command[start] === '`';
+    let depth = 1;
+    let body = '';
+    let j = start + (isBacktick ? 1 : 2);
+    for (; j < command.length; j += 1) {
+      const ch = command[j];
+      if (isBacktick) {
+        if (ch === '`') break;
+      } else if (ch === '(') {
+        depth += 1;
+      } else if (ch === ')') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+      body += ch;
+    }
+    if (j >= command.length) throw new UnparsableCommand('閉じていないコマンド置換');
+    flush();
+    tokens.push('(', ...tokenize(body, nesting + 1), ')');
+    return j;
+  };
+
   for (let i = 0; i < command.length; i += 1) {
     const c = command[i];
 
     if (inDoubleQuote) {
       if (c === '"') { inDoubleQuote = false; continue; }
-      // 二重引用符の中でもコマンド置換は効く。区切りとして切り出し、以降は
-      // 引用の外と同じように読む。閉じ引用符まで戻さないので切りすぎる側に
-      // 倒れるが、見落とす側には倒れない
-      if (c === '`') { flush(); tokens.push('`'); inDoubleQuote = false; continue; }
-      if (c === '$' && command[i + 1] === '(') {
-        flush();
-        tokens.push('(');
-        inDoubleQuote = false;
-        i += 1;
-        continue;
-      }
+      // 二重引用符の中では \ が打ち消しになるので、置換の判定より先に見る
       if (c === '\\' && i + 1 < command.length) { i += 1; add(command[i]); continue; }
+      // 二重引用符の中でもコマンド置換は効く
+      if (isSubstitution(i)) { i = consumeSubstitution(i); continue; }
       add(c);
       continue;
     }
 
     if (c === '\\' && command[i + 1] === '\n') { i += 1; continue; } // 行継続。両方消える
     if (c === '\\' && i + 1 < command.length) { add(command[i + 1]); i += 1; continue; }
+
+    if (isSubstitution(i)) { i = consumeSubstitution(i); continue; }
 
     if (c === '$' && command[i + 1] === "'") {
       let body = '';
@@ -128,6 +163,7 @@ function tokenize(command) {
         }
         body += command[j];
       }
+      if (j >= command.length) throw new UnparsableCommand('閉じていない $\'…\'');
       add(decodeAnsiC(body));
       i = j;
       continue;
@@ -136,10 +172,11 @@ function tokenize(command) {
     if (c === '"') { openDoubleQuote(); continue; }
 
     if (c === "'") {
-      // シングルクォートの中に打ち消しは無い。閉じないまま終わったら残り全部が 1 語
+      // シングルクォートの中に打ち消しは無い
       const end = command.indexOf("'", i + 1);
-      add(end === -1 ? command.slice(i + 1) : command.slice(i + 1, end));
-      i = end === -1 ? command.length : end;
+      if (end === -1) throw new UnparsableCommand('閉じていない引用符');
+      add(command.slice(i + 1, end));
+      i = end;
       continue;
     }
 
@@ -151,6 +188,7 @@ function tokenize(command) {
 
     add(c);
   }
+  if (inDoubleQuote) throw new UnparsableCommand('閉じていない引用符');
   flush();
   return tokens;
 }
@@ -235,17 +273,35 @@ process.stdin.on('end', () => {
     process.exit(0);
   }
 
-  const denied = findDenied(command);
+  const deny = (reason) => {
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: reason,
+      },
+    }));
+    process.exit(0);
+  };
+
+  // 判定そのものが失敗したら拒否側に倒す。例外のまま落ちると終了コードが 1 に
+  // なり、フックの異常として素通りする（実際に \U の範囲外でそうなった）
+  let denied;
+  try {
+    denied = findDenied(command);
+  } catch (e) {
+    const detail = e instanceof UnparsableCommand ? e.message : '判定に失敗';
+    deny(
+      `コマンドを解釈できなかったため許可できません（${detail}）。`
+      + 'AWS 変更操作を見落とさないよう、読み切れないコマンドは通していません。',
+    );
+    return;
+  }
+
   if (!denied) process.exit(0);
 
-  process.stdout.write(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason:
-        `クラウドセッションからの AWS 変更操作は禁止されています（検出: ${denied}）。` +
-        'verify プロファイルは読み取り専用です。変更が必要な場合は人間に依頼してください。',
-    },
-  }));
-  process.exit(0);
+  deny(
+    `クラウドセッションからの AWS 変更操作は禁止されています（検出: ${denied}）。`
+    + 'verify プロファイルは読み取り専用です。変更が必要な場合は人間に依頼してください。',
+  );
 });
