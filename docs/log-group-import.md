@@ -46,15 +46,26 @@ CloudFormation の import は追加しか受け付けない。[公式ドキュ�
 
 ### 先にマージしてしまったら
 
-慌てなくてよい。壊れる方向には倒れない。
+慌てなくてよい。壊れる方向には倒れない。#174 で実際に踏んだので、そのときの結果を書いておく。
 
-`cdk deploy --all` はロググループの作成で `AlreadyExists` に当たり、CloudFormation がスタックをロールバックして元に戻す。`Custom::LogRetention` の削除は作成がすべて成功したあとの後始末で走るので、そこまで到達しない。ロググループもログ本体も触られず、保持期間 30 日のまま残る。スタックは `UPDATE_ROLLBACK_COMPLETE` になるだけで、そこからそのままデプロイし直せる。
+`cdk deploy --all` は**チェンジセットの事前検証で弾かれる**。更新そのものが始まらないため、ロールバックすら起きない。
+
+```
+❌  sakekasu-dev-auth failed: ToolkitError: ChangeSet 'cdk-deploy-change-set' on stack
+'sakekasu-dev-auth' failed early validation:
+  - Resource of type 'AWS::Logs::LogGroup' with identifier
+    '/aws/lambda/dev-sakekasu-signup-notifier' already exists.
+    (at /Resources/SignupNotifierLogGroupF4C03A83)
+```
+
+`cdk deploy --all` はスタックを1つずつ流すので、最初の `sakekasu-dev-auth` で止まり、`sakekasu-dev-api` と `sakekasu-dev-monitoring` には進まない。3スタックとも `UPDATE_COMPLETE` のまま、最終更新時刻も変わらない。ロググループもログ本体も触られず、保持期間 30 日のまま残る。
+
+失敗するのは、既存のロググループと同じ名前を作ろうとするからで、ここまでは移行の前提どおり。取り込みを済ませてからデプロイをやり直せば、そのまま先へ進む。
 
 立て直しは、やることの順番が入れ替わるだけ。
 
-1. deploy の失敗とロールバックの完了を待つ
-2. この文書の手順1〜3をそのまま実行する。一時パッチは main に当てる。デプロイされているのはマージ前の状態のままなので、「デプロイ済み + ロググループ」という関係は変わらない
-3. deploy ワークフローを再実行する。手順4のマージは済んでいるので、代わりに Actions から `deploy` を再実行する
+1. この文書の手順1〜3をそのまま実行する。一時パッチは main に当てる。デプロイされているのはマージ前の状態のままなので、「デプロイ済み + ロググループ」という関係は変わらない
+2. マージは済んでいるので、手順4の代わりに Actions から `deploy` を再実行する
 
 取り込みが終わるまで `infra/` の変更を main に入れないのは同じ。入れると同じところで落ち続ける。
 
