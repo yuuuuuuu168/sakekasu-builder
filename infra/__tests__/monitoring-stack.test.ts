@@ -510,6 +510,36 @@ describe('MonitoringStack', () => {
       },
     );
 
+    // 名前がずれるとアラームは INSUFFICIENT_DATA のまま居座り、合成もデプロイも
+    // 成功する。リテラルで書いた期待値と突き合わせるのではなく、**合成結果の
+    // SLO 名そのもの**と突き合わせる。こうしておけば、名前を変えたときに
+    // 片側だけ直しても落ちる（PR #165 のレビュー指摘）
+    it('アラームは実在する SLO を指している', () => {
+      const sloNames = new Set(
+        Object.values(
+          template.findResources('AWS::ApplicationSignals::ServiceLevelObjective'),
+        ).map((slo) => slo.Properties?.Name),
+      );
+      const alarms = Object.values(
+        template.findResources('AWS::CloudWatch::Alarm', {
+          Properties: { MetricName: 'AttainmentRate' },
+        }),
+      );
+
+      expect(sloNames.size).toBeGreaterThan(0);
+      expect(alarms.length, 'SLO の数だけアラームが要る').toBe(sloNames.size);
+
+      for (const alarm of alarms) {
+        const dimension = (alarm.Properties?.Dimensions ?? []).find(
+          (d: { Name: string }) => d.Name === 'SloName',
+        );
+        expect(
+          sloNames.has(dimension?.Value),
+          `${alarm.Properties?.AlarmName} が存在しない SLO（${dimension?.Value}）を指している`,
+        ).toBe(true);
+      }
+    });
+
     // SLO の目標とアラームのしきい値が食い違うと、SLO 上は未達なのに
     // アラームは鳴らない（あるいはその逆）状態が黙って生まれる
     it('SLO の目標とアラームのしきい値が一致している', () => {

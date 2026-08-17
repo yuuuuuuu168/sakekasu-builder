@@ -103,7 +103,6 @@ export class MonitoringStack extends cdk.Stack {
     // SLO はここで作る。API スタックに置くと、エラーバジェットのアラームを
     // 足すときに通知先の SNS を参照して循環参照になる。
     this.addOcrServiceLevelObjectives(props.envName);
-    // アラームは通知経路（alertTopic）を作ってから。addAlarm がそれを参照する
 
     // --- 通知経路 ---
 
@@ -585,8 +584,32 @@ export class MonitoringStack extends cdk.Stack {
    * request-based は「リクエストの成功割合」を直接数えるので、疎なトラフィックでも
    * 意味のある値になる。
    */
-  private addOcrServiceLevelObjectives(envName: string): void {
+  /**
+   * OCR の SLO 名を組み立てる唯一の場所（Issue #86）。
+   *
+   * SLO の `name` と、アラームの `SloName` ディメンションは一致していないと
+   * いけない。ずれるとアラームは `INSUFFICIENT_DATA` のまま居座り、
+   * 「監視が入っている」ように見えて何も鳴らない。合成もデプロイも成功するので、
+   * 気づく手立てが無い。
+   *
+   * 定義側とアラーム側でそれぞれ文字列を書いていると、名前を変えるときに
+   * 片方だけ直して壊せる。ここを通してしか作らせない（PR #165 のレビュー指摘）。
+   */
+  private static ocrSloNames(envName: string): {
+    serviceName: string;
+    availability: string;
+    latency: string;
+  } {
     const serviceName = `${envName}-sakekasu-ocr-analyzer`;
+    return {
+      serviceName,
+      availability: `${serviceName}-availability`,
+      latency: `${serviceName}-latency`,
+    };
+  }
+
+  private addOcrServiceLevelObjectives(envName: string): void {
+    const { serviceName, availability, latency } = MonitoringStack.ocrSloNames(envName);
     // Application Signals が Lambda のサービスに付ける環境名。実機の
     // メトリクスのディメンションから取っている（推測で書くと SLO が
     // 対象を見つけられず、達成率が空のまま出来上がる）
@@ -608,7 +631,7 @@ export class MonitoringStack extends cdk.Stack {
     const burnRateConfigurations = [{ lookBackWindowMinutes: 1440 }];
 
     new applicationsignals.CfnServiceLevelObjective(this, 'OcrAvailabilitySlo', {
-      name: `${serviceName}-availability`,
+      name: availability,
       description: 'ラベル OCR の成功率（30日で 90%）。ぽつぽつ失敗し続ける状態を見つけるためのもの',
       burnRateConfigurations,
       goal: goal(SLO_ATTAINMENT_GOAL),
@@ -618,7 +641,7 @@ export class MonitoringStack extends cdk.Stack {
     });
 
     new applicationsignals.CfnServiceLevelObjective(this, 'OcrLatencySlo', {
-      name: `${serviceName}-latency`,
+      name: latency,
       description: 'ラベル OCR の所要時間（30日で 90% が 15 秒未満）。大半は Bedrock の時間',
       burnRateConfigurations,
       goal: goal(SLO_ATTAINMENT_GOAL),
@@ -657,20 +680,22 @@ export class MonitoringStack extends cdk.Stack {
    * ディメンションは `SloName` だけ。`applicationsignals.CfnServiceLevelObjective`
    * に付けた `name` と一致していないと、アラームは INSUFFICIENT_DATA のまま
    * 居座る。監視が入っているように見えて何も鳴らない状態になるので、
-   * SLO 名の組み立てはこのクラスの中で1か所に閉じてある。
+   * 名前は `ocrSloNames()` からしか作らない。
    */
   private addOcrSloAlarms(prefix: string, envName: string): void {
+    const { availability, latency } = MonitoringStack.ocrSloNames(envName);
+
     const slos = [
       {
         id: 'OcrAvailabilitySloBreach',
-        sloName: `${envName}-sakekasu-ocr-analyzer-availability`,
+        sloName: availability,
         alarmName: `${prefix}-ocr-slo-availability`,
         description:
           'OCR の成功率が30日で 90% を割りました（1回きりの失敗ではなく、失敗が積み上がっています）',
       },
       {
         id: 'OcrLatencySloBreach',
-        sloName: `${envName}-sakekasu-ocr-analyzer-latency`,
+        sloName: latency,
         alarmName: `${prefix}-ocr-slo-latency`,
         description: 'OCR の所要時間が30日で 90% の呼び出しで 15 秒を超えています',
       },
@@ -719,6 +744,17 @@ export class MonitoringStack extends cdk.Stack {
       comparisonOperator?: cloudwatch.ComparisonOperator;
     },
   ): cloudwatch.Alarm {
+    // 通知先を作る前に呼ばれると undefined を読んで落ちる。TypeScript は
+    // コンストラクタ内の代入順までは見てくれないので、ここで弾く。
+    // 落ちること自体は合成時に分かるが、素の TypeError だと原因が読み取れない
+    // （PR #165 のレビュー指摘）
+    if (!this.alertTopic) {
+      throw new Error(
+        `${id}: 通知先（alertTopic）を作る前にアラームを追加している。` +
+          'addAlarm の呼び出しをトピックの生成より後ろに移すこと',
+      );
+    }
+
     const alarm = new cloudwatch.Alarm(this, id, {
       alarmName: options.alarmName,
       alarmDescription: options.description,
