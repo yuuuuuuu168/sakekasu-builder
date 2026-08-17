@@ -206,6 +206,20 @@ test('非ASCIIを混ぜて名前を隠しても止める', () => {
   denies(`aws lo\u{1f600}gs ${W}`); // 絵文字
 });
 
+// コマンド名の位置はパスでも書ける。そちらにも混ぜ物を置けるので同じように読む
+test('パスの形のコマンド名に混ぜ物があっても止める', () => {
+  const W = 'logs delete-log-group --log-group-name y';
+  denies(`/usr/local/bin/aws\u02b0 ${W}`); // 末尾に修飾文字
+  denies(`/usr/local/bin/aws\u043e ${W}`); // 末尾にキリル文字
+  denies(`/usr/local/bin/\u02b0aws ${W}`); // 直前に混ぜ物
+  allows('/usr/local/bin/aws logs tail /aws/lambda/x'); // 読み取りは通る
+});
+
+// 実体を別名で置いて呼ぶ形は、名前を手がかりにする方式では追えない。
+// 本当の境界は verify プロファイルの IAM 側にある
+test('別名で置いた実体は追えない（既知の限界）', () => {
+  allows('/tmp/x logs delete-log-group --log-group-name y');
+});
 // 落として空になる語は名前ではない。日本語の散文を止めないための境目
 test('日本語の散文は呼び出しと見なさない', () => {
   allows('echo クラウドには aws が入っていないため手で入れる');

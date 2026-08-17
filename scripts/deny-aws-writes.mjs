@@ -313,12 +313,23 @@ function isRead(service, operation) {
   return READ_PREFIXES.some((p) => operation.startsWith(p));
 }
 
+// その語が AWS CLI の呼び出しかどうか。'aws' 単体と、'aws' で終わるパス
+// （/usr/local/bin/aws）の両方を見る。名前の位置と同じく混ぜ物を置けるので、
+// 非 ASCII を落とした形でも同じ2つを見る。
+//
+// ただし、実体を別名で置いて呼ぶ形（cp や ln で /tmp/x にしてから /tmp/x s3 rm …）は
+// ここでは拾えない。名前を手がかりにする方式では原理的に追えないので、先頭に書いた
+// 「サンドボックスではない」の範囲に含まれる
+function isAwsCommand(token) {
+  if (token === 'aws' || token.endsWith('/aws')) return true;
+  const ascii = token.replace(/[^\x00-\x7f]/g, '');
+  return ascii === 'aws' || ascii.endsWith('/aws');
+}
+
 function findDenied(command) {
   const tokens = tokenize(command);
   for (let i = 0; i < tokens.length; i += 1) {
-    // 'aws' 単体、または 'aws' で終わるパス（/usr/local/bin/aws）を CLI 呼び出しとみなす。
-    // コマンド名の位置にも混ぜ物を置けるので、こちらも落としてから見る
-    if (tokens[i] !== 'aws' && !tokens[i].endsWith('/aws') && toCliName(tokens[i]) !== 'aws') continue;
+    if (!isAwsCommand(tokens[i])) continue;
     const { service, operation, safe } = parseInvocation(tokens, i);
     if (safe || !service) continue;
     if (!isRead(service, operation)) {
