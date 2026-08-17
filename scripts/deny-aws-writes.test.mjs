@@ -160,8 +160,8 @@ test('NUL でコマンド名やサービス名を割っても止める', () => {
   denies("$'aws\\x00' logs delete-log-group --log-group-name y"); // コマンド名の位置
 });
 
-// NUL 以外の制御文字も名前の形を崩す。AWS CLI 自身も弾く形だが、
-// 関門としては素通りさせない
+// 不可視文字は名前の形を崩す。AWS CLI 自身も弾く形だが、関門としては
+// 素通りさせない。範囲ではなく Unicode の分類（Cc・Cf）で落としている
 test('制御文字で名前を割っても止める', () => {
   const W = 'delete-log-group --log-group-name y';
   denies(`aws $'\\x01logs' ${W}`);
@@ -171,6 +171,18 @@ test('制御文字で名前を割っても止める', () => {
   denies(`aws $'\\x7flogs' ${W}`); // DEL
   denies(`aws $'lo\\x01gs' ${W}`); // 語の途中
   denies(`$'\\x01aws' logs ${W}`); // コマンド名の位置
+});
+
+test('C1 やゼロ幅の文字で名前を割っても止める', () => {
+  const W = 'delete-log-group --log-group-name y';
+  // 見えない文字なので、テストでは符号位置で書く
+  denies(`aws \u0080logs ${W}`); // C1 の先頭
+  denies(`aws \u009flogs ${W}`); // C1 の末尾
+  denies(`\u0080aws logs ${W}`); // コマンド名の位置
+  denies(`aws \u200blogs ${W}`); // ゼロ幅スペース
+  denies(`aws \u00adlogs ${W}`); // ソフトハイフン
+  denies(`aws lo\u2060gs ${W}`); // ワードジョイナ（語の途中）
+  denies(`aws \ufefflogs ${W}`); // BOM
 });
 
 // バッククォートの中の \` は閉じではない。bash は打ち消しを外してから中身を
