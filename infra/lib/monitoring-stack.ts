@@ -111,6 +111,39 @@ export class MonitoringStack extends cdk.Stack {
       displayName: '酒カス 監視アラート',
     });
 
+    // CloudWatch アラームからの publish を明示的に許可する。
+    //
+    // SNS はトピック作成時に「所有アカウントからの publish を許可する」既定ポリシーを
+    // 暗黙に持っていて、アラーム通知はこれに乗っている。だがこの既定は
+    // **明示的なトピックポリシーを置いた瞬間に丸ごと置き換わる**。
+    // 下の AwsHealthRule がこのトピックを宛先にしているため、CDK は
+    // events.amazonaws.com を許可する AWS::SNS::TopicPolicy を生成する。その副作用で
+    // アラーム側の権限が落ちていた。2026-08-17 の SLO アラームで実際に
+    // 「Failed to execute action」となり、Slack には何も届かなかった。
+    // EventBridge 経由の AWS Health 通知だけが生き残っていたため、
+    // 経路が壊れていること自体に長く気づけなかった。
+    //
+    // 暗黙の既定には頼らない。ここで明示しておけば、将来別のサービスを
+    // 宛先に足してもこの文は残る。
+    this.alertTopic.addToResourcePolicy(
+      new iam.PolicyStatement({
+        sid: 'AllowCloudWatchAlarmsToPublish',
+        effect: iam.Effect.ALLOW,
+        principals: [new iam.ServicePrincipal('cloudwatch.amazonaws.com')],
+        actions: ['sns:Publish'],
+        resources: [this.alertTopic.topicArn],
+        // 混乱した代理人対策。ただし条件は、CloudWatch が渡すと AWS の手順書に
+        // 明記されているキーだけに留める。推測で絞ると「鳴っているのに届かない」
+        // という、いま踏んだのと同じ壊れ方をする
+        conditions: {
+          StringEquals: { 'aws:SourceAccount': this.account },
+          ArnLike: {
+            'aws:SourceArn': `arn:aws:cloudwatch:${this.region}:${this.account}:alarm:*`,
+          },
+        },
+      }),
+    );
+
     const slackNotifier = new NodejsFunction(this, 'SlackNotifierFunction', {
       functionName: `${prefix}-slack-notifier`,
       runtime: Runtime.NODEJS_22_X,
