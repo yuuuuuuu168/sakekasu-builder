@@ -35,6 +35,16 @@ CloudWatch Logs・メトリクス・Application Signals・X-Ray は**意図的�
 - `ssm:DescribeParameters`（パラメータ名。値は `GetParameter*` 側で Deny 済み）
 - `cognito-idp:DescribeUserPool` / `DescribeUserPoolClient` / `ListGroups`（プールの設定。利用者そのものは `ListUsers` / `AdminGetUser` 側で Deny 済み）
 
+## この Deny が届かないところ
+
+明示 Deny は IAM の認可を通る呼び出しにしか効かない。**SSO Portal API（`aws sso ...`）と Cognito の利用者向け操作は SigV4 で署名されず**、access token だけで通るため、ここに何を書いても止まらない。CLI 同梱のモデルで確かめると `sso get-role-credentials` は `authtype: none` になっている。
+
+とくに問題になるのは `sso get-role-credentials` で、`aws sso login` が作ったトークンを渡すと、**ログインした人に割り当てられている任意の Permission Set**（`AdministratorAccess` を含む）の一時認証情報が返る。`AgentVerifyAccess` で入っていても、同じ人が他の Permission Set を持っていればそちらに乗り換えられる。
+
+[scripts/deny-aws-writes.mjs](../scripts/deny-aws-writes.mjs) は `sso login` を除く `sso` / `sso-oidc` と、IAM が届かない Cognito 操作をすべて落とすようにしてある。ただしトークンは `~/.aws/sso/cache/` に平文で置かれるので、CLI の動詞を止めるだけでは塞ぎきれない。
+
+**この経路の本当の境界は Identity Center 側の割り当てにある。** クラウドセッションから `aws sso login` する人には `AgentVerifyAccess` 以外の Permission Set を割り当てない（別のユーザーを使う）のが、唯一の確実な塞ぎ方になる。
+
 ## 作成状況
 
 作成・割り当て済み（2026-08-17）。IAM Identity Center は CDK 管理外のため手動で作成した。
