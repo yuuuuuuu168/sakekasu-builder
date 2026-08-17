@@ -160,6 +160,19 @@ test('NUL でコマンド名やサービス名を割っても止める', () => {
   denies("$'aws\\x00' logs delete-log-group --log-group-name y"); // コマンド名の位置
 });
 
+// NUL 以外の制御文字も名前の形を崩す。AWS CLI 自身も弾く形だが、
+// 関門としては素通りさせない
+test('制御文字で名前を割っても止める', () => {
+  const W = 'delete-log-group --log-group-name y';
+  denies(`aws $'\\x01logs' ${W}`);
+  denies(`aws $'\\alogs' ${W}`); // 名前付きの打ち消し（BEL）
+  denies(`aws $'\\nlogs' ${W}`);
+  denies(`aws $'\\tlogs' ${W}`);
+  denies(`aws $'\\x7flogs' ${W}`); // DEL
+  denies(`aws $'lo\\x01gs' ${W}`); // 語の途中
+  denies(`$'\\x01aws' logs ${W}`); // コマンド名の位置
+});
+
 // バッククォートの中の \` は閉じではない。bash は打ち消しを外してから中身を
 // 実行するので、外した形で読み直さないと入れ子の呼び出しを見落とす
 test('打ち消したバッククォートの内側も見る', () => {

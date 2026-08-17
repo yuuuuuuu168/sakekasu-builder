@@ -50,11 +50,18 @@ const ANSI_C_ESCAPES = {
   r: '\r', t: '\t', v: '\v', '\\': '\\', "'": "'", '"': '"', '?': '?',
 };
 
-// 数値指定の打ち消しを文字に直す。bash に合わせて 2 つは文字にしない。
-//   - NUL は語から取り除かれる（a$'\x00'b は bash では ab という 1 語）。
-//     落とさずに残すと logs\0 のような語ができ、名前の形から外れて素通りする
-//   - \U は 8 桁取れるので Unicode の範囲を超え得る。超える値を渡すと例外になる
-const codeToChar = (code) => (code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '');
+// 数値指定の打ち消しを文字に直す。\U は 8 桁取れるので Unicode の範囲を
+// 超え得るが、超える値を String.fromCodePoint に渡すと例外になる
+const codeToChar = (code) => (code <= 0x10ffff ? String.fromCodePoint(code) : '');
+
+// 語から取り除く制御文字。取り除かないと、名前に混ぜるだけで形が崩れて
+// 「CLI 呼び出しではない」と判断され素通りする（$'\x01logs' のような形）。
+//
+// bash が実際に落とすのは NUL だけで、他の制御文字はそのまま子プロセスへ渡る。
+// それでも取り除くのは、AWS CLI のサービス名・操作名に制御文字が入り得ないため。
+// 混ざった名前は AWS CLI 自身が ParamValidation で弾くので、取り除いて照合しても
+// 新たに止まるのは元々実行できないコマンドだけで済む
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
 
 function decodeAnsiC(body) {
   let out = '';
@@ -105,7 +112,12 @@ function tokenize(command, nesting = 0) {
   // 二重引用符の内側か。$"…" もロケール変換が働かない限り同じ扱いになる
   let inDoubleQuote = false;
   const add = (s) => { word = (word ?? '') + s; };
-  const flush = () => { if (word !== null) tokens.push(word); word = null; };
+  // 制御文字は語を確定するときにまとめて落とす。打ち消しの表記（\x01）でも
+  // 名前付きの打ち消し（\a や \n）でも、引用の中の生の文字でも同じ経路を通る
+  const flush = () => {
+    if (word !== null) tokens.push(word.replace(CONTROL_CHARS, ''));
+    word = null;
+  };
   const openDoubleQuote = () => { inDoubleQuote = true; word = word ?? ''; };
 
   const isSubstitution = (i) => command[i] === '`' || (command[i] === '$' && command[i + 1] === '(');
