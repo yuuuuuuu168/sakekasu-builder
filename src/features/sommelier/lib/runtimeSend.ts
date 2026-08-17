@@ -7,6 +7,7 @@ import {
 import type { ChatImagePayload, SendToSommelier } from '../types';
 import { MAX_CHAT_IMAGES } from './chatImages';
 import { SommelierError, isAbortError, toSommelierError } from './errors';
+import { isValidSessionId } from './sessionId';
 
 /** AgentCore がセッション識別に使うヘッダー。33文字以上が必要 */
 const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
@@ -82,6 +83,14 @@ export const runtimeSend: SendToSommelier = async function* (
   prompt,
   { signal, sessionId, images },
 ) {
+  // ヘッダーに載せる直前でも形式を確かめる。呼び出し側は作りたての値か
+  // 検証済みの値しか渡さない作りだが、型は string としか言っておらず、
+  // ここは値がそのまま HTTP ヘッダーになる場所（改行を含む値は
+  // ヘッダー分割に使える）。渡された側でも見ておく
+  if (!isValidSessionId(sessionId)) {
+    throw new SommelierError('unknown', '会話のセッションを特定できませんでした');
+  }
+
   const token = await getAccessToken();
 
   const body: {

@@ -2,14 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatMessage, SendToSommelier } from '../types';
 import type { PreparedChatImage } from '../lib/chatImages';
 import {
+  beginMessagesWrite,
   clearMessages,
   clearSessionId,
-  createSessionId,
   loadMessages,
   loadSessionId,
   saveMessages,
   saveSessionId,
 } from '../lib/chatStorage';
+import { createSessionId } from '../lib/sessionId';
 import { SommelierError, isAbortError, messageForError } from '../lib/errors';
 
 export interface UseSommelierChatReturn {
@@ -76,6 +77,13 @@ export function useSommelierChat(
     messagesRef.current = stored;
     setMessages(stored);
     sessionIdRef.current = loadSessionId(userId) ?? '';
+
+    // 受信中のままユーザーが変わったら（サインアウト）打ち切る。
+    // 放っておくと、担当が外れた後もモデルを回し続けることになる
+    return () => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    };
   }, [userId]);
 
   /** いまの会話のセッション ID を返す。まだ無ければ作って端末にも残す */
@@ -113,6 +121,9 @@ export function useSommelierChat(
       // 送る前にセッションを確定させる。応答の途中で「新しい相談」を
       // 押されても、この送信は最後まで元の会話のものとして扱う
       const sessionId = currentSessionId();
+      // 保存はこの応答を受け終えてから行う。その間にサインアウトや
+      // 「新しい相談」で消されたかどうかを、確定時に判定できるようにする
+      const writeToken = beginMessagesWrite();
 
       const userMessage: ChatMessage = {
         id: createId('user'),
@@ -174,9 +185,9 @@ export function useSommelierChat(
           abortRef.current = null;
         }
         setIsResponding(false);
-        // 会話が確定した時点で保存する。リセット後なら messagesRef は
-        // 空になっているため、消した会話が書き戻ることはない
-        saveMessages(userId, messagesRef.current);
+        // 会話が確定した時点で保存する。送信を始めた後に消されていれば
+        // （サインアウト・「新しい相談」）、writeToken を見て書き戻さない
+        saveMessages(userId, messagesRef.current, writeToken);
       }
     },
     [send, isResponding, applyMessages, currentSessionId, userId],
