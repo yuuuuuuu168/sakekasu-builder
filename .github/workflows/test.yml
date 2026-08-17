@@ -12,16 +12,31 @@ name: test
 # paths にワークフロー全体を入れているのは、deploy.yml から npm test の行を
 # 消すだけの PR でもこのワークフローを走らせるため。infra/** と test.yml だけに
 # 絞ると、関門を外す変更そのものが無検査で通る。ブランチ保護が使えない以上、
-# 走ったという事実だけが手がかりになる
+# 走ったという事実だけが手がかりになる。
+#
+# フロント側（src/** と設定ファイル）も対象に入れている。lint は root の
+# `eslint .` が infra と sommelier まで見るため、どちらの変更でも走らせて困らない
 on:
   pull_request:
     paths:
       - 'infra/**'
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'eslint.config.js'
+      - 'tsconfig*.json'
+      - 'vite.config.ts'
       - '.github/workflows/**'
   push:
     branches: [main]
     paths:
       - 'infra/**'
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'eslint.config.js'
+      - 'tsconfig*.json'
+      - 'vite.config.ts'
       - '.github/workflows/**'
 
 permissions:
@@ -62,3 +77,24 @@ jobs:
           done
       - run: npx tsc --noEmit
       - run: npm test
+
+  # フロント（src/**）は lint も型検査も CI のどこでも走っていなかった。infra の
+  # テストと同じで、壊れても誰も気づかないまま main に入る状態だったため足す
+  # （Issue #134）。infra のジョブとは分けて、片方が落ちてももう片方の結果が残るようにする
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      # --ignore-scripts の理由は infra ジョブと同じ。PR のブランチをそのまま
+      # checkout する以上、lock に仕込まれたインストール時スクリプトは走らせない。
+      # lint も tsc も esbuild のバイナリを要らないので、これで足りる
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      # tsconfig.app.json はアプリ本体の設定。root の tsconfig.json は
+      # プロジェクト参照だけなので、こちらを明示して検査する
+      - run: npx tsc --noEmit -p tsconfig.app.json
