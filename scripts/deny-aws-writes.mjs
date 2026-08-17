@@ -40,48 +40,106 @@ const READ_EXACT = new Set([
 const SEPARATORS = ['&&', '||', ';', '|', '&', '>', '<', '(', ')', '`'];
 const SEPARATOR_CHARS = ';|&<>()`';
 
-// コマンド文字列をシェルに近い形で語に分ける。正規表現で切っていたときは
-// 2 通りの見落としがあった。
+// ANSI-C 引用（$'…'）の中の打ち消しを実際の文字に戻す。bash はここで \x61 の
+// ような表記を解釈するため、字面のまま読むとコマンド名を見落とす
+const ANSI_C_ESCAPES = {
+  a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n',
+  r: '\r', t: '\t', v: '\v', '\\': '\\', "'": "'", '"': '"', '?': '?',
+};
+
+function decodeAnsiC(body) {
+  let out = '';
+  for (let i = 0; i < body.length; i += 1) {
+    if (body[i] !== '\\' || i + 1 >= body.length) { out += body[i]; continue; }
+    i += 1;
+    const c = body[i];
+    if (c in ANSI_C_ESCAPES) { out += ANSI_C_ESCAPES[c]; continue; }
+    // \xHH / \uHHHH / \UHHHHHHHH と、8 進の \nnn
+    const digits = (pattern) => (body.slice(i + 1).match(pattern) ?? [''])[0];
+    const radix16 = { x: 2, u: 4, U: 8 }[c];
+    if (radix16) {
+      const h = digits(new RegExp(`^[0-9a-fA-F]{1,${radix16}}`));
+      if (h) { out += String.fromCodePoint(parseInt(h, 16)); i += h.length; continue; }
+    }
+    if (c >= '0' && c <= '7') {
+      const o = (body.slice(i).match(/^[0-7]{1,3}/) ?? [''])[0];
+      out += String.fromCharCode(parseInt(o, 8));
+      i += o.length - 1;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+// コマンド文字列をシェルに近い形で語に分ける。字面をそのまま切っていたときに
+// 見落としていた形が、レビューで順に挙がった。
 //
-//   1. 区切り文字が空白で挟まれていないと直前の引数と融合し、続く 2 つ目の
-//      呼び出しを見落とす（/my-group;aws … の形）
-//   2. 語の途中の引用符を落とさないため、シェルが語結合で組み立てる名前を
-//      別物として読む。bash は ""s3api も s""3api も s3api という 1 語にする
+//   1. 区切り文字が空白で挟まれていないと直前の引数と融合する（/my-group;aws …）
+//   2. 語の途中の引用符を落とさないと、シェルが語結合で組み立てる名前を別物として
+//      読む。bash は ""s3api も s""3api も s3api という 1 語にする
+//   3. 引用や打ち消しでコマンド名そのものを隠せる。$'\x61\x77\x73' も $"aws" も
+//      bash では aws になり、\ と改行は行継続として消える
 //
-// どちらもシェルの語の作り方を写していないことが原因なので、引用符を外して
-// 隣り合う断片を 1 語にまとめ、区切りは引用符の外でだけ切るようにする
+// どれもシェルの語の作り方を写していないことが原因なので、引用と打ち消しを
+// 解いてから語をつなぐ。区切りは引用の外でだけ切る
 function tokenize(command) {
   const tokens = [];
   // 組み立て中の語。「まだ始まっていない」と「空の語」を区別するため null 始まり
   let word = null;
+  // 二重引用符の内側か。$"…" もロケール変換が働かない限り同じ扱いになる
+  let inDoubleQuote = false;
   const add = (s) => { word = (word ?? '') + s; };
   const flush = () => { if (word !== null) tokens.push(word); word = null; };
+  const openDoubleQuote = () => { inDoubleQuote = true; word = word ?? ''; };
 
   for (let i = 0; i < command.length; i += 1) {
     const c = command[i];
 
-    // 引用符の外のバックスラッシュは次の 1 文字を打ち消す（\; は区切りではない）
-    if (c === '\\' && i + 1 < command.length) {
-      add(command[i + 1]);
-      i += 1;
+    if (inDoubleQuote) {
+      if (c === '"') { inDoubleQuote = false; continue; }
+      // 二重引用符の中でもコマンド置換は効く。区切りとして切り出し、以降は
+      // 引用の外と同じように読む。閉じ引用符まで戻さないので切りすぎる側に
+      // 倒れるが、見落とす側には倒れない
+      if (c === '`') { flush(); tokens.push('`'); inDoubleQuote = false; continue; }
+      if (c === '$' && command[i + 1] === '(') {
+        flush();
+        tokens.push('(');
+        inDoubleQuote = false;
+        i += 1;
+        continue;
+      }
+      if (c === '\\' && i + 1 < command.length) { i += 1; add(command[i]); continue; }
+      add(c);
       continue;
     }
 
-    if (c === '"' || c === "'") {
-      // 閉じないまま終わったら残り全部が 1 語。シングルクォートの中では
-      // バックスラッシュは打ち消しにならない（bash と同じ）
+    if (c === '\\' && command[i + 1] === '\n') { i += 1; continue; } // 行継続。両方消える
+    if (c === '\\' && i + 1 < command.length) { add(command[i + 1]); i += 1; continue; }
+
+    if (c === '$' && command[i + 1] === "'") {
       let body = '';
-      let j = i + 1;
-      for (; j < command.length && command[j] !== c; j += 1) {
-        if (c === '"' && command[j] === '\\' && j + 1 < command.length) {
+      let j = i + 2;
+      for (; j < command.length && command[j] !== "'"; j += 1) {
+        if (command[j] === '\\' && j + 1 < command.length) {
+          body += command[j] + command[j + 1];
           j += 1;
-          body += command[j];
           continue;
         }
         body += command[j];
       }
-      add(body);
+      add(decodeAnsiC(body));
       i = j;
+      continue;
+    }
+    if (c === '$' && command[i + 1] === '"') { openDoubleQuote(); i += 1; continue; }
+    if (c === '"') { openDoubleQuote(); continue; }
+
+    if (c === "'") {
+      // シングルクォートの中に打ち消しは無い。閉じないまま終わったら残り全部が 1 語
+      const end = command.indexOf("'", i + 1);
+      add(end === -1 ? command.slice(i + 1) : command.slice(i + 1, end));
+      i = end === -1 ? command.length : end;
       continue;
     }
 
