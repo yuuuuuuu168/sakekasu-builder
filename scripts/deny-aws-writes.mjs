@@ -36,10 +36,14 @@ const READ_EXACT = new Set([
   'configure list', 'configure list-profiles', 'configure get',
   // logs tail は高レベルコマンドで、内部は FilterLogEvents（--follow なら StartLiveTail）
   'logs tail',
-  // Logs Insights の3つは名前が read らしくないが、AWS 自身が読み取り専用の
-  // 管理ポリシー CloudWatchLogsReadOnlyAccess に logs:StartQuery / StopQuery /
-  // StartLiveTail を入れている。verify の土台は ReadOnlyAccess なので実際に許可される
-  'logs start-query', 'logs stop-query', 'logs start-live-tail',
+  // この2つは名前が read らしくないが、AWS 自身が読み取り専用の管理ポリシー
+  // CloudWatchLogsReadOnlyAccess に logs:StartQuery / StartLiveTail を入れている。
+  // verify の土台は ReadOnlyAccess なので実際に許可される。どちらも作るのは
+  // 自分のクエリ・自分のストリームだけで、他人の状態には触らない。
+  // 対する stop-query は、describe-queries で拾った ID を指定すれば誰が始めた
+  // クエリでも止められる。自分が始めたものを止める用途しか無いのに他人の状態へ
+  // 届いてしまうので、載せない
+  'logs start-query', 'logs start-live-tail',
   'dynamodb scan', 'dynamodb query',
   's3 ls',
 ]);
@@ -65,23 +69,24 @@ const codeToChar = (code) => (code <= 0x10ffff ? String.fromCodePoint(code) : ''
 // 語から取り除く不可視文字。混ぜるだけで名前の形が崩れ、「CLI 呼び出しでは
 // ない」と判断されて素通りするため、照合の前に落とす（$'\x01logs' のような形）。
 //
-// 個別の符号位置ではなく Unicode の分類で指定している。制御文字（Cc）と書式用
-// （Cf）、結合文字（M）をまとめて覆うので、C0・DEL・C1 に加えてゼロ幅スペースや
-// BOM、ソフトハイフン、アクセント記号などの結合文字も同じ規則で落ちる。範囲を
-// 継ぎ足していく形だと、隣の範囲が残るたびに同じ穴が開き直す。
+// 個別の符号位置ではなく Unicode の分類で指定している。範囲を継ぎ足していく形だと、
+// 隣の範囲が残るたびに同じ穴が開き直すため。
 //
-// 結合文字を入れているのは、それ自体では字にならず前の字を飾るだけで、
-// 名前の一部になり得ないため。単独で字になる文字（下記の同形異字）とは分けている。
+//   Cc / Cf … 制御文字と書式用。C0・DEL・C1、ゼロ幅スペース、BOM、ソフトハイフン
+//   M       … 結合文字。前の字を飾るだけで単独では字にならない
+//   Co      … 私用領域。表示のされ方が決まっておらず、字として意味を持たない
+//   Cs      … 孤立サロゲート。文字を成さない壊れた符号単位
+//
+// 線引きは「それ単独で字にならないもの」。字として成立する文字は、見た目が紛らわしく
+// ても落とさない。修飾文字（Lm の ʰ など）やキリル文字の о のような同形異字がこれに
+// あたる。落とすには同形異字の対応表が要るうえ、そうした名前も AWS CLI が
+// ParamValidation で弾いて API 呼び出しに至らないため、この関門で追う利得が薄い。
 //
 // bash が実際に落とすのは NUL だけで、他はそのまま子プロセスへ渡る。それでも
-// 落とすのは、AWS CLI のサービス名・操作名に不可視文字が入り得ないため。混ざった
-// 名前は AWS CLI 自身が弾くので、落として照合しても新たに止まるのは元々実行
-// できないコマンドだけで済む。
-//
-// 目に見える偽装（キリル文字の о を使うなど）はここでは扱わない。判別には
-// 同形異字の対応表が要るうえ、そうした名前も AWS CLI が ParamValidation で
-// 弾くため、この関門で追う利得が薄い。
-const INVISIBLE_CHARS = /[\p{Cc}\p{Cf}\p{M}]/gu;
+// 落とすのは、AWS CLI のサービス名・操作名にこれらが入り得ないため。混ざった名前は
+// AWS CLI 自身が弾くので、落として照合しても新たに止まるのは元々実行できない
+// コマンドだけで済む。
+const INVISIBLE_CHARS = /[\p{Cc}\p{Cf}\p{M}\p{Co}\p{Cs}]/gu;
 
 function decodeAnsiC(body) {
   let out = '';
