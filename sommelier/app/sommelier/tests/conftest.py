@@ -18,3 +18,6 @@ os.environ.setdefault("COGNITO_APP_CLIENT_ID", "testappclientid")
 # 好み記憶は各テストで明示的に組み立てる。読み込み時に AWS クライアントを
 # 作らせないよう、既定では未設定にしておく
 os.environ.pop("MEMORY_PREFERENCE_ID", None)
+# Web 検索も同じ。シークレット名が設定されていると読み込み時に
+# Secrets Manager のクライアントを作ってしまう
+os.environ.pop("TAVILY_API_KEY_SECRET_ID", None)
