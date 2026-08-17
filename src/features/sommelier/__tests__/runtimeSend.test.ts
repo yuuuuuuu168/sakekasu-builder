@@ -5,7 +5,7 @@ vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: () => fetchAuthSessionMock(),
 }));
 
-const { runtimeSend, resetSommelierSession } = await import('../lib/runtimeSend');
+const { runtimeSend } = await import('../lib/runtimeSend');
 const { isAbortError } = await import('../lib/errors');
 
 /** SSE 形式のレスポンスを組み立てる（実際の Runtime と同じ形） */
@@ -29,12 +29,13 @@ async function collect(iterable: AsyncIterable<string>): Promise<string> {
 }
 
 const signal = new AbortController().signal;
-const noHistory = { signal, history: [] };
+/** 33文字以上という AgentCore の要求を満たす、テスト用の固定セッション ID */
+const SESSION_ID = 'session-0123456789-0123456789-0123456789';
+const options = { signal, sessionId: SESSION_ID };
 
 describe('runtimeSend', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    resetSommelierSession();
     fetchAuthSessionMock.mockResolvedValue({
       tokens: { accessToken: { toString: () => 'test-token' } },
     });
@@ -48,7 +49,7 @@ describe('runtimeSend', () => {
       ),
     );
 
-    expect(await collect(runtimeSend('相談', noHistory))).toBe(
+    expect(await collect(runtimeSend('相談', options))).toBe(
       '日本酒がおすすめ',
     );
   });
@@ -62,24 +63,34 @@ describe('runtimeSend', () => {
       ),
     );
 
-    expect(await collect(runtimeSend('相談', noHistory))).toBe('こんばんは！');
+    expect(await collect(runtimeSend('相談', options))).toBe('こんばんは！');
   });
 
   it('Authorization ヘッダーとセッション ID を付けて呼び出す', async () => {
     const fetchMock = vi.fn().mockResolvedValue(sseResponse(['data: "ok"\n\n']));
     vi.stubGlobal('fetch', fetchMock);
 
-    await collect(runtimeSend('相談', noHistory));
+    await collect(runtimeSend('相談', options));
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain('bedrock-agentcore.ap-northeast-1.amazonaws.com');
     expect(url).toContain('qualifier=DEFAULT');
     expect(init.headers.Authorization).toBe('Bearer test-token');
-    const sessionId =
-      init.headers['X-Amzn-Bedrock-AgentCore-Runtime-Session-Id'];
-    // AgentCore はセッション ID に 33 文字以上を要求する
-    expect(sessionId.length).toBeGreaterThanOrEqual(33);
-    expect(JSON.parse(init.body)).toEqual({ prompt: '相談', history: [] });
+    // どの会話の続きかは、渡されたセッション ID がそのまま伝える
+    expect(
+      init.headers['X-Amzn-Bedrock-AgentCore-Runtime-Session-Id'],
+    ).toBe(SESSION_ID);
+    expect(JSON.parse(init.body)).toEqual({ prompt: '相談' });
+  });
+
+  it('会話履歴は送らない（エージェントが自分の記憶から引くため）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(['data: "ok"\n\n']));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await collect(runtimeSend('続き', options));
+
+    // 履歴を自己申告できると、細工した偽のアシスタント発言を送り込めてしまう
+    expect('history' in JSON.parse(fetchMock.mock.calls[0][1].body)).toBe(false);
   });
 
   it('添付画像を必要なキーだけに絞ってペイロードに含める', async () => {
@@ -89,7 +100,7 @@ describe('runtimeSend', () => {
     await collect(
       runtimeSend('この中でおすすめある？', {
         signal,
-        history: [],
+        sessionId: SESSION_ID,
         images: [
           // プレビュー用 dataURL のような余計なキーは送らないこと
           {
@@ -103,7 +114,6 @@ describe('runtimeSend', () => {
 
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
       prompt: 'この中でおすすめある？',
-      history: [],
       images: [{ format: 'jpeg', data: 'aGVsbG8=' }],
     });
   });
@@ -112,97 +122,27 @@ describe('runtimeSend', () => {
     const fetchMock = vi.fn().mockResolvedValue(sseResponse(['data: "ok"\n\n']));
     vi.stubGlobal('fetch', fetchMock);
 
-    await collect(runtimeSend('相談', { signal, history: [], images: [] }));
+    await collect(
+      runtimeSend('相談', { signal, sessionId: SESSION_ID, images: [] }),
+    );
 
     expect('images' in JSON.parse(fetchMock.mock.calls[0][1].body)).toBe(false);
   });
 
-  it('直前までの会話を文脈として送る', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementation(async () => sseResponse(['data: "ok"\n\n']));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await collect(
-      runtimeSend('ちょっとリッチなのがいい', {
-        signal,
-        history: [
-          { id: 'u1', role: 'user', content: 'ハイボールのおすすめある？' },
-          { id: 'a1', role: 'assistant', content: 'XXX がおすすめです' },
-        ],
-      }),
-    );
-
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).history).toEqual([
-      { role: 'user', content: 'ハイボールのおすすめある？' },
-      { role: 'assistant', content: 'XXX がおすすめです' },
-    ]);
-  });
-
-  it('失敗した発言や空の発言は文脈に含めない', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementation(async () => sseResponse(['data: "ok"\n\n']));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await collect(
-      runtimeSend('続き', {
-        signal,
-        history: [
-          { id: 'u1', role: 'user', content: '前の相談' },
-          { id: 'a1', role: 'assistant', content: '', error: '失敗しました' },
-          { id: 'a2', role: 'assistant', content: '   ' },
-        ],
-      }),
-    );
-
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).history).toEqual([
-      { role: 'user', content: '前の相談' },
-    ]);
-  });
-
-  it('文脈は直近の件数までに絞る', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementation(async () => sseResponse(['data: "ok"\n\n']));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const many = Array.from({ length: 30 }, (_, i) => ({
-      id: `m${i}`,
-      role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
-      content: `発言${i}`,
-    }));
-
-    await collect(runtimeSend('続き', { signal, history: many }));
-
-    const sent = JSON.parse(fetchMock.mock.calls[0][1].body).history;
-    expect(sent).toHaveLength(10);
-    expect(sent[sent.length - 1].content).toBe('発言29');
-  });
-
-  it('同じセッションでは同じセッション ID を使い、リセットで切り替わる', async () => {
+  it('セッション ID が変われば別の会話として送る', async () => {
     // Response の body は一度読むとロックされるため、呼び出しごとに作り直す
     const fetchMock = vi
       .fn()
       .mockImplementation(async () => sseResponse(['data: "ok"\n\n']));
     vi.stubGlobal('fetch', fetchMock);
+    const newSessionId = 'session-9876543210-9876543210-9876543210';
 
-    await collect(runtimeSend('1回目', noHistory));
-    await collect(runtimeSend('2回目', noHistory));
-    const first = fetchMock.mock.calls[0][1].headers[
-      'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id'
-    ];
-    const second = fetchMock.mock.calls[1][1].headers[
-      'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id'
-    ];
-    expect(second).toBe(first);
+    await collect(runtimeSend('1回目', options));
+    await collect(runtimeSend('2回目', { signal, sessionId: newSessionId }));
 
-    resetSommelierSession();
-    await collect(runtimeSend('3回目', noHistory));
-    const third = fetchMock.mock.calls[2][1].headers[
-      'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id'
-    ];
-    expect(third).not.toBe(first);
+    const header = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+    expect(fetchMock.mock.calls[0][1].headers[header]).toBe(SESSION_ID);
+    expect(fetchMock.mock.calls[1][1].headers[header]).toBe(newSessionId);
   });
 
   it('認証エラー（401/403）は auth として区別する', async () => {
@@ -211,7 +151,7 @@ describe('runtimeSend', () => {
       vi.fn().mockResolvedValue(new Response('', { status: 403 })),
     );
 
-    await expect(collect(runtimeSend('相談', noHistory))).rejects.toMatchObject({
+    await expect(collect(runtimeSend('相談', options))).rejects.toMatchObject({
       kind: 'auth',
       status: 403,
     });
@@ -223,7 +163,7 @@ describe('runtimeSend', () => {
       vi.fn().mockResolvedValue(new Response('', { status: 500 })),
     );
 
-    await expect(collect(runtimeSend('相談', noHistory))).rejects.toMatchObject({
+    await expect(collect(runtimeSend('相談', options))).rejects.toMatchObject({
       kind: 'server',
       status: 500,
     });
@@ -233,7 +173,7 @@ describe('runtimeSend', () => {
     // fetch は接続できないと TypeError を投げる
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
 
-    await expect(collect(runtimeSend('相談', noHistory))).rejects.toMatchObject({
+    await expect(collect(runtimeSend('相談', options))).rejects.toMatchObject({
       kind: 'network',
     });
   });
@@ -244,7 +184,7 @@ describe('runtimeSend', () => {
       vi.fn().mockRejectedValue(new DOMException('中断されました', 'AbortError')),
     );
 
-    await expect(collect(runtimeSend('相談', noHistory))).rejects.toSatisfy(
+    await expect(collect(runtimeSend('相談', options))).rejects.toSatisfy(
       (err: unknown) => isAbortError(err),
     );
   });
@@ -259,7 +199,7 @@ describe('runtimeSend', () => {
       ),
     );
 
-    await expect(collect(runtimeSend('相談', noHistory))).rejects.toMatchObject({
+    await expect(collect(runtimeSend('相談', options))).rejects.toMatchObject({
       kind: 'server',
     });
   });
@@ -269,7 +209,7 @@ describe('runtimeSend', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(collect(runtimeSend('相談', noHistory))).rejects.toMatchObject({
+    await expect(collect(runtimeSend('相談', options))).rejects.toMatchObject({
       kind: 'auth',
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -280,7 +220,7 @@ describe('runtimeSend', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(collect(runtimeSend('相談', noHistory))).rejects.toMatchObject({
+    await expect(collect(runtimeSend('相談', options))).rejects.toMatchObject({
       kind: 'auth',
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -289,7 +229,6 @@ describe('runtimeSend', () => {
 
 describe('parseDataLine の防御', () => {
   beforeEach(() => {
-    resetSommelierSession();
     fetchAuthSessionMock.mockResolvedValue({
       tokens: { accessToken: { toString: () => 'test-token' } },
     });
@@ -308,6 +247,6 @@ describe('parseDataLine の防御', () => {
     );
 
     // 生のペイロードが本文に混ざらないこと
-    expect(await collect(runtimeSend('相談', noHistory))).toBe('正常な応答');
+    expect(await collect(runtimeSend('相談', options))).toBe('正常な応答');
   });
 });

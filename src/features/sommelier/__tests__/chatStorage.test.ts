@@ -3,6 +3,10 @@ import {
   loadMessages,
   saveMessages,
   clearMessages,
+  createSessionId,
+  loadSessionId,
+  saveSessionId,
+  clearSessionId,
   MAX_STORED_MESSAGES,
 } from '../lib/chatStorage';
 import type { ChatMessage } from '../types';
@@ -131,5 +135,62 @@ describe('相談履歴の保存', () => {
     clearMessages('user-a');
 
     expect(loadMessages('user-a')).toEqual([]);
+  });
+});
+
+// 会話の文脈はエージェント側の記憶にあり、セッション ID が唯一の手がかり。
+// これを取り違えると、画面に見えている会話と文脈がずれる
+describe('相談セッションの保存', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('保存したセッション ID を読み戻せる', () => {
+    const sessionId = createSessionId();
+    saveSessionId('user-a', sessionId);
+
+    expect(loadSessionId('user-a')).toBe(sessionId);
+  });
+
+  it('作るたびに違う ID になり、AgentCore の長さの要求を満たす', () => {
+    const first = createSessionId();
+
+    expect(first).not.toBe(createSessionId());
+    expect(first.length).toBeGreaterThanOrEqual(33);
+  });
+
+  it('ユーザーごとに分かれる（他人の会話の続きにならない）', () => {
+    saveSessionId('user-a', createSessionId());
+
+    expect(loadSessionId('user-b')).toBeNull();
+  });
+
+  it('保存がなければ null を返す', () => {
+    expect(loadSessionId('user-a')).toBeNull();
+  });
+
+  it('userId が空なら保存も読み込みもしない', () => {
+    saveSessionId('', createSessionId());
+
+    expect(loadSessionId('')).toBeNull();
+    expect(localStorage.length).toBe(0);
+  });
+
+  it.each([
+    ['短すぎる値', 'too-short'],
+    ['エージェント側が受け付けない文字', `セッション${'a'.repeat(40)}`],
+    ['区切り文字を含む値', `../other${'a'.repeat(40)}`],
+    ['長すぎる値', 'a'.repeat(101)],
+  ])('端末の値が書き換えられていたら使わない（%s）', (_label, stored) => {
+    localStorage.setItem('sakekasu:sommelier-session:user-a', stored);
+
+    expect(loadSessionId('user-a')).toBeNull();
+  });
+
+  it('削除するとセッションが引き継がれなくなる', () => {
+    saveSessionId('user-a', createSessionId());
+    clearSessionId('user-a');
+
+    expect(loadSessionId('user-a')).toBeNull();
   });
 });

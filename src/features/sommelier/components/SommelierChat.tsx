@@ -3,7 +3,7 @@ import { AnimatePresence } from 'framer-motion';
 import { FloatingChatButton } from './FloatingChatButton';
 import { ChatWindow } from './ChatWindow';
 import { useSommelierChat } from '../hooks/useSommelierChat';
-import { runtimeSend, resetSommelierSession } from '../lib/runtimeSend';
+import { runtimeSend } from '../lib/runtimeSend';
 import { useAuth } from '@/features/auth/AuthContext';
 import type { PreparedChatImage } from '../lib/chatImages';
 import type { SendToSommelier } from '../types';
@@ -11,24 +11,16 @@ import type { SendToSommelier } from '../types';
 interface SommelierChatProps {
   /** 問い合わせの実装。既定はデプロイ済み AgentCore Runtime の呼び出し */
   send?: SendToSommelier;
-  /**
-   * 会話を破棄するときの後始末。既定は Runtime のセッション切り替え。
-   * send を差し替えたときに、既定の後始末が付いてこないようにする
-   */
-  onResetSession?: () => void;
 }
 
 /**
  * どの画面からでも呼び出せるソムリエ相談 UI。
  * 開閉ボタンとチャットウィンドウをまとめて提供する。
  */
-export function SommelierChat({
-  send = runtimeSend,
-  onResetSession = resetSommelierSession,
-}: SommelierChatProps) {
+export function SommelierChat({ send = runtimeSend }: SommelierChatProps) {
   const [isOpen, setIsOpen] = useState(false);
-  // 履歴は端末に保存するため、同じ端末を別アカウントで使っても
-  // 前の利用者の相談内容が見えないようユーザー単位で分ける
+  // 表示用の会話とセッション ID は端末に保存するため、同じ端末を別アカウントで
+  // 使っても前の利用者の相談内容や会話の続きに触れないようユーザー単位で分ける
   const { user } = useAuth();
   const { messages, isResponding, sendMessage, stop, reset } =
     useSommelierChat(send, user?.userId ?? '');
@@ -43,12 +35,6 @@ export function SommelierChat({
     [sendMessage],
   );
 
-  // 会話を破棄するときは送信側のセッションも切り替える
-  const handleReset = useCallback(() => {
-    onResetSession();
-    reset();
-  }, [onResetSession, reset]);
-
   return (
     <>
       <AnimatePresence>
@@ -58,7 +44,7 @@ export function SommelierChat({
             isResponding={isResponding}
             onSend={handleSend}
             onStop={stop}
-            onReset={handleReset}
+            onReset={reset}
             onClose={close}
           />
         )}

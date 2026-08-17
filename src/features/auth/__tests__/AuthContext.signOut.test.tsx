@@ -30,15 +30,12 @@ vi.mock('aws-amplify/api', () => ({
 }));
 
 const mockClearMessages = vi.fn();
+const mockClearSessionId = vi.fn();
 const mockClearFilterState = vi.fn();
 
 vi.mock('@/features/sommelier/lib/chatStorage', () => ({
   clearMessages: (...args: unknown[]) => mockClearMessages(...args),
-}));
-const mockResetSommelierSession = vi.fn();
-
-vi.mock('@/features/sommelier/lib/runtimeSend', () => ({
-  resetSommelierSession: (...args: unknown[]) => mockResetSommelierSession(...args),
+  clearSessionId: (...args: unknown[]) => mockClearSessionId(...args),
 }));
 vi.mock('@/features/records/lib/filterStorage', () => ({
   clearFilterState: (...args: unknown[]) => mockClearFilterState(...args),
@@ -100,8 +97,8 @@ describe('AuthProvider の signOut', () => {
     });
 
     mockClearMessages.mockClear();
+    mockClearSessionId.mockClear();
     mockClearFilterState.mockClear();
-    mockResetSommelierSession.mockClear();
 
     await act(async () => {
       await result.current.signOut();
@@ -109,8 +106,10 @@ describe('AuthProvider の signOut', () => {
 
     expect(mockClearMessages).toHaveBeenCalledTimes(2);
     expect(mockClearFilterState).toHaveBeenCalledTimes(2);
-    // セッション ID は次のリクエストで作り直されるため、通信の後にも切り替える
-    expect(mockResetSommelierSession).toHaveBeenCalledTimes(2);
+    // セッション ID を残すと、次の利用者が前の会話の続きとして相談できてしまう。
+    // 進行中の応答が確定時に書き戻すため、通信の後にも消す
+    expect(mockClearSessionId).toHaveBeenCalledTimes(2);
+    expect(mockClearSessionId).toHaveBeenCalledWith('user-a');
   });
 
   // サインアウトが失敗したときが一番まずい。利用者はサインアウトしたつもりで

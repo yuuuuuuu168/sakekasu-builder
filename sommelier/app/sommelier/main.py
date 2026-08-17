@@ -8,8 +8,9 @@
 酒屋の棚や飲食店のメニューの写真（base64 添付）から、写っている銘柄と
 好みを照らしたおすすめ提案もできる。
 
-会話をまたぐ好みは AgentCore Memory に残し、次の相談で引き当てる
-（preference_memory.py）。記憶が無くても相談は成立する。
+会話の続きも、会話をまたぐ好みも AgentCore Memory に残す
+（conversation_memory.py）。履歴はクライアントから受け取らず、
+同じセッションの記憶から読み戻す。記憶が無くても相談は成立する。
 
 認証はフェイルクローズ設計:
 - Cognito JWKS による JWT 署名・有効期限・発行者のアプリ内検証（Authorizer 未設定でも安全）
@@ -33,12 +34,13 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from jwt import PyJWKClient
 from strands import Agent, tool
 
-from model.load import load_model
-from preference_memory import (
+from conversation_memory import (
     MAX_EVENT_TEXT_LENGTH,
+    MAX_HISTORY_MESSAGES,
     MAX_PREFERENCE_TEXT_LENGTH,
-    load_preference_memory,
+    load_conversation_memory,
 )
+from model.load import load_model
 
 app = BedrockAgentCoreApp()
 log = app.logger
@@ -89,10 +91,10 @@ MAX_PROMPT_LENGTH = 4000
 MAX_QUERY_PAGES = 10
 MAX_MEMO_LENGTH = 200
 MAX_TEXT_FIELD_LENGTH = 120
-# 会話の文脈として受け取る過去の発言数の上限（直近から数える）
-MAX_HISTORY_MESSAGES = 10
-# 過去の発言1件あたりの文字数上限
-MAX_HISTORY_MESSAGE_LENGTH = 2000
+# 過去の発言1件あたりの文字数上限。記憶に残すときの上限
+# （MAX_EVENT_TEXT_LENGTH）と揃える。読み戻した文字列は無害化で
+# 伸びうるため、切り詰めは読み出し側でも行う
+MAX_HISTORY_MESSAGE_LENGTH = MAX_EVENT_TEXT_LENGTH
 # 1回の相談に添付できる画像の上限枚数
 MAX_IMAGES = 3
 # 添付画像1枚あたりのバイナリ上限（フロントの圧縮上限 5MB と揃える）
@@ -219,8 +221,8 @@ _PREFERENCE_PROMPT_HEADER = """
 今回の相談内容を優先してください（好みは変わるものです）。
 """
 
-# 会話をまたぐ好みの記憶。記憶が未設定なら無効インスタンスとして振る舞う
-_preference_memory = load_preference_memory()
+# 会話の続きと、会話をまたぐ好みの記憶。未設定なら無効インスタンスとして振る舞う
+_conversation_memory = load_conversation_memory()
 
 
 _jwks_client: Optional[PyJWKClient] = None
@@ -756,10 +758,13 @@ def _build_image_blocks(raw) -> tuple:
 
 
 def _build_history(raw) -> list:
-    """クライアントから届いた会話履歴を Agent に渡せる形へ整える。
+    """記憶から読み戻した会話履歴を Agent に渡せる形へ整える。
 
-    履歴はクライアント側の値なので、プロンプトと同じ無害化を通し、
-    件数と長さの上限も課す（コスト増幅と注入の両方を抑える）。
+    履歴の出どころは AgentCore Memory（同じセッションの過去のイベント）で、
+    書き込む時点で無害化済み。それでも読み出し側でもう一度同じ無害化を通す。
+    記憶に入るのはユーザーの発話と、そこから誘導された応答であり、
+    元をたどればユーザー入力だからで、記録・好みと同じ扱いにしている。
+    件数と長さの上限も課す（コスト増幅と注入の両方を抑えるため）。
     role が user/assistant 以外のものや、無害化で破棄されたものは落とす。
     """
     if not isinstance(raw, list):
@@ -856,14 +861,22 @@ async def invoke(payload, context):
 
     tools = _build_tools(owner_sub)
 
-    # 直前までの会話を渡して文脈を引き継ぐ。Runtime はリクエストごとに
-    # 状態を持たないため、履歴はクライアントから受け取る
-    history = _build_history(payload.get("history") if isinstance(payload, dict) else None)
+    session_id = getattr(context, "session_id", None)
 
-    # 会話をまたいで学習した好みのうち、今回の相談に近いものを引き当てる。
-    # boto3 は同期呼び出しなので、他の同時リクエストを止めないよう
-    # 別スレッドへ逃がす。取得できなくても在庫と記録だけで相談は成立する
-    preferences = await asyncio.to_thread(_preference_memory.recall, owner_sub, prompt)
+    # 記憶から2種類の文脈を引く。どちらも boto3 の同期呼び出しなので、
+    # 他の同時リクエストを止めないよう別スレッドへ逃がし、
+    # 待ち時間が積み上がらないよう同時に走らせる。
+    # どちらも取得できなくても在庫と記録だけで相談は成立する
+    #
+    # - 直前までの会話: 同じセッションの過去のイベントから読み戻す。
+    #   クライアントの自己申告を受けないので、偽のアシスタント発言を
+    #   送り込む余地がない
+    # - 会話をまたいで学習した好み: 今回の相談に近いものを引き当てる
+    history_messages, preferences = await asyncio.gather(
+        asyncio.to_thread(_conversation_memory.recent_messages, owner_sub, session_id),
+        asyncio.to_thread(_conversation_memory.recall, owner_sub, prompt),
+    )
+    history = _build_history(history_messages)
 
     agent = Agent(
         model=load_model(),
@@ -893,7 +906,8 @@ async def invoke(payload, context):
                 reply_length += len(chunk)
             yield chunk
 
-    # 今回のやり取りを長期記憶に残す（次の相談で引き当てる好みの材料）。
+    # 今回のやり取りを記憶に残す（次のリクエストで読み戻す会話履歴と、
+    # 次の相談で引き当てる好みの、両方の材料になる）。
     # 応答はすでに返し終えているので、ここで失敗しても相談には影響しない。
     # 途中で中断された場合はこの行に到達せず、中途半端な会話は記録されない。
     #
@@ -907,9 +921,9 @@ async def invoke(payload, context):
         return
     try:
         await asyncio.to_thread(
-            _preference_memory.remember,
+            _conversation_memory.remember,
             owner_sub,
-            getattr(context, "session_id", None),
+            session_id,
             prompt,
             reply,
         )

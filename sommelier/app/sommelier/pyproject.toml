@@ -24,7 +24,7 @@ dev = ["pytest >= 8.0.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# main.py / preference_memory.py はプロジェクト直下にあるため import パスに加える
+# main.py / conversation_memory.py はプロジェクト直下にあるため import パスに加える
 pythonpath = ["."]
 
 [tool.hatch.build.targets.wheel]
