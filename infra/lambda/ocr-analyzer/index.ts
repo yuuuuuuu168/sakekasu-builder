@@ -170,11 +170,19 @@ type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 const IMAGE_SIGNATURES: {
   mediaType: ImageMediaType;
   segments: { offset: number; bytes: readonly number[] }[];
+  /** 値が固定でないため区間では書けない条件（JPEG のマーカー番号） */
+  extraCheck?: (bytes: Uint8Array) => boolean;
 }[] = [
-  // JPEG は SOI（FF D8）+ 次のマーカーの開始（FF）まで。4バイト目のマーカー種別は
-  // 見ない。JFIF（E0）と Exif（E1）以外に、量子化テーブルから始まるもの（DB）や
-  // Adobe の APP14（EE）も正当な JPEG なので、そこまで縛ると本物を弾く
-  { mediaType: 'image/jpeg', segments: [{ offset: 0, bytes: [0xff, 0xd8, 0xff] }] },
+  {
+    // JPEG は SOI（FF D8）+ 次のマーカーの開始（FF）。4バイト目はマーカー番号で、
+    // 値は一つに定まらない。JFIF（E0）や Exif（E1）に絞ると、量子化テーブルから
+    // 始まるもの（DB）や Adobe の APP14（EE）といった正当な JPEG を弾く。
+    // 番号として妥当な範囲（C0 以上）かだけを見る。FF は詰め物で、その後ろに
+    // 番号が続く形も規格上あるので、そのまま範囲に含まれていてよい
+    mediaType: 'image/jpeg',
+    segments: [{ offset: 0, bytes: [0xff, 0xd8, 0xff] }],
+    extraCheck: (bytes) => (bytes[3] ?? 0x00) >= 0xc0,
+  },
   {
     mediaType: 'image/png',
     segments: [{ offset: 0, bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] }],
@@ -204,10 +212,11 @@ const IMAGE_SIGNATURES: {
  * 短すぎるファイルは範囲外の添字が undefined になり、どの形式とも一致しない
  */
 export function detectImageMediaType(bytes: Uint8Array): ImageMediaType | null {
-  const signature = IMAGE_SIGNATURES.find(({ segments }) =>
-    segments.every((segment) =>
-      segment.bytes.every((byte, i) => bytes[segment.offset + i] === byte),
-    ),
+  const signature = IMAGE_SIGNATURES.find(
+    ({ segments, extraCheck }) =>
+      segments.every((segment) =>
+        segment.bytes.every((byte, i) => bytes[segment.offset + i] === byte),
+      ) && (extraCheck?.(bytes) ?? true),
   );
   return signature?.mediaType ?? null;
 }
