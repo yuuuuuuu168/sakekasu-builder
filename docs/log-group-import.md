@@ -67,23 +67,55 @@ CloudFormation の import は追加しか受け付けない。[公式ドキュ�
 
 このパッチは `npm test` で落ちる。非推奨の `logRetention` が残っていないかを見張るテストがあるため。落ちるのが正しい。commit しないための歯止めとして置いてある。
 
-### 2. cdk diff で追加だけになっていることを確かめる
+### 2. cdk diff で中身を確かめる
 
 ```sh
-AWS_PROFILE=sakekasu-builder npx cdk diff sakekasu-dev-auth
+AWS_PROFILE=sakekasu-builder npx cdk diff --strict sakekasu-dev-auth
 ```
 
-`AWS::Logs::LogGroup` の追加以外が出たら止める。main と AWS の状態がずれているということなので、先にそちらを揃える。
+`AWS::Logs::LogGroup` の追加に加えて、**日本語を含むリソースが軒並み変更として出る**。これは実際のずれではない。理由は次の「非 ASCII の幻の差分」に書いた。
+
+追加と、そこに挙げた種類の変更以外が出たら止める。main と AWS の状態がずれているということなので、先にそちらを揃える。
 
 ### 3. cdk import で取り込む
 
 1スタックずつ実行する。3つ同時には触らない。
 
-```sh
-AWS_PROFILE=sakekasu-builder npx cdk import sakekasu-dev-auth
+ロググループ名は対話で聞かれるが、打ち間違いを避けるため対応表のファイルを渡す。`sakekasu-dev-auth` ならこう書く。
+
+```json
+{
+  "SignupNotifierLogGroupF4C03A83": { "LogGroupName": "/aws/lambda/dev-sakekasu-signup-notifier" }
+}
 ```
 
-ロググループ名を聞かれるので、対応表の値をそのまま入れる。実行前に IMPORT のチェンジセットの内容が出るので、中身を見てから進める。
+論理 ID は手順1のパッチを当てた状態で `npx cdk synth` すれば出る。3スタックぶんの値は次のとおり（2026-08-17 時点で確認済み）。
+
+| スタック | 論理 ID | ロググループ |
+| --- | --- | --- |
+| `sakekasu-dev-auth` | `SignupNotifierLogGroupF4C03A83` | `/aws/lambda/dev-sakekasu-signup-notifier` |
+| `sakekasu-dev-api` | `PresignedUrlLogGroup131ACA41` | `/aws/lambda/dev-sakekasu-presigned-url` |
+| `sakekasu-dev-api` | `OcrAnalyzerLogGroup35C7BA9F` | `/aws/lambda/dev-sakekasu-ocr-analyzer` |
+| `sakekasu-dev-monitoring` | `SlackNotifierLogGroup8A643683` | `/aws/lambda/dev-sakekasu-slack-notifier` |
+| `sakekasu-dev-monitoring` | `HealthCheckLogGroupC9F0564D` | `/aws/lambda/dev-sakekasu-health-check` |
+| `sakekasu-dev-monitoring` | `SommelierCanaryLogGroup0E2A4673` | `/aws/lambda/dev-sakekasu-sommelier-canary` |
+
+まずチェンジセットを作るだけにして、中身を見てから実行する。
+
+```sh
+AWS_PROFILE=sakekasu-builder npx cdk import sakekasu-dev-auth \
+  --resource-mapping auth-import.json --force --no-execute
+```
+
+`--force` が要る理由は次節。`--no-execute` を付けるとチェンジセットが残るので、`describe-change-set` で中身を見る。`Action` が `Import` のものだけになっていることを確かめる。
+
+```sh
+AWS_PROFILE=sakekasu-builder aws cloudformation describe-change-set \
+  --stack-name sakekasu-dev-auth --change-set-name <名前> \
+  --query 'Changes[].ResourceChange.[Action,LogicalResourceId]' --output table
+```
+
+良ければ実行する。`--no-execute` を外してもう一度打つか、チェンジセットをそのまま実行する。
 
 終わったら次のスタックへ。`sakekasu-dev-api`、`sakekasu-dev-monitoring` の順。
 
@@ -100,9 +132,58 @@ git checkout -- lib/
 管理アカウント（<管理アカウント ID>）の認証情報で、同じことをもう一度やる。こちらは Actions に乗らないので、デプロイも手で打つ。
 
 ```sh
-npx cdk import sakekasu-billing-notifier -c billing=true
+npx cdk import sakekasu-billing-notifier -c billing=true \
+  --resource-mapping billing-import.json --force --no-execute
 npx cdk deploy sakekasu-billing-notifier -c billing=true
 ```
+
+```json
+{
+  "BillingNotifierLogGroup8184291A": { "LogGroupName": "/aws/lambda/sakekasu-billing-notifier" },
+  "SlackNotifierLogGroup8A643683": { "LogGroupName": "/aws/lambda/sakekasu-billing-slack-notifier" }
+}
+```
+
+論理 ID は合成結果から取った値だが、**このアカウントの実際の状態は未確認**。読み取り用の `verify` プロファイルはアプリ本体のアカウント（232791540685）しか見られないため。ロググループが実在するか、`Custom::LogRetention` がいくつあるかは、作業の前に自分の目で確かめること。
+
+## 非 ASCII の幻の差分
+
+`cdk diff` と `cdk import` は、日本語を含むリソースを毎回「変更あり」と報告する。
+
+```
+[~] AWS::Cognito::UserPool UserPool UserPool6BA7E5F2
+ └─ [~] EmailVerificationSubject
+     ├─ [-] sakekasu-builder ?????
+     └─ [+] sakekasu-builder 確認コード
+```
+
+**実体は正しく、CloudFormation の `GetTemplate` が読み出しで化けさせているだけ。** 2026-08-17 に次の3点で確かめた。
+
+1. AWS CLI（Python）でも AWS SDK for JavaScript でも同じ `?` が返る。手元のロケールや CLI の問題ではなく、API の応答がそうなっている
+2. Cognito のユーザープール本体を `describe-user-pool` で見ると、`EmailVerificationSubject` は `sakekasu-builder 確認コード` と正しく入っている。CloudFormation は正しい UTF-8 を受け取って適用している
+3. `describe-stack-events` を見ると、直近のデプロイで `UserPool6BA7E5F2` は一度も更新されていない。保存されている値が `?` なら、CDK が毎回正しい日本語を送っている以上、毎デプロイで更新が走るはず
+
+つまり保存されている値は正しく、読み出しの経路だけが壊れている。デプロイでは何も起きないが、`cdk import` はこの読み出しと合成結果を比べるため、追加以外の変更があると見なして中断する。
+
+```
+No resource updates or deletes are allowed on import operation.
+```
+
+`--force` はこの中断を飛ばす。**飛ばして安全なのは、CloudFormation 側が自分の保存している正しいテンプレートと比べるため。** 変更なしと判断されるので、IMPORT のチェンジセットは取り込みだけを含む。それでも `--no-execute` で中身を見てから実行する。もし本物の変更が紛れていれば CloudFormation がチェンジセットの作成で落とすので、実行前に止まる。
+
+`AWS::CDK::Metadata` も変更として出る。こちらは幻ではなく、ロググループのコンストラクトが増えたぶん解析用の文字列が変わるため。何もしないリソースなので実害は無い。
+
+**`get-template` の出力を手で編集して投げ返さないこと。** 化けた `?` をそのまま書き戻すことになり、Cognito の確認メール本文と各リソースの説明文が本当に壊れる。CDK 経由で入れれば合成結果の正しい日本語が使われるので、この事故は起きない。
+
+## 事前確認の結果（2026-08-17）
+
+読み取り専用の `verify` プロファイルで確認済み。
+
+- `dev-sakekasu-*` のロググループ6つはすべて実在し、保持期間は 30 日。名前もこの移行で作る `/aws/lambda/<関数名>` と一致する
+- 3スタックに `Custom::LogRetention` が計6個。`AWS::Logs::LogGroup` はまだ1つも無い
+- `sakekasu-dev-devops-agent` は存在しない（`agentSpaceArn` が未設定のため）。取り込みは要らない
+- main と AWS の状態は一致している（非 ASCII の幻の差分を除く）
+- 手順1のパッチを当てた合成結果は、既存リソースが `AWS::CDK::Metadata` を除いて main と一字一句同じで、ロググループ6つが増えるだけ。論理 ID は最終形と一致する
 
 ## 検証
 
