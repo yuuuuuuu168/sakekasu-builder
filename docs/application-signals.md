@@ -344,18 +344,48 @@ period-based は「期間ごとに good / bad を判定して、good な期間�
 
 同じ理由でバーンレートの参照窓は1日（1440分）だけにしてある。1時間窓はほとんどが空になる。
 
-### エラーバジェット消費アラームはまだ入れていない
+### SLO を割ったときのアラーム
 
-**バーンレートのメトリクス名とディメンションを実機で確認していないため。** 名前を間違えたアラームは `INSUFFICIENT_DATA` のまま居座り、「監視が入っている」ように見えて何も鳴らない。この状態がいちばん困る。
+`dev-sakekasu-ocr-slo-availability` と `dev-sakekasu-ocr-slo-latency` の2つ。既存の SNS（`dev-sakekasu-alerts`）に繋いである。monitoring スタック側に置いているのは、ApiStack に置くと通知先の SNS を参照して循環参照になるため。
 
-SLO をデプロイしたら、実際に出ているメトリクスを見てから作る。
+**バーンレートではなく達成率（`AttainmentRate`）を見ている。** バーンレートは「エラー率 ÷ (100% − 目標)」なので、日に数回の規模だと1回の失敗で 3.3 まで跳ねる。必ず鳴る形は「30日で9回まで許容する」という budget の設計と噛み合わない。達成率なら30日の成功率そのものなので、失敗が積み上がったときだけ 90 を割る。
+
+しきい値は SLO の目標と同じ定数（`SLO_ATTAINMENT_GOAL`）から取っている。別々に書くと、片方だけ動かしたときに「SLO は未達なのにアラームは鳴らない」が黙って生まれる。
+
+欠損時は状態を保つ（`missing`）。このリポジトリのアラームは既定で「欠損＝異常なし」だが、30日 rolling の値が出なくなったときに復旧と判定されると困るので、カナリアと同じ扱いにしてある（`monitoring-stack.test.ts` の例外一覧に理由付きで載せてある）。
+
+#### 名前空間が2つある
+
+**`AWS/ApplicationSignals` と `AWS/AppSignals` の両方に、同じメトリクス名・同じディメンションで同じ値が出る**（2026-08-17 実測。どちらも `84.5070422` を返した）。別名と思われる。正式名のほうを使っている。
+
+出ているメトリクスは以下。ディメンションは `SloName` のみで、`BurnRate` だけ `BurnRateWindowMinutes`（SLO 側で指定した 1440）が付く。
+
+```
+AttainmentRate / BurnRate / BreachedCount
+TotalRequestCount / TotalRequestCountPerMinute / BadRequestCountPerMinute
+```
+
+`SloName` は `CfnServiceLevelObjective` の `name` と一致していないといけない。ずれるとアラームは `INSUFFICIENT_DATA` のまま居座り、「監視が入っている」ように見えて何も鳴らない。SLO 名の組み立ては `monitoring-stack.ts` の中で1か所に閉じてある。
 
 ```bash
 AWS_PROFILE=sakekasu-builder aws cloudwatch list-metrics \
   --namespace AWS/ApplicationSignals --region ap-northeast-1 --output json
 ```
 
-アラームは monitoring スタック側に置く。ApiStack に置くと通知先の SNS を参照して循環参照になる。
+### 導入時点の達成率（2026-08-17）
+
+SLO を作った直後の可用性は **84.51%** で、**すでに目標の 90% を割っていた**。`60/71` に一致するので、直近30日で 71 リクエスト中 11 回が失敗している。
+
+これは SLO が意図どおり働いた結果でもある。`ocr-errors`（15分で3件以上）は一度も鳴っておらず、ぽつぽつ失敗する状態が見えていなかった。Issue #115 と同じ構図なので、失敗の中身を追う価値がある。
+
+```bash
+# 失敗しているスパンを見る
+AWS_PROFILE=sakekasu-builder aws logs filter-log-events \
+  --log-group-name aws/spans \
+  --start-time $(( ($(date +%s) - 86400 * 7) * 1000 )) \
+  --filter-pattern '"ocr-analyzer" "ERROR"' --region ap-northeast-1 \
+  --query 'events[].message' --output text | head -c 4000
+```
 
 ### 実測を取り直すコマンド
 
