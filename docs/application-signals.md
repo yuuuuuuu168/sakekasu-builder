@@ -398,6 +398,27 @@ start time must not be in the past
 
 CloudFormation は `UPDATE_ROLLBACK_COMPLETE` で戻るため、失敗しても SLO とアラームは無事。ただし修正するまで以降のデプロイが毎回落ちるので、気づいたらすぐ戻すこと。
 
+### アラームが鳴っても Slack に届かなかった（2026-08-17・修正済み）
+
+SLO アラームが最初に ALARM へ遷移したとき、Slack には何も来なかった。原因は Application Signals とは無関係で、**通知経路そのものが壊れていた**。
+
+```
+$ aws cloudwatch describe-alarm-history --alarm-name dev-sakekasu-ocr-slo-availability \
+    --query 'AlarmHistoryItems[].[Timestamp,HistoryItemType,HistorySummary]' --output text
+2026-08-17T09:59:30+09:00  Action        Failed to execute action arn:aws:sns:...:dev-sakekasu-alerts
+2026-08-17T09:59:30+09:00  StateUpdate   Alarm updated from INSUFFICIENT_DATA to ALARM
+```
+
+トピックポリシーには `events.amazonaws.com` を許可する文が1つあるだけで、CloudWatch を許可する文も、アカウント所有者を許可する既定の文も無かった。
+
+**SNS はトピック作成時に「所有アカウントからの publish を許可する」既定ポリシーを暗黙に持つが、明示的なトピックポリシーを1つでも置くとそれが丸ごと置き換わる。** `AwsHealthRule` の宛先に SNS トピックを指定したことで CDK が `AWS::SNS::TopicPolicy` を生成し、その副作用でアラームの publish 権限が消えていた。
+
+影響はこの SLO アラームだけではなく、**monitoring-stack のアラーム全部**だった。EventBridge 経由の AWS Health 通知は許可が残っていたので届き続けており、経路が死んでいること自体に気づけなかった。
+
+対処は `cloudwatch.amazonaws.com` への `sns:Publish` を明示的に許可すること（[repost](https://repost.aws/knowledge-center/cloudwatch-receive-sns-for-alarm-trigger)）。条件キーは CloudWatch が渡すと明記されている `aws:SourceAccount` と `aws:SourceArn` だけに留める。推測で条件を足すと、また無言で届かなくなる。
+
+暗黙の既定に戻すのではなく明示しているのは、将来別のサービスを宛先に足しても消えないようにするため。`infra/__tests__/monitoring-stack.test.ts` で固定している。
+
 ### 失敗の中身を調べる
 
 失敗ごとに `ERROR Invoke Error {"errorMessage":"..."}` という1行の要約が出る。これを拾えば、スタックトレース抜きで一覧できる。
