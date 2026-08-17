@@ -113,18 +113,42 @@ export class MonitoringStack extends cdk.Stack {
 
     // CloudWatch アラームからの publish を明示的に許可する。
     //
+    // ## なぜ要るか
+    //
     // SNS はトピック作成時に「所有アカウントからの publish を許可する」既定ポリシーを
     // 暗黙に持っていて、アラーム通知はこれに乗っている。だがこの既定は
-    // **明示的なトピックポリシーを置いた瞬間に丸ごと置き換わる**。
+    // 明示的なトピックポリシーを置いた瞬間に丸ごと置き換わる。
     // 下の AwsHealthRule がこのトピックを宛先にしているため、CDK は
-    // events.amazonaws.com を許可する AWS::SNS::TopicPolicy を生成する。その副作用で
-    // アラーム側の権限が落ちていた。2026-08-17 の SLO アラームで実際に
-    // 「Failed to execute action」となり、Slack には何も届かなかった。
-    // EventBridge 経由の AWS Health 通知だけが生き残っていたため、
-    // 経路が壊れていること自体に長く気づけなかった。
+    // events.amazonaws.com を許可する AWS::SNS::TopicPolicy を必ず生成する。
+    // その副作用でアラーム側の権限が落ちる。
     //
-    // 暗黙の既定には頼らない。ここで明示しておけば、将来別のサービスを
-    // 宛先に足してもこの文は残る。
+    // 暗黙の既定に戻すのではなく明示しているのは、将来また別のサービスを
+    // 宛先に足しても、この文だけは残るようにするため。
+    //
+    // ## 実際に一度壊した（2026-08-06 〜 08-17）
+    //
+    // AwsHealthRule を入れた 08-06 から、このスタックのアラーム全部が無音になった。
+    // 鳴ってはいるが誰にも届かない状態で、9日間気づけなかった。
+    // EventBridge 経由の AWS Health 通知だけは許可が残っていて届き続けたため、
+    // 通知が来ること自体は日常的に起きていたのが、気づけなかった理由。
+    //
+    // 失われた通知の実例として、08-08 12:46 の signup-notify-fail がある。
+    // 表に出たのは 08-17、Application Signals の SLO アラーム（Issue #86）が
+    // 初めて遷移したときだった。
+    //
+    // ## 壊れているかの見分け方
+    //
+    // アラームの状態ではなく、アクションの履歴を見る。状態は正常に遷移するので、
+    // describe-alarms では気づけない。
+    //
+    //   aws cloudwatch describe-alarm-history --alarm-name <name> \
+    //     --history-item-type Action --query 'AlarmHistoryItems[].[Timestamp,HistorySummary]'
+    //
+    // Failed to execute action が出ていれば拒否されている。
+    // 経路を試すなら set-alarm-state で状態を手で動かすのが早い（実通知が飛ぶ）。
+    //
+    // 対処の出典:
+    // https://repost.aws/knowledge-center/cloudwatch-receive-sns-for-alarm-trigger
     this.alertTopic.addToResourcePolicy(
       new iam.PolicyStatement({
         sid: 'AllowCloudWatchAlarmsToPublish',
