@@ -9,7 +9,7 @@ import { Architecture, LayerVersion, Runtime, Tracing } from 'aws-cdk-lib/aws-la
 import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
-import { LAMBDA_LOG_RETENTION } from './log-retention.js';
+import { lambdaLogGroup } from './log-retention.js';
 import {
   MAX_IMAGES_PER_RECORD,
   TEMP_LOCATION,
@@ -388,13 +388,14 @@ export class ApiStack extends cdk.Stack {
     });
 
     // Presigned URL 生成 Lambda 関数
+    const presignedUrlFunctionName = `${props.envName}-sakekasu-presigned-url`;
     this.presignedUrlFunction = new NodejsFunction(
       this,
       'PresignedUrlFunction',
       {
-        functionName: `${props.envName}-sakekasu-presigned-url`,
+        functionName: presignedUrlFunctionName,
         runtime: Runtime.NODEJS_22_X,
-        logRetention: LAMBDA_LOG_RETENTION,
+        logGroup: lambdaLogGroup(this, 'PresignedUrlLogGroup', presignedUrlFunctionName),
         entry: path.join(
           path.dirname(url.fileURLToPath(import.meta.url)),
           '../lambda/presigned-url/index.ts',
@@ -506,10 +507,11 @@ export class ApiStack extends cdk.Stack {
     });
 
     // OCR Analyzer Lambda 関数
+    const ocrAnalyzerFunctionName = `${props.envName}-sakekasu-ocr-analyzer`;
     this.ocrAnalyzerFunction = new NodejsFunction(this, 'OcrAnalyzerFunction', {
-      functionName: `${props.envName}-sakekasu-ocr-analyzer`,
+      functionName: ocrAnalyzerFunctionName,
       runtime: Runtime.NODEJS_22_X,
-      logRetention: LAMBDA_LOG_RETENTION,
+      logGroup: lambdaLogGroup(this, 'OcrAnalyzerLogGroup', ocrAnalyzerFunctionName),
       entry: path.join(
         path.dirname(url.fileURLToPath(import.meta.url)),
         '../lambda/ocr-analyzer/index.ts',
