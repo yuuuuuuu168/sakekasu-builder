@@ -55,6 +55,46 @@ test('名前が読み取りっぽくても実質が違うものは止める', ()
   denies('aws ecs execute-command --command /bin/sh');
 });
 
+// SSO Portal API は SigV4 で署名されないので、verify セッションに重ねた Deny も
+// ReadOnlyAccess の枠も効かない。get-role-credentials が通ると、その利用者に
+// 割り当てられた任意のロールの一時認証情報が取れてしまう
+test('sso は login 以外すべて止める', () => {
+  denies('aws sso get-role-credentials --account-id 1 --role-name AdministratorAccess --access-token T');
+  denies('aws --profile verify sso get-role-credentials --account-id 1 --role-name X --access-token T');
+  denies('aws sso list-accounts --access-token T');
+  denies('aws sso list-account-roles --access-token T --account-id 1');
+  denies('aws sso logout');
+  denies('aws sso-oidc create-token --client-id x --client-secret y --grant-type z');
+  denies('aws sso-oidc start-device-authorization --client-id x --client-secret y --start-url u');
+  allows('aws sso login --profile verify --use-device-code'); // 手順そのもの
+});
+
+// Cognito の利用者向け操作も IAM で認証されない。deny ポリシーが止めているのは
+// Admin* の側だけなので、こちらはこの関門でしか止まらない
+test('IAM が届かない Cognito の操作は止める', () => {
+  denies('aws cognito-identity get-credentials-for-identity --identity-id x');
+  denies('aws cognito-identity get-id --identity-pool-id x');
+  denies('aws cognito-identity get-open-id-token --identity-id x');
+  denies('aws cognito-idp get-user --access-token T');
+  denies('aws cognito-idp get-tokens-from-refresh-token --refresh-token R --client-id C');
+  denies('aws cognito-idp list-devices --access-token T');
+  denies('aws cognito-idp list-web-authn-credentials --access-token T');
+  // IAM で認証される側は deny ポリシーの担当。ここでは止めない
+  allows('aws cognito-idp describe-user-pool --user-pool-id x');
+  allows('aws cognito-identity list-identity-pools --max-results 10');
+});
+
+// 資格情報そのものを返す操作。手に入れば以降は環境変数や SDK 経由になり、
+// この関門からは見えなくなる
+test('資格情報を返す操作は接頭辞が読み取りでも止める', () => {
+  denies('aws sts get-session-token');
+  denies('aws sts get-federation-token --name x --policy {}');
+  denies('aws ecr get-login-password --region ap-northeast-1');
+  denies('aws eks get-token --cluster-name x');
+  denies('aws codeartifact get-authorization-token --domain d');
+  allows('aws sts get-caller-identity'); // 素性を見るだけ
+});
+
 test('s3 の高レベルコマンドは ls だけを通す', () => {
   denies('aws s3 cp local.txt s3://bucket/');
   denies('aws s3 sync . s3://bucket/');

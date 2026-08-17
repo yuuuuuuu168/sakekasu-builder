@@ -48,6 +48,40 @@ const READ_EXACT = new Set([
   's3 ls',
 ]);
 
+// 名前は読み取りの接頭辞だが、通してはいけない操作。READ_PREFIXES より先に見る。
+//
+// 一覧は CLI 同梱の botocore モデルから機械的に出した。接頭辞で通る操作 8142 件の
+// うち、SigV4 で署名されない（モデル上 authtype: none）ものは 19 件しかなく、
+// その内訳は sso・cognito-identity・cognito-idp・agenttoolkit の4サービスだった。
+// 新しい AWS CLI に上げたときは同じ観点で見直す。
+const DENY_EXACT = new Set([
+  // Cognito Identity。ID プールのロールの一時認証情報が返る。呼び出しは
+  // 利用者側のトークンで通るため、verify セッションの Deny も ReadOnlyAccess の
+  // 枠も効かない。この関門が唯一の防ぎ手になる
+  'cognito-identity get-credentials-for-identity',
+  'cognito-identity get-id',
+  'cognito-identity get-open-id-token',
+  // Cognito User Pools の利用者向け操作。利用者の access token で本人のデータと
+  // トークンが読める。deny ポリシーが止めているのは Admin* の側だけで、
+  // IAM で認証されないこちらには届かない
+  'cognito-idp get-user',
+  'cognito-idp get-user-attribute-verification-code',
+  'cognito-idp get-user-auth-factors',
+  'cognito-idp get-tokens-from-refresh-token',
+  'cognito-idp get-device',
+  'cognito-idp list-devices',
+  'cognito-idp list-web-authn-credentials',
+  // ここから下は IAM で認証されるので Deny も枠も効くが、返るのが資格情報そのもの。
+  // 手に入れば以降の操作は環境変数や SDK 経由になり、この関門からは見えなくなる。
+  // 確認作業のどれにも要らないので落とす
+  'sts get-session-token', 'sts get-federation-token',
+  'sts get-delegated-access-token', 'sts get-web-identity-token',
+  'ecr get-login-password', 'ecr get-authorization-token',
+  'ecr-public get-login-password', 'ecr-public get-authorization-token',
+  'eks get-token',
+  'codeartifact get-authorization-token',
+]);
+
 // シェルの区切り文字。引用符の外にあるときだけ区切りとして扱う
 const SEPARATORS = ['&&', '||', ';', '|', '&', '>', '<', '(', ')', '`'];
 const SEPARATOR_CHARS = ';|&<>()`';
@@ -305,10 +339,19 @@ function parseInvocation(tokens, i) {
 
 function isRead(service, operation) {
   if (!operation) return false;
+  // 落とす側を先に見る。後から許可リストに同じものが足されても、こちらが勝つ
+  if (DENY_EXACT.has(`${service} ${operation}`)) return false;
   if (READ_EXACT.has(`${service} ${operation}`)) return true;
   // s3 の高レベルコマンドは cp / mv / rm / sync / mb / rb が書き込みなので
   // 上の READ_EXACT に載せた ls だけを通す
   if (service === 's3') return false;
+  // SSO Portal API（sso）と、そのトークンを作る側（sso-oidc）は、上で通した
+  // sso login を除いて全部落とす。get-role-credentials に access token を渡すと
+  // その利用者に割り当てられた任意のロール（AdministratorAccess を含む）の
+  // 一時認証情報が返るうえ、この2サービスの呼び出しは SigV4 で署名されないため、
+  // verify セッションに重ねた Deny も ReadOnlyAccess の枠も一切効かない。
+  // サービス単位で落としておけば、将来 AWS が読み取りの名前で操作を足しても素通りしない
+  if (service === 'sso' || service === 'sso-oidc') return false;
   if (operation === 'wait' || operation === 'help') return true;
   return READ_PREFIXES.some((p) => operation.startsWith(p));
 }
