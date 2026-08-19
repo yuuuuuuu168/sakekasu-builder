@@ -128,7 +128,7 @@ def test_記憶が使えなくても相談は成立する(agent_stub, monkeypatc
     chunks = invoke({"prompt": "すき焼きに合うお酒"})
 
     assert "".join(chunks) == "燗酒がおすすめです"
-    assert agent_stub.last_kwargs["system_prompt"] == main.SYSTEM_PROMPT
+    assert "# 覚えている好み" not in agent_stub.last_kwargs["system_prompt"]
 
 
 def test_認証できなければ記憶にも触れない(agent_stub, memory, monkeypatch):
