@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatMessage, SendToSommelier } from '../types';
 import type { PreparedChatImage } from '../lib/chatImages';
-import { clearMessages, loadMessages, saveMessages } from '../lib/chatStorage';
+import {
+  beginMessagesWrite,
+  clearMessages,
+  clearSessionId,
+  loadMessages,
+  loadSessionId,
+  saveMessages,
+  saveSessionId,
+} from '../lib/chatStorage';
+import { createSessionId } from '../lib/sessionId';
 import { SommelierError, isAbortError, messageForError } from '../lib/errors';
 
 export interface UseSommelierChatReturn {
@@ -38,6 +47,13 @@ export function useSommelierChat(
    * リセット直後に古い状態のエフェクトが走って履歴が復活しうる。
    */
   const messagesRef = useRef<ChatMessage[]>([]);
+  /**
+   * いま続けている会話のセッション ID。
+   * エージェントはこれを手がかりに自分の記憶から文脈を引き当てるので、
+   * 画面に残っている会話と同じものを指し続ける必要がある。
+   * 空文字は「まだ決まっていない」で、次の送信時に作る
+   */
+  const sessionIdRef = useRef('');
 
   /**
    * 発言一覧を更新する。更新関数は setState の中ではなくここで即時に評価し、
@@ -53,11 +69,30 @@ export function useSommelierChat(
     [],
   );
 
-  // 保存済みの履歴を読み込む。ユーザーが変わったら読み直す
+  // 表示用に保存しておいた会話を読み込む。ユーザーが変わったら読み直す。
+  // セッション ID も一緒に引き継ぐ。画面だけ復元してセッションを作り直すと、
+  // 目の前に前回の会話が見えているのにエージェントは文脈を持たない状態になる
   useEffect(() => {
     const stored = loadMessages(userId);
     messagesRef.current = stored;
     setMessages(stored);
+    sessionIdRef.current = loadSessionId(userId) ?? '';
+
+    // 受信中のままユーザーが変わったら（サインアウト）打ち切る。
+    // 放っておくと、担当が外れた後もモデルを回し続けることになる
+    return () => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    };
+  }, [userId]);
+
+  /** いまの会話のセッション ID を返す。まだ無ければ作って端末にも残す */
+  const currentSessionId = useCallback(() => {
+    if (!sessionIdRef.current) {
+      sessionIdRef.current = createSessionId();
+      saveSessionId(userId, sessionIdRef.current);
+    }
+    return sessionIdRef.current;
   }, [userId]);
 
   const stop = useCallback(() => {
@@ -71,6 +106,10 @@ export function useSommelierChat(
     setMessages([]);
     setIsResponding(false);
     clearMessages(userId);
+    // 「新しい相談」はエージェント側の文脈も切る。セッションを捨てておけば、
+    // 次の送信で新しい ID が作られ、前の会話は引き当てられなくなる
+    sessionIdRef.current = '';
+    clearSessionId(userId);
   }, [stop, userId]);
 
   const sendMessage = useCallback(
@@ -79,8 +118,12 @@ export function useSommelierChat(
       // 写真だけの相談も許可する（「この中でおすすめある？」は文面がなくても成立する）
       if ((!trimmed && images.length === 0) || isResponding) return;
 
-      // 今回の発言を積む前の会話を、文脈として送る
-      const history = messagesRef.current;
+      // 送る前にセッションを確定させる。応答の途中で「新しい相談」を
+      // 押されても、この送信は最後まで元の会話のものとして扱う
+      const sessionId = currentSessionId();
+      // 保存はこの応答を受け終えてから行う。その間にサインアウトや
+      // 「新しい相談」で消されたかどうかを、確定時に判定できるようにする
+      const writeToken = beginMessagesWrite();
 
       const userMessage: ChatMessage = {
         id: createId('user'),
@@ -113,7 +156,7 @@ export function useSommelierChat(
         let content = '';
         for await (const chunk of send(trimmed, {
           signal: controller.signal,
-          history,
+          sessionId,
           images:
             images.length > 0
               ? images.map(({ format, data }) => ({ format, data }))
@@ -142,12 +185,12 @@ export function useSommelierChat(
           abortRef.current = null;
         }
         setIsResponding(false);
-        // 会話が確定した時点で保存する。リセット後なら messagesRef は
-        // 空になっているため、消した履歴が書き戻ることはない
-        saveMessages(userId, messagesRef.current);
+        // 会話が確定した時点で保存する。送信を始めた後に消されていれば
+        // （サインアウト・「新しい相談」）、writeToken を見て書き戻さない
+        saveMessages(userId, messagesRef.current, writeToken);
       }
     },
-    [send, isResponding, applyMessages, userId],
+    [send, isResponding, applyMessages, currentSessionId, userId],
   );
 
   return { messages, isResponding, sendMessage, stop, reset };

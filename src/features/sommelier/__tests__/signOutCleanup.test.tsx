@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import type { SendToSommelier } from '../types';
 
 const amplifySignOut = vi.fn().mockResolvedValue(undefined);
 vi.mock('aws-amplify/auth', () => ({
@@ -14,7 +15,10 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 const { AuthProvider, useAuth } = await import('@/features/auth/AuthContext');
-const { saveMessages, loadMessages } = await import('../lib/chatStorage');
+const { saveMessages, loadMessages, saveSessionId, loadSessionId } = await import(
+  '../lib/chatStorage'
+);
+const { createSessionId } = await import('../lib/sessionId');
 const { saveFilterState, loadFilterState, DEFAULT_FILTER_STATE } = await import(
   '@/features/records/lib/filterStorage'
 );
@@ -46,6 +50,60 @@ describe('サインアウト時の後始末', () => {
     expect(loadMessages('user-a')).toEqual([]);
     expect(amplifySignOut).toHaveBeenCalled();
     expect(result.current.user).toBeNull();
+  });
+
+  it('会話のセッションも端末から消す（続きから話せてしまうため）', async () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.user?.userId).toBe('user-a'));
+
+    saveSessionId('user-a', createSessionId());
+
+    await act(async () => {
+      await result.current.signOut();
+    });
+
+    // セッションが残ると、次の利用者が前の相談の文脈を引き当ててしまう
+    expect(loadSessionId('user-a')).toBeNull();
+  });
+
+  // 応答の保存は受信し終えてから行うので、サインアウトの後始末と競合する。
+  // AuthContext は通信の前後で2回消しているが、2回目を消し終えてから画面が
+  // 落ちるまでの間に応答が確定すると、そこで書き戻されて消えなくなる。
+  // 画面の再描画を待たない、この一番危ない順序を再現する
+  it('サインアウトを終えた直後に応答が確定しても会話を書き戻さない', async () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.user?.userId).toBe('user-a'));
+
+    const { useSommelierChat } = await import('../hooks/useSommelierChat');
+    // 応答を止めたまま保持し、サインアウトの後に終わらせる
+    let finish: () => void = () => {};
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const hangingSend: SendToSommelier = async function* () {
+      yield '燗酒がおすすめです';
+      await pending;
+    };
+
+    const chat = renderHook(() => useSommelierChat(hangingSend, 'user-a'));
+    act(() => {
+      void chat.result.current.sendMessage('今夜のおすすめは？');
+    });
+    await waitFor(() => expect(chat.result.current.isResponding).toBe(true));
+
+    await act(async () => {
+      await result.current.signOut();
+    });
+
+    // 画面はまだ user-a のまま（setUser(null) の再描画が届く前）
+    await act(async () => {
+      finish();
+      await pending;
+    });
+
+    expect(loadMessages('user-a')).toEqual([]);
+    // 空配列を書いたのでもなく、そもそも書いていないこと
+    expect(localStorage.getItem('sakekasu:sommelier-chat:user-a')).toBeNull();
   });
 
   it('絞り込み条件も端末から消す（検索語に銘柄名が残るため）', async () => {

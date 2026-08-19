@@ -103,8 +103,8 @@ function statementsAllowing(action: string): PolicyStatement[] {
   );
 }
 
-/** 好み記憶の ARN。論理 ID の末尾ハッシュは synth ごとに変わりうるので前方一致で見る */
-const PREFERENCE_MEMORY_ARN = {
+/** 記憶の ARN。論理 ID の末尾ハッシュは synth ごとに変わりうるので前方一致で見る */
+const SOMMELIER_MEMORY_ARN = {
   'Fn::GetAtt': [expect.stringMatching(/^ApplicationMemoryPreference/), 'MemoryArn'],
 };
 
@@ -135,18 +135,20 @@ test('AgentCoreStack synthesizes with empty spec', () => {
   });
 });
 
-// 好み学習（Issue #51）は「記憶が作られる」「エージェントがその ID を
-// 受け取れる」「読み書きの権限がある」の3つが揃って初めて動く。
-// どれか1つでも欠けると、エージェントは黙って記憶なしのまま動き続ける
-// （フェイルオープン設計なので実行時エラーにならない）ため synth で確かめる。
-describe('好み学習用の AgentCore Memory', () => {
+// 記憶（会話の続き = Issue #93 / 好み学習 = Issue #51）は「記憶が作られる」
+// 「エージェントがその ID を受け取れる」「読み書きの権限がある」の3つが
+// 揃って初めて動く。どれか1つでも欠けると、エージェントは黙って記憶なしの
+// まま動き続ける（フェイルオープン設計なので実行時エラーにならない）ため
+// synth で確かめる。
+describe('ソムリエの AgentCore Memory', () => {
   test('USER_PREFERENCE の記憶をユーザー単位の名前空間で作る', () => {
     synthesizeProject().hasResourceProperties('AWS::BedrockAgentCore::Memory', {
       MemoryStrategies: [
         {
           UserPreferenceMemoryStrategy: Match.objectLike({
-            // main.py 側の PREFERENCE_NAMESPACE_TEMPLATE と一致させること。
-            // ずれると書き込みと読み出しが別の棚を指し、好みが引けなくなる
+            // conversation_memory.py の PREFERENCE_NAMESPACE_TEMPLATE と
+            // 一致させること。ずれると書き込みと読み出しが別の棚を指し、
+            // 好みが引けなくなる
             NamespaceTemplates: ['sommelier/preference/{actorId}'],
           }),
         },
@@ -157,7 +159,7 @@ describe('好み学習用の AgentCore Memory', () => {
   test('記憶 ID をエージェントの環境変数として渡す', () => {
     synthesizeProject().hasResourceProperties('AWS::BedrockAgentCore::Runtime', {
       EnvironmentVariables: Match.objectLike({
-        // preference_memory.py の MEMORY_ID_ENV_NAME と一致させること
+        // conversation_memory.py の MEMORY_ID_ENV_NAME と一致させること
         MEMORY_PREFERENCE_ID: Match.anyValue(),
       }),
     });
@@ -170,14 +172,15 @@ describe('好み学習用の AgentCore Memory', () => {
   // 名前空間の条件を付けられるのは、条件キー bedrock-agentcore:namespace を
   // 受け付ける ListMemoryRecords / RetrieveMemoryRecords の2つだけ。
   // CreateEvent は namespace を引数に取らず（名前空間はストラテジ設定と
-  // actorId からサービス側が決める）条件キーも持たないため、条件を付けると
-  // 常に不一致で全拒否になる。したがって「書き込み先を本人に限る」のは
-  // preference_memory.py の actor_id 検証が唯一の砦になる。
+  // actorId からサービス側が決める）条件キーも持たない。会話履歴を読む
+  // ListEvents も actorId / sessionId を引数に取るだけで条件キーがない。
+  // どちらも条件を付けると常に不一致で全拒否になるため、「本人の会話しか
+  // 読み書きしない」のは conversation_memory.py の actor_id 検証が唯一の砦になる。
   //
   // 経路の数そのものは版で変わる（alpha.45 で条件キー namespacePath が増え、
   // 読み出しが2文に分かれた）。数を決め打ちにすると、増えただけで落ちる一方
   // 減っても気づけないので、「届く経路がすべて閉じているか」を見る。
-  test('読み出しはどの経路も名前空間の条件つきで、好み記憶に閉じている', () => {
+  test('好みの読み出しはどの経路も名前空間の条件つきで、記憶に閉じている', () => {
     const statements = statementsAllowing('bedrock-agentcore:RetrieveMemoryRecords');
     expect(statements.length).toBeGreaterThan(0);
     for (const statement of statements) {
@@ -187,19 +190,30 @@ describe('好み学習用の AgentCore Memory', () => {
         expect(key).toMatch(/^bedrock-agentcore:namespace/);
         expect(value).toEqual(['sommelier/preference/*']);
       }
-      expect(statement.Resource).toEqual(PREFERENCE_MEMORY_ARN);
+      expect(statement.Resource).toEqual(SOMMELIER_MEMORY_ARN);
     }
   });
 
-  test('書き込みは条件なしだが、どの経路も好み記憶に閉じている', () => {
+  // 会話の続きは ListEvents で読み戻す。権限が無いと履歴だけが黙って
+  // 空になり、毎回はじめましての会話になる（フェイルオープンなので
+  // エラーとしては出ない）
+  test('会話履歴の読み出しも記憶に閉じている', () => {
+    const statements = statementsAllowing('bedrock-agentcore:ListEvents');
+    expect(statements.length).toBeGreaterThan(0);
+    for (const statement of statements) {
+      expect(statement.Resource).toEqual(SOMMELIER_MEMORY_ARN);
+    }
+  });
+
+  test('書き込みは条件なしだが、どの経路も記憶に閉じている', () => {
     const statements = statementsAllowing('bedrock-agentcore:CreateEvent');
     expect(statements.length).toBeGreaterThan(0);
     for (const statement of statements) {
-      expect(statement.Resource).toEqual(PREFERENCE_MEMORY_ARN);
+      expect(statement.Resource).toEqual(SOMMELIER_MEMORY_ARN);
     }
   });
 
-  // 上の2つは「その action に届く経路がすべて好み記憶に閉じている」を見ている。
+  // 上の3つは「その action に届く経路がすべて記憶に閉じている」を見ている。
   // ワイルドカードは展開して数えているので * や ? 経由の経路も対象に入るが、
   // 数え上げの網から外れる形（NotAction、組み込み関数）を疑わずに済むよう、
   // そもそもワイルドカードを書かせない側でも止めておく。

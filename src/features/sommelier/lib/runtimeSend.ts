@@ -7,27 +7,10 @@ import {
 import type { ChatImagePayload, SendToSommelier } from '../types';
 import { MAX_CHAT_IMAGES } from './chatImages';
 import { SommelierError, isAbortError, toSommelierError } from './errors';
+import { isValidSessionId } from './sessionId';
 
 /** AgentCore がセッション識別に使うヘッダー。33文字以上が必要 */
 const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
-
-/** 文脈として送る過去の発言数（エージェント側の上限と揃える） */
-const MAX_HISTORY_MESSAGES = 10;
-
-let sessionId: string | null = null;
-
-/** 会話が続く間は同じセッション ID を使い、Runtime のセッションを再利用する */
-function getSessionId(): string {
-  if (sessionId === null) {
-    sessionId = `${crypto.randomUUID()}-${crypto.randomUUID()}`;
-  }
-  return sessionId;
-}
-
-/** 「新しい相談」を始めるときに呼び、Runtime 側のセッションも切り替える */
-export function resetSommelierSession(): void {
-  sessionId = null;
-}
 
 function invocationUrl(): string {
   const arn = encodeURIComponent(SOMMELIER_RUNTIME_ARN);
@@ -91,25 +74,29 @@ function parseDataLine(line: string): string | null {
  *
  * Cognito のアクセストークンを Bearer で送る。Runtime 側は
  * JWT Authorizer とアプリ内の JWKS 検証の二段で認証している。
+ *
+ * 会話の文脈は送らない。エージェントがセッション ID をたよりに
+ * 自分の記憶（AgentCore Memory）から読み戻すため、こちらは
+ * どの会話の続きかだけを伝えればよい。
  */
 export const runtimeSend: SendToSommelier = async function* (
   prompt,
-  { signal, history, images },
+  { signal, sessionId, images },
 ) {
-  const token = await getAccessToken();
+  // ヘッダーに載せる直前でも形式を確かめる。呼び出し側は作りたての値か
+  // 検証済みの値しか渡さない作りだが、型は string としか言っておらず、
+  // ここは値がそのまま HTTP ヘッダーになる場所（改行を含む値は
+  // ヘッダー分割に使える）。渡された側でも見ておく
+  if (!isValidSessionId(sessionId)) {
+    throw new SommelierError('unknown', '会話のセッションを特定できませんでした');
+  }
 
-  // 直近のやり取りだけを文脈として送る（送信量とコストを抑えるため）。
-  // 応答に失敗した発言は文脈として役に立たないので除く
-  const recentHistory = history
-    .filter((m) => !m.error && m.content.trim().length > 0)
-    .slice(-MAX_HISTORY_MESSAGES)
-    .map((m) => ({ role: m.role, content: m.content }));
+  const token = await getAccessToken();
 
   const body: {
     prompt: string;
-    history: { role: string; content: string }[];
     images?: ChatImagePayload[];
-  } = { prompt, history: recentHistory };
+  } = { prompt };
   if (images && images.length > 0) {
     // ペイロードに必要なキーだけ載せる（プレビュー用 dataURL 等を送らない）
     body.images = images
@@ -124,7 +111,7 @@ export const runtimeSend: SendToSommelier = async function* (
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
-        [SESSION_HEADER]: getSessionId(),
+        [SESSION_HEADER]: sessionId,
       },
       body: JSON.stringify(body),
       signal,

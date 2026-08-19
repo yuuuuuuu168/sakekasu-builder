@@ -37,8 +37,12 @@ export type SendToSommelier = (
   prompt: string,
   options: {
     signal: AbortSignal;
-    /** 直前までの会話。文脈を引き継ぐために送る（今回の発言は含まない） */
-    history: ChatMessage[];
+    /**
+     * 会話を束ねるセッション ID。
+     * エージェントはこれで自分の記憶から直前までの会話を引き当てる。
+     * 履歴そのものは送らない（クライアントの自己申告を受け付けないため）
+     */
+    sessionId: string;
     /**
      * 今回の相談に添付する画像（棚や冷蔵庫の写真など）。
      * 過去の発言の画像は送らない（送信量とコストを抑えるため）
