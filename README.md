@@ -59,7 +59,7 @@
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuu168/sakekasu-builder/issues/92)） |
 | DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。コンソール側の設定あり（[#67](https://github.com/yuuuuuu168/sakekasu-builder/issues/67)） |
 | Application Signals による APM | サービス検出・X-Ray トレースまで。ADOT の計装と SLO は未導入（[#86](https://github.com/yuuuuuu168/sakekasu-builder/issues/86)） |
-| CDK デプロイの自動化 | main へのマージで GitHub Actions が `cdk deploy`（OIDC 認証、[#94](https://github.com/yuuuuuu168/sakekasu-builder/issues/94)）。cdkd への移行が進行中（[#150](https://github.com/yuuuuuu168/sakekasu-builder/issues/150)） |
+| CDK デプロイの自動化 | main へのマージで GitHub Actions が `cdk deploy`（OIDC 認証、[#94](https://github.com/yuuuuuu168/sakekasu-builder/issues/94)）。infra とソムリエで対象を分ける。cdkd への移行が進行中（[#150](https://github.com/yuuuuuu168/sakekasu-builder/issues/150)） |
 | 一覧画面の画像表示高速化 | サムネイル生成・Presigned URL キャッシュ・遅延読み込み |
 
 ## 今後やりたいこと
@@ -355,19 +355,56 @@ AWS_PROFILE=sakekasu-builder PURCHASE_TABLE_NAME=dev-sakekasu-purchase-records \
 cd sommelier/app/sommelier
 uv run pytest
 
-# デプロイ
-cd sommelier
-AWS_PROFILE=sakekasu-builder agentcore deploy --target dev
-
 # CDK 側（記憶の作成・環境変数・IAM が揃っているかの synth テスト）
 cd sommelier/agentcore/cdk && npm ci && npm test
 ```
+
+#### デプロイ
+
+`sommelier/` 以下を触った PR を main へマージすれば、**自動でデプロイされる**（`.github/workflows/deploy-sommelier.yml`）。infra 側と同じ OIDC の deploy ロールを使い、エージェントのテスト（`pytest`）と CDK の synth テストを通してから `aws-cdk deploy --all` を実行する。
+
+ワークフローを infra 側（`deploy.yml`）と分けているのは、`paths` がワークフロー単位でしか効かないため。1つにまとめると、ソムリエだけの変更で infra のデプロイまで走る。
+
+手で打つのは、ワークフローが使えないとき（Actions の障害、ワークフロー自体の修正中）と、`agentcore` CLI でしかできない操作をするとき（`agentcore add` でのリソース追加など）だけ。
+
+```bash
+# 1. main を最新にする
+#    デプロイされるのは「手元のファイル」であって main の内容ではない。
+#    ブランチが古いまま打つと、古い版を本番へ出すことになる
+git switch main && git pull
+
+# 2. デプロイ（--target は aws-targets.json の name）
+cd sommelier
+AWS_PROFILE=sakekasu-builder agentcore deploy --target dev
+
+# 3. cdk/ の依存が勝手に上がっていないか見る（下記）
+git status --short sommelier/agentcore/cdk
+
+# 4. 反映を確認（lastUpdatedAt が今なら出ている）
+AWS_PROFILE=sakekasu-builder aws bedrock-agentcore-control list-agent-runtimes \
+  --region ap-northeast-1 \
+  --query "agentRuntimes[?agentRuntimeName=='sommelier_sommelier'].[agentRuntimeVersion,lastUpdatedAt]" \
+  --output text
+```
+
+`agentcore deploy` は CLI 内部で `.cli/deployed-state.json` を更新する。ワークフロー側は CDK を直接叩くのでこのファイルを書かないが、記録されているのはリソース ID と `deployHash` で、次に手で `agentcore deploy` を打ったときに「変更あり」と判定されて出し直されるだけ。害はない。
 
 #### agentcore deploy は CDK の依存を勝手に上げる
 
 `agentcore deploy` は本体の処理に入る前に `agentcore/cdk` の依存を最新へ書き換えて `npm install` まで走らせる。**CI が確かめた版と、実際にデプロイされる版が別物になりうる**（2026-08-09 のデプロイでは `@aws/agentcore-cdk` が alpha.20 から alpha.45 へ飛び、`Namespaces` が `NamespaceTemplates` に改名されていた）。
 
 デプロイしたら `package.json` と `package-lock.json` の差分を見て、`npm test` を新しい版で通し直す。テストが落ちたらデプロイ済みのものが落ちているということなので、先に中身を確かめる。この自動更新を止めるなら `agentcore config disableDependencyManagement true`。
+
+ワークフローが `agentcore deploy` ではなく CDK を直接叩いているのはこれが理由で、`npm ci` で lock どおりに入れたものをそのまま出す。
+
+#### `npx cdk` は CDK CLI ではない
+
+`sommelier/agentcore/cdk/package.json` は自分自身の `bin.cdk` として CDK アプリ（`dist/bin/cdk.js`）を宣言している。npx は自パッケージの bin を優先するため、**`npx cdk deploy` は CLI ではなくアプリを引数なしで実行して、何もせず成功する**。CLI を使うときは `npx aws-cdk` と書く。
+
+```bash
+npx cdk ls        # 何も出力せず終了コード 0（アプリが動いただけ）
+npx aws-cdk ls    # AgentCore-sommelier-dev
+```
 
 #### デプロイ後に好み学習が生きているか確かめる
 
@@ -708,15 +745,18 @@ AWS_PROFILE=sakekasu-builder npx cdk diff --context env=dev
 
 **バックエンド（CDK）のデプロイは main へのマージ経由のみ。ローカルからの手動 `cdk deploy` は原則禁止**（Issue #94）。
 
-- main に push（= PR マージ）されると GitHub Actions（`.github/workflows/deploy.yml`）が `cdk deploy --all` を実行する
-- PR を開くと `cdk diff` の結果が自動でコメントされる（`.github/workflows/cdk-diff.yml`）
-- 認証は OIDC（`sakekasu-github-oidc` スタックの deploy ロール）。リポジトリにアクセスキーは置かない
+- main に push（= PR マージ）されると GitHub Actions が対象を分けてデプロイする
+  - `infra/**` → `.github/workflows/deploy.yml` が `cdk deploy --all`
+  - `sommelier/**` → `.github/workflows/deploy-sommelier.yml` が AgentCore スタックを `aws-cdk deploy --all`
+- PR を開くと `cdk diff` の結果が自動でコメントされる（`.github/workflows/cdk-diff.yml`。対象は infra のみ）
+- 認証はどちらも OIDC（`sakekasu-github-oidc` スタックの deploy ロール）。リポジトリにアクセスキーは置かない
+
+ワークフローを2つに分けているのは、`paths` がワークフロー単位でしか効かないため。1つにまとめると、片方だけの変更でもう片方のデプロイまで走る。
 
 例外として、以下は今までどおり手動デプロイする:
 
 - `sakekasu-billing-notifier`（管理アカウント宛て。`-c billing=true`）
 - `sakekasu-github-oidc`（OIDC 連携自体。Actions に自分のロールを触らせないため。`-c github-oidc=true`）
-- ソムリエ Runtime（`agentcore deploy`。CDK 管理外）
 
 ### OIDC 連携の初回セットアップ（1回だけ手動）
 
