@@ -33,9 +33,9 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 
 ## 先に片付けること
 
-[#129](https://github.com/yuuuuuuu168/sakekasu-builder/issues/129)（`logRetention` → `logGroup`）を先に済ませる。コードは対応済みだが、**既存のロググループを `cdk import` で取り込む手作業が残っている**（手順は [log-group-import.md](log-group-import.md)）。それが終わるまでは `Custom::LogRetention` が実物として残る。
+[#129](https://github.com/yuuuuuuu168/sakekasu-builder/issues/129)（`logRetention` → `logGroup`）は**完了済み**。2026-08-18 に dev の3スタックへ反映し、`Custom::LogRetention` は6個とも消えた（経緯は [log-group-import.md](log-group-import.md)）。
 
-移行対象のスタックには `Custom::LogRetention` が6個あった（api 2 / auth 1 / monitoring 3）。取り込みは問題なく通るが、CloudFormation へ戻すときに引っかかる。CFn は Lambda 実装のカスタムリソースを IMPORT できないため、`cdkd export --include-non-importable` による2フェーズ移行（フェーズ2で CFn が再 CREATE し、`onCreate` が呼び直される）が必要になる。#129 が終われば `Custom::LogRetention` そのものが消えるので、戻し手順が素直になる。
+これで CloudFormation へ戻すときの障害がひとつ減った。CFn は Lambda 実装のカスタムリソースを IMPORT できないため、`Custom::LogRetention` が残っていると `cdkd export --include-non-importable` による2フェーズ移行（フェーズ2で CFn が再 CREATE し、`onCreate` が呼び直される）が要る。いまはその必要が無い。
 
 ## 移行対象
 
@@ -257,7 +257,7 @@ AWS_PROFILE=sakekasu-builder npx cdkd export sakekasu-dev-api --dry-run
 AWS_PROFILE=sakekasu-builder npx cdkd export sakekasu-dev-api
 ```
 
-`Custom::LogRetention` が残っているスタック（#129 が未完のとき）は、そのままだと「CFn が IMPORT できない型がある」として中断する。その場合は2フェーズ移行を使う。
+`Custom::LogRetention` が残っているスタックは、そのままだと「CFn が IMPORT できない型がある」として中断する。その場合は2フェーズ移行を使う。dev の3スタックからは #129 で消えているので、いまは当たらない。
 
 ```bash
 AWS_PROFILE=sakekasu-builder npx cdkd export sakekasu-dev-api --include-non-importable
