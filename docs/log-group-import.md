@@ -62,18 +62,33 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy --import-existing-resources sakekasu
 | `sakekasu-dev-auth` | 232791540685 | `/aws/lambda/dev-sakekasu-signup-notifier` | 取り込み済み（2026-08-18） |
 | `sakekasu-dev-api` | 232791540685 | `/aws/lambda/dev-sakekasu-presigned-url`<br>`/aws/lambda/dev-sakekasu-ocr-analyzer` | 取り込み済み（2026-08-18） |
 | `sakekasu-dev-monitoring` | 232791540685 | `/aws/lambda/dev-sakekasu-slack-notifier`<br>`/aws/lambda/dev-sakekasu-health-check`<br>`/aws/lambda/dev-sakekasu-sommelier-canary` | 取り込み済み（2026-08-18） |
-| `sakekasu-billing-notifier` | <管理アカウント ID> | `/aws/lambda/sakekasu-billing-notifier`<br>`/aws/lambda/sakekasu-billing-slack-notifier` | 未実施 |
+| `sakekasu-billing-notifier` | <管理アカウント ID> | `/aws/lambda/sakekasu-billing-notifier`<br>`/aws/lambda/sakekasu-billing-slack-notifier` | 取り込み済み（2026-08-19）<br>保持期間は手で設定 |
 | `sakekasu-dev-devops-agent` | 232791540685 | `/aws/lambda/dev-sakekasu-devops-agent-webhook` | 取り込み不要 |
 
 `sakekasu-dev-devops-agent` は `agentSpaceArn` の context が入っているときだけ合成される。いまは入っておらずデプロイもされていないため、ロググループの実物が無い。初回デプロイのときに素直に作られる。
 
-課金通知は管理アカウント側の手動デプロイ専用スタックなので別作業になる。ロググループが実在するか、`Custom::LogRetention` がいくつあるかを自分の目で確かめてから、同じフラグを付けて打つ。
+課金通知は管理アカウント側の手動デプロイ専用スタックなので別作業になる。同じフラグを付けて打つ。
 
 ```sh
 npx cdk deploy --import-existing-resources sakekasu-billing-notifier -c billing=true
 ```
 
+このスタックの2つは取り込む前の保持期間が無期限だったため、取り込みのあとに手で 30 日を設定した。理由は次の節にある。
+
 ## 検証
+
+**取り込みは実物のプロパティを書き換えない。** ここが一番踏みやすい。CloudFormation はロググループをスタックの管理下に置くだけで、テンプレートに書いた `RetentionInDays` を実物へ適用しない。取り込む前の保持期間が 30 日でなければ、テンプレートは 30 日と言っているのに実物は違う、というドリフトになる。
+
+`sakekasu-billing-notifier` で実際に踏んだ。取り込み自体は成功し、`Custom::LogRetention` も消えて過去のログも引き継いだが、保持期間は無期限のままだった。dev の3スタックでこうならなかったのは、取り込む前から 30 日が設定されていたため。
+
+一度だけ実物に設定すれば、テンプレートと一致してドリフトも消える。以後は CDK の管理下なので、コード側で値を変えれば追随する。
+
+```sh
+AWS_PROFILE=<プロファイル> aws logs put-retention-policy \
+  --log-group-name /aws/lambda/<関数名> --retention-in-days 30
+```
+
+そのうえで次を見る。
 
 ```sh
 # 名前と保持期間。retentionInDays が 30 で、名前が変わっていないこと
@@ -99,10 +114,14 @@ AWS_PROFILE=sakekasu-builder aws cloudformation list-stack-resources \
 
 各 Lambda が起動してログを書けることも見る。実行ロールには `AWSLambdaBasicExecutionRole` が付いたままで権限は変わらないはずだが、合成結果だけでは分からない。画像を1枚上げて `dev-sakekasu-presigned-url` と `dev-sakekasu-ocr-analyzer` に新しいログが出れば足りる。
 
-AWS が勧めているとおり、取り込みの直後にドリフト検出を掛けておくとなおよい。
+AWS が勧めているとおり、取り込みの直後にドリフト検出を掛ける。上の保持期間のずれは、ここでも `MODIFIED` として出る。
 
 ```sh
 AWS_PROFILE=sakekasu-builder aws cloudformation detect-stack-drift --stack-name sakekasu-dev-api
+
+AWS_PROFILE=sakekasu-builder aws cloudformation describe-stack-resource-drifts \
+  --stack-name sakekasu-dev-api --stack-resource-drift-status-filters MODIFIED DELETED \
+  --query 'StackResourceDrifts[].[LogicalResourceId,StackResourceDriftStatus]' --output table
 ```
 
 ## 通らなかった道
