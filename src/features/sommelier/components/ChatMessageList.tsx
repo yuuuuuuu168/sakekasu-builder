@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { linkifyText } from '../lib/linkify';
 import type { ChatMessage } from '../types';
 
 interface ChatMessageListProps {
@@ -93,7 +94,9 @@ export function ChatMessageList({ messages }: ChatMessageListProps) {
                   📷 画像{message.imageCount}枚を添付
                 </p>
               ) : null}
-              {message.content}
+              {/* ソムリエは出典の URL を本文に載せるので、開ける形にする。
+                  ユーザーの発話はそのまま出す（リンクにする理由がない） */}
+              {isUser ? message.content : linkifyText(message.content)}
               {message.isStreaming && (
                 <span
                   className="ml-0.5 inline-block animate-pulse"

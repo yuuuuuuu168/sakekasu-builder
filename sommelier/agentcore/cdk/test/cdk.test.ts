@@ -108,6 +108,9 @@ const SOMMELIER_MEMORY_ARN = {
   'Fn::GetAtt': [expect.stringMatching(/^ApplicationMemoryPreference/), 'MemoryArn'],
 };
 
+/** Tavily の API キーを入れるシークレット名（agentcore.json の envVars と一致させる） */
+const TAVILY_SECRET_NAME = 'dev-sakekasu/sommelier/tavily-api-key';
+
 test('AgentCoreStack synthesizes with empty spec', () => {
   const app = new cdk.App();
   const stack = new AgentCoreStack(app, 'TestStack', {
@@ -232,5 +235,81 @@ describe('ソムリエの AgentCore Memory', () => {
       (role) => role.Properties?.ManagedPolicyArns ?? []
     );
     expect(attached).toEqual([]);
+  });
+});
+
+
+// Web 検索（Issue #122）は「シークレット名がエージェントに渡る」「その値を読む
+// 権限がある」「その権限が他のシークレットに届かない」の3つで成り立つ。
+// 1つ目が欠ければ検索は黙って無効になり、2つ目が欠ければ検索のたびに失敗する。
+// どちらも相談自体は成立してしまう（フェイルソフト）ので synth で確かめる。
+describe('Web 検索の API キー', () => {
+  test('シークレット名だけをエージェントの環境変数として渡す', () => {
+    const runtimes = synthesizeProject().findResources('AWS::BedrockAgentCore::Runtime');
+    const envVars = Object.values(runtimes).map(
+      (runtime) => (runtime as { Properties?: { EnvironmentVariables?: Record<string, unknown> } })
+        .Properties?.EnvironmentVariables ?? {}
+    );
+
+    expect(envVars).toHaveLength(1);
+    // web_search.py の API_KEY_SECRET_ID_ENV_NAME と一致させること
+    expect(envVars[0].TAVILY_API_KEY_SECRET_ID).toBe(TAVILY_SECRET_NAME);
+    // キーそのものを環境変数で渡していないこと。値は実行時に Secrets Manager から取る
+    for (const value of Object.values(envVars[0])) {
+      expect(JSON.stringify(value)).not.toMatch(/tvly-/);
+    }
+  });
+
+  test('読めるのは Tavily のシークレット1つだけ', () => {
+    const statements = statementsAllowing('secretsmanager:GetSecretValue');
+    expect(statements.length).toBeGreaterThan(0);
+    for (const statement of statements) {
+      // ARN の末尾6文字はサービスが付けるので、そこだけ * を許す
+      expect(statement.Resource).toEqual({
+        'Fn::Join': ['', expect.arrayContaining([`:secret:${TAVILY_SECRET_NAME}-*`])],
+      });
+    }
+  });
+
+  test('シークレットへの権限は読み取りだけ', () => {
+    // 書き換え・削除・一覧の権限が紛れ込んでいないこと
+    for (const action of [
+      'secretsmanager:PutSecretValue',
+      'secretsmanager:UpdateSecret',
+      'secretsmanager:DeleteSecret',
+      'secretsmanager:ListSecrets',
+      'secretsmanager:CreateSecret',
+    ]) {
+      expect(statementsAllowing(action)).toEqual([]);
+    }
+  });
+
+  test('シークレット名にワイルドカードを書かれたら synth で落とす', () => {
+    const spec = readProjectSpec();
+    for (const runtime of spec.runtimes ?? []) {
+      const envVar = runtime.envVars?.find(v => v.name === 'TAVILY_API_KEY_SECRET_ID');
+      if (envVar) envVar.value = 'dev-sakekasu/*';
+    }
+
+    expect(() => new AgentCoreStack(new cdk.App(), 'BadSecretStack', { spec })).toThrow(
+      /TAVILY_API_KEY_SECRET_ID の値が不正です/
+    );
+  });
+
+  test('シークレット名が無ければ権限も付けない（検索なしで動く構成）', () => {
+    const spec = readProjectSpec();
+    for (const runtime of spec.runtimes ?? []) {
+      runtime.envVars = runtime.envVars?.filter(v => v.name !== 'TAVILY_API_KEY_SECRET_ID');
+    }
+    const template = Template.fromStack(
+      new AgentCoreStack(new cdk.App(), 'NoSecretStack', { spec })
+    );
+
+    const statements = Object.values(
+      template.findResources('AWS::IAM::Policy') as Record<string, IamResource>
+    ).flatMap((resource) => resource.Properties?.PolicyDocument?.Statement ?? []);
+    expect(
+      statements.filter(s => actionsOf(s).includes('secretsmanager:GetSecretValue'))
+    ).toEqual([]);
   });
 });

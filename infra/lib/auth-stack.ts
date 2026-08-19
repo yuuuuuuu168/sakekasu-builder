@@ -7,7 +7,7 @@ import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
-import { LAMBDA_LOG_RETENTION } from './log-retention.js';
+import { lambdaLogGroup } from './log-retention.js';
 import { applyRoleBoundary } from './role-boundary.js';
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
@@ -126,10 +126,11 @@ export class AuthStack extends cdk.Stack {
     // サインアップは壊れない（通知だけ失敗し、ログに残る）
     const alertTopicArn = `arn:aws:sns:${this.region}:${this.account}:${props.envName}-sakekasu-alerts`;
 
+    const signupNotifierFunctionName = `${props.envName}-sakekasu-signup-notifier`;
     const signupNotifier = new NodejsFunction(this, 'SignupNotifierFunction', {
-      functionName: `${props.envName}-sakekasu-signup-notifier`,
+      functionName: signupNotifierFunctionName,
       runtime: Runtime.NODEJS_22_X,
-      logRetention: LAMBDA_LOG_RETENTION,
+      logGroup: lambdaLogGroup(this, 'SignupNotifierLogGroup', signupNotifierFunctionName),
       entry: path.join(here, '../lambda/signup-notifier/index.ts'),
       handler: 'handler',
       // Cognito はトリガーの完了を 5 秒しか待たない。Lambda 側だけ長くしても
