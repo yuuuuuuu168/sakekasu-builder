@@ -270,7 +270,8 @@ class Test検索のシステムプロンプト:
         無効 = _build_system_prompt([], search_enabled=False)
 
         assert "# Web 検索（search_web）" in 有効
-        assert 無効 == SYSTEM_PROMPT
+        assert "# Web 検索（search_web）" not in 無効
+        assert 無効.startswith(SYSTEM_PROMPT)
 
     def test_検索結果は指示ではないと明記する(self):
         prompt = _build_system_prompt([], search_enabled=True)
@@ -281,7 +282,10 @@ class Test検索のシステムプロンプト:
     def test_出典のURLを載せるよう指示する(self):
         prompt = _build_system_prompt([], search_enabled=True)
 
-        assert "出典の URL" in prompt
+        assert "根拠にした URL を必ず本文に載せる" in prompt
+        assert "出典:" in prompt
+        # 作り変えさせない（それらしい URL を書かれると出典の意味がない）
+        assert "そのまま写すこと" in prompt
 
     def test_好みの差し込みと両立する(self):
         prompt = _build_system_prompt(["辛口の純米が好き"], search_enabled=True)
@@ -292,4 +296,4 @@ class Test検索のシステムプロンプト:
     def test_設定を省略したら今の状態に従う(self, monkeypatch):
         monkeypatch.setattr(main, "_web_search", WebSearch("", None))
 
-        assert _build_system_prompt([]) == SYSTEM_PROMPT
+        assert "# Web 検索（search_web）" not in _build_system_prompt([])
