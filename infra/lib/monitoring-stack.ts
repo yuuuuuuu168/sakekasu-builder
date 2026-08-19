@@ -15,7 +15,7 @@ import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
-import { LAMBDA_LOG_RETENTION } from './log-retention.js';
+import { lambdaLogGroup } from './log-retention.js';
 import { applyRoleBoundary } from './role-boundary.js';
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
@@ -168,10 +168,11 @@ export class MonitoringStack extends cdk.Stack {
       }),
     );
 
+    const slackNotifierFunctionName = `${prefix}-slack-notifier`;
     const slackNotifier = new NodejsFunction(this, 'SlackNotifierFunction', {
-      functionName: `${prefix}-slack-notifier`,
+      functionName: slackNotifierFunctionName,
       runtime: Runtime.NODEJS_22_X,
-      logRetention: LAMBDA_LOG_RETENTION,
+      logGroup: lambdaLogGroup(this, 'SlackNotifierLogGroup', slackNotifierFunctionName),
       entry: path.join(here, '../lambda/slack-notifier/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(15),
@@ -404,10 +405,11 @@ export class MonitoringStack extends cdk.Stack {
       },
     ];
 
+    const healthCheckFunctionName = `${prefix}-health-check`;
     const healthCheck = new NodejsFunction(this, 'HealthCheckFunction', {
-      functionName: `${prefix}-health-check`,
+      functionName: healthCheckFunctionName,
       runtime: Runtime.NODEJS_22_X,
-      logRetention: LAMBDA_LOG_RETENTION,
+      logGroup: lambdaLogGroup(this, 'HealthCheckLogGroup', healthCheckFunctionName),
       entry: path.join(here, '../lambda/health-check/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(60),
@@ -457,10 +459,11 @@ export class MonitoringStack extends cdk.Stack {
 
     // --- 外形監視: ソムリエとの実会話（6時間ごと）---
 
+    const canaryFunctionName = `${prefix}-sommelier-canary`;
     const canary = new NodejsFunction(this, 'SommelierCanaryFunction', {
-      functionName: `${prefix}-sommelier-canary`,
+      functionName: canaryFunctionName,
       runtime: Runtime.NODEJS_22_X,
-      logRetention: LAMBDA_LOG_RETENTION,
+      logGroup: lambdaLogGroup(this, 'SommelierCanaryLogGroup', canaryFunctionName),
       entry: path.join(here, '../lambda/sommelier-canary/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(90),

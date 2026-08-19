@@ -49,7 +49,7 @@ def agent_stub(monkeypatch):
     monkeypatch.setattr(main, "Agent", FakeAgent)
     monkeypatch.setattr(main, "load_model", lambda: object())
     monkeypatch.setattr(main, "_get_owner_sub", lambda context: OWNER_SUB)
-    monkeypatch.setattr(main, "_build_tools", lambda owner_sub: [])
+    monkeypatch.setattr(main, "_build_tools", lambda owner_sub, search_enabled=None: [])
     return FakeAgent
 
 
@@ -187,7 +187,7 @@ def test_記憶が使えなくても相談は成立する(agent_stub, monkeypatc
     chunks = invoke({"prompt": "すき焼きに合うお酒"})
 
     assert "".join(chunks) == "燗酒がおすすめです"
-    assert agent_stub.last_kwargs["system_prompt"] == main.SYSTEM_PROMPT
+    assert "# 覚えている好み" not in agent_stub.last_kwargs["system_prompt"]
     assert agent_stub.last_kwargs["messages"] == []
 
 

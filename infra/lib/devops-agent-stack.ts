@@ -9,7 +9,7 @@ import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
-import { LAMBDA_LOG_RETENTION } from './log-retention.js';
+import { lambdaLogGroup } from './log-retention.js';
 import { applyRoleBoundary } from './role-boundary.js';
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
@@ -98,10 +98,11 @@ export class DevOpsAgentStack extends cdk.Stack {
 
     const selfAlarmName = `${prefix}-devops-agent-webhook-failure`;
 
+    const webhookForwarderFunctionName = `${prefix}-devops-agent-webhook`;
     const webhookForwarder = new NodejsFunction(this, 'WebhookForwarderFunction', {
-      functionName: `${prefix}-devops-agent-webhook`,
+      functionName: webhookForwarderFunctionName,
       runtime: Runtime.NODEJS_22_X,
-      logRetention: LAMBDA_LOG_RETENTION,
+      logGroup: lambdaLogGroup(this, 'WebhookForwarderLogGroup', webhookForwarderFunctionName),
       entry: path.join(here, '../lambda/devops-agent-webhook/index.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(20),

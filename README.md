@@ -38,6 +38,8 @@
 | ソムリエ相談 | 在庫相談・ペアリング・銘柄レコメンド・酒知識 Q&A（[#51](https://github.com/yuuuuuu168/sakekasu-builder/issues/51)） |
 | ソムリエへの写真添付 | 店の棚や品書きの写真から、好みに合う1〜3本を選んでもらう（[#44](https://github.com/yuuuuuu168/sakekasu-builder/issues/44)） |
 | 好み学習 | AgentCore Memory。セッションをまたいで好みが育つ |
+| 会話の記憶 | AgentCore Memory。履歴はサーバー側に持ち、クライアントからは送らない（[#93](https://github.com/yuuuuuu168/sakekasu-builder/issues/93)） |
+| ソムリエの Web 検索 | 新酒の発売・蔵元・相場など記録の外の話は Tavily で調べて出典つきで答える（[#122](https://github.com/yuuuuuu168/sakekasu-builder/issues/122)） |
 
 ### アカウント・セキュリティ
 
@@ -84,7 +86,6 @@
 | さけのわデータ API 連携 | 銘柄マスタとフレーバーチャート。無料・商用可・認証不要だが日本酒のみ | [#90](https://github.com/yuuuuuu168/sakekasu-builder/issues/90) |
 | ソムリエ Phase 2 | 外部情報連携（新発売情報・Web レビュー要約） | [#52](https://github.com/yuuuuuu168/sakekasu-builder/issues/52) |
 | ソムリエ Phase 3 | 分析・定期実行（月次レポート・節酒プランナー・傾向分析） | [#53](https://github.com/yuuuuuu168/sakekasu-builder/issues/53) |
-| AgentCore Memory の短期記憶 | 長期記憶（好み学習）は #51 で実装済み。残るのは会話履歴をサーバー側に持ち、クライアントからの履歴送信をやめる話 | [#93](https://github.com/yuuuuuu168/sakekasu-builder/issues/93) |
 
 ### インフラ・運用
 
@@ -188,7 +189,7 @@
 | Phase | 内容 | 状態 |
 |-------|------|------|
 | 1 | 対話 UI + 記録参照（在庫相談・ペアリング・銘柄レコメンド・Q&A・好み学習） | ✅ 完了 |
-| 2 | 外部情報収集（新発売情報・レビュー要約） | [#52](https://github.com/yuuuuuu168/sakekasu-builder/issues/52) |
+| 2 | 外部情報収集（新発売情報・レビュー要約） | Web 検索は導入済み（[#122](https://github.com/yuuuuuu168/sakekasu-builder/issues/122)）。残りは [#52](https://github.com/yuuuuuu168/sakekasu-builder/issues/52) |
 | 3 | 定期実行系（月次レポート・節酒プランナー・傾向分析） | [#53](https://github.com/yuuuuuu168/sakekasu-builder/issues/53) |
 
 ### Phase 1 の構成
@@ -214,17 +215,28 @@ AgentCore Runtime（PUBLIC・東京）
   │ ② アプリ内の JWKS 検証（署名・exp・iss・audience）
   ▼
 Strands Agent（Claude Haiku 4.5 / jp. CRIS）
-  │ Tool: list_my_purchase_records / list_my_drinking_records
+  │ Tool: list_my_purchase_records / list_my_drinking_records / search_web
   ▼
 DynamoDB（owner-index。トークンの sub で自分の記録のみ）
   ＋
 AgentCore Memory（会話の続きと好み学習。actorId は sub）
+  ＋
+Tavily 検索 API（記録の外。API キーは Secrets Manager）
 ```
 
 - **モデル**: `jp.anthropic.claude-haiku-4-5-20251001-v1:0`（OCR と共通）
 - **会話の継続**: Runtime はステートレスだが、履歴は AgentCore Memory に置く。クライアントはセッション ID を送るだけで、エージェントが自分の記憶から直近10件を読み戻す
 - **画面の表示**: ブラウザの localStorage にユーザー単位で保存（最大50件）。あくまで表示用の写しで、送信内容にはならない。セッション ID も同じ単位で保存し、**どちらもサインアウト時に削除**
 - **入力の安全対策**: プロンプト・履歴・記録の値はすべて正規化（HTML エンティティ展開＋NFKC を固定点まで反復）し、`<user_data>` で囲んで指示と区別。プロンプト長・DynamoDB 読み取りページ数にも上限
+- **今日の日付**: 相談を受けた日（日本時間）をシステムプロンプトに毎回差し込む
+
+#### 今日の日付を渡す理由
+
+モデルの知識は学習時点で止まっていて、**「今がいつか」は入っていない**。渡さないと学習時点の年を今年だと思い込み、「今年の新酒」を過去の年で答える。しかも自信を持って間違えるので気づきにくい（実際、2026年8月の相談に対して2024年の話として答えていた）。
+
+渡すのは日付だけで、時刻は入れない。時刻まで入れるとシステムプロンプトがリクエストごとに変わり、プロンプトキャッシュが毎回無効になる。日付なら1日1回の切り替わりで済む。
+
+年が効く話題を検索するときはクエリにも年を入れるよう指示している。検索結果の側が「今年」と書いていても、その「今年」がいつを指すかは記事の公開時点によるため、こちらから年を指定したほうが確実に絞れる。
 
 #### 会話の記憶と好み学習（AgentCore Memory）
 
@@ -256,6 +268,45 @@ AgentCore Memory（会話の続きと好み学習。actorId は sub）
 記憶に**書く**ときも、ユーザーの発話とエージェントの応答の両方を無害化してから渡す。ユーザーの発話を無害化しても、そこから誘導された応答の文面までは縛れない。書いたものは次のリクエストで会話履歴として、また好みの抽出を経て次回のシステムプロンプトとして戻ってくるため、読み出し側と二重にかけている。
 
 記憶 ID は CDK が `MEMORY_PREFERENCE_ID` 環境変数としてエージェントへ渡す（`agentcore.json` の `memories[].name` から自動導出）。この環境変数が無ければ記憶は自動的に無効になるので、ローカル開発では何も設定しなくてよい（会話の続きは効かなくなるが、1回ごとの相談は成立する）。
+
+#### Web 検索（Tavily）
+
+記録の中の話は DynamoDB のツールで足りるが、**新酒が出ているか・蔵元はどこか・いま買えるのか**といった記録の外の話は、モデルの学習知識に頼るとうろ覚えのまま断定してしまう。ここが一番ハルシネーションの害が大きいので、Tavily の検索 API をツール（`search_web`）として渡し、必要なときだけモデル自身に調べさせている（[#122](https://github.com/yuuuuuu168/sakekasu-builder/issues/122)）。
+
+| 決めごと | 内容 |
+|---------|------|
+| API キー | Secrets Manager（`dev-sakekasu/sommelier/tavily-api-key`）。エージェントに渡すのは**名前だけ** |
+| キーの取得 | 初回の検索で1回だけ取ってメモリに保持。失敗したら60秒は再取得しない |
+| 件数・深さ | 既定3件・最大5件、`search_depth` は `basic` 固定。要約生成と本文の全文取得は使わない |
+| 検索回数 | 1回の相談で3回まで（失敗した検索も1回として数える） |
+| 失敗したとき | 相談は止めない。ツールがエラーを返し、モデルは分かる範囲で答える（フェイルソフト） |
+| 出典 | 回答に URL を載せる。チャットの吹き出し側でリンクとして描画する |
+| 情報源の国 | `country: japan` で日本に寄せる。プロンプト側でも日本語の情報源を優先させる |
+
+情報源を日本に寄せているのは、実機で「獺祭の今年の新酒」を聞いたときに、旭酒造の**台湾サイト**（`dassai.com/tw`）と中華圏の日本酒メディアが出典に出てきたため。日本語で検索しても、地域を縛らないと同じ蔵の海外向けページが上位に来る。扱っている商品も価格も日本と違うので、日本での発売や相場を聞かれているときの根拠にはならない。API 側の国指定とシステムプロンプトの二段構えにしてある。
+
+なお `country` パラメータの仕様は Tavily の公式ドキュメントで裏取りできていない（クラウドセッションからは `docs.tavily.com` へ到達できない）。受け付けられなかった場合に検索そのものが死なないよう、**400 / 422 が返ったら国指定を外して1回だけ取り直し、以降はそのプロセスでは付けない**ようにしている。外したことは警告ログに残るので、そこで気づける。500 やタイムアウトでは取り直さない（失敗のたびに費用と待ち時間が倍になるため）。
+
+検索結果は**外部サイトの本文がそのままモデルの入力に入る**ので、記録やメモよりも疑ってかかる相手になる。扱いは記録と同じ経路（HTML エンティティ展開＋NFKC を固定点まで反復してから山括弧を潰す）を通したうえで、囲みのタグだけ `<web_data>` に分けている。`<user_data>` と同じ印を付けてしまうと、検索でヒットした他人のブログの文章が「このユーザーの好み」として通ってしまうため。
+
+URL だけは無害化を通さない。山括弧を丸括弧に潰した URL はもう開けず、出典として役に立たなくなる。代わりに `web_search.py` 側で **http / https であること・非 ASCII や引用符は percent-encode すること・エンティティ経由で山括弧に戻らないこと・`user@host` の形でないこと**を確かめ、通らないものは結果ごと捨てている（出典を示せない引用は、作り話と見分けが付かない）。
+
+`user@host` を弾くのは、`https://有名な酒屋.jp@attacker.example/...` が「表示は信頼できるドメイン・実際の接続先は別」になるため。出典はそのままリンクになるので、通すと出典自体を偽装できる。同じ判定は描画側（`linkify.tsx`）にも置いている。吹き出しに流れてくるのはモデルが書いた本文で、検索結果の抜粋に載っていた URL を書き写すこともあるため、上流の検証を当てにしない。長さの上限（500文字）も同じ理由で両側に置いている。
+
+キーを読む権限は Runtime ロールに `secretsmanager:GetSecretValue` を1つ、**そのシークレットの ARN だけ**に付ける。テーブル名と同じく `agentcore.json` の `envVars` を唯一の定義元にして、CDK 側はそれを読むだけにしている（設定ドリフト防止）。`TAVILY_API_KEY_SECRET_ID` を消せば権限も付かず、エージェント側も検索ツールを持たないまま動く。
+
+#### Tavily の API キーを登録する（デプロイ前に1回）
+
+キーはリポジトリにも `agentcore.json` にも置かない。[Tavily](https://tavily.com/) でキーを取ってから、先に Secrets Manager へ入れる。
+
+```bash
+AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
+  --name dev-sakekasu/sommelier/tavily-api-key \
+  --secret-string 'tvly-xxxxxxxxxxxxxxxxxxxxxxxx' \
+  --region ap-northeast-1
+```
+
+登録せずにデプロイしても壊れない。キーが読めなければ検索は無効のままで、記録と一般知識だけで相談に答える。
 
 #### 記憶まわりの IAM の線引き
 
