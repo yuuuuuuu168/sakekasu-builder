@@ -70,6 +70,22 @@ def fake_urlopen(payload, capture=None, error=None):
     return _urlopen
 
 
+def picky_urlopen(capture):
+    """country を付けたリクエストだけ 422 で弾く urlopen（API 側の代役）。"""
+    ok = fake_urlopen({"results": [result()]}, capture)
+
+    def _urlopen(request, timeout=None):
+        body = json.loads(request.data.decode("utf-8"))
+        if "country" in body:
+            capture.append({"body": body})
+            raise urllib.error.HTTPError(
+                web_search.TAVILY_SEARCH_URL, 422, "Unprocessable", {}, None
+            )
+        return ok(request, timeout=timeout)
+
+    return _urlopen
+
+
 def result(url="https://example.com/sake", title="獺祭", content="山口の酒蔵"):
     return {"url": url, "title": title, "content": content, "score": 0.9}
 
@@ -186,6 +202,68 @@ class Test費用の上限:
         build(capture=capture).search("獺祭")
 
         assert capture[0]["timeout"] == web_search.HTTP_TIMEOUT
+
+
+class Test検索結果を日本に寄せる:
+    """地域を指定しないと、日本語で検索しても海外向けページが上位に来る。
+
+    実機では「獺祭の新酒」を聞いて旭酒造の台湾サイト（dassai.com/tw）と
+    中華圏の日本酒メディアが出典になった。相談しているのは日本にいるユーザーで、
+    知りたいのは日本での発売や相場なので、日本の情報源に寄せる。
+    """
+
+    def test_国を指定して検索する(self):
+        capture = []
+        build(capture=capture).search("獺祭 新酒 2026年")
+
+        assert capture[0]["body"]["country"] == web_search.SEARCH_COUNTRY
+
+    def test_国指定を拒否されたら外して取り直す(self):
+        # Tavily 側の仕様は手元から検証できていない。受け付けられなかったときに
+        # 検索そのものが死なないよう、国指定は落として続行する
+        capture = []
+        search = WebSearch(
+            SECRET_ID,
+            secrets_client=FakeSecretsClient(),
+            urlopen=picky_urlopen(capture),
+        )
+
+        got = search.search("獺祭 新酒 2026年")
+
+        assert len(capture) == 2
+        assert "country" in capture[0]["body"]
+        assert "country" not in capture[1]["body"]
+        assert got["results"][0]["url"] == "https://example.com/sake"
+
+    def test_一度拒否されたら次からは付けない(self):
+        capture = []
+        search = WebSearch(
+            SECRET_ID,
+            secrets_client=FakeSecretsClient(),
+            urlopen=picky_urlopen(capture),
+        )
+
+        search.search("獺祭")
+        search.search("八海山")
+
+        # 1回目は付けて拒否され外して再送、2回目は最初から付けない（計3回）
+        assert len(capture) == 3
+        assert "country" not in capture[2]["body"]
+
+    def test_国指定と関係のない失敗は再送しない(self):
+        # 500 やタイムアウトで2回叩くと、失敗のたびに費用と待ち時間が倍になる
+        capture = []
+        err = urllib.error.HTTPError(
+            web_search.TAVILY_SEARCH_URL, 500, "Server Error", {}, None
+        )
+        search = WebSearch(
+            SECRET_ID,
+            secrets_client=FakeSecretsClient(),
+            urlopen=fake_urlopen({"results": []}, capture, err),
+        )
+
+        assert "error" in search.search("獺祭")
+        assert len(capture) == 1
 
 
 class Test検索結果の扱い:
