@@ -124,6 +124,18 @@ AWS_PROFILE=sakekasu-builder aws cloudformation describe-stack-resource-drifts \
   --query 'StackResourceDrifts[].[LogicalResourceId,StackResourceDriftStatus]' --output table
 ```
 
+2026-08-19 の実測では、`sakekasu-dev-auth` / `sakekasu-dev-monitoring` / `sakekasu-billing-notifier` が `IN_SYNC`、`sakekasu-dev-api` だけ `DRIFTED` で4件だった。ロググループは1つも含まれていない。
+
+`api` の4件は `AWS::AppSync::FunctionConfiguration` で、ずれているのは `/FunctionVersion` の1点だけ。
+
+```
+Expected: "2018-05-29"   Actual: null
+```
+
+**これは移行と関係が無く、直す必要も無い。** `FunctionVersion` は VTL 時代のプロパティで、JS ランタイム（`FunctionRuntime.JS_1_0_0`）の関数では意味を持たない。テンプレートには CDK が既定値を入れるが、AppSync 側は `null` を返す。値が食い違っているのではなく、使われていない項目が比較されているだけ。テンプレートから消すこともできない。
+
+このスタックでドリフトを見るのは #129 が初めてだったので、ここで表に出た。次に掛ける人が同じところで止まらないよう記録しておく。
+
 ## 通らなかった道
 
 最初は `cdk import` による2段階の移行を組んだ。**この方式では通らない。** 同じところで詰まる人が出ないよう、理由を残す。
