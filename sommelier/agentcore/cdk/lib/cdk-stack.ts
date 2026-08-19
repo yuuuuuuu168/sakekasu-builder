@@ -4,7 +4,7 @@ import {
   type AgentCoreProjectSpec,
   type AgentCoreMcpSpec,
 } from '@aws/agentcore-cdk';
-import { CfnOutput, Stack, aws_iam as iam, type StackProps } from 'aws-cdk-lib';
+import { ArnFormat, CfnOutput, Stack, aws_iam as iam, type StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
 /** エージェントに渡すテーブル名の環境変数名（読み取り権限を付与する対象） */
@@ -15,6 +15,23 @@ const OWNER_INDEX_NAME = 'owner-index';
 
 /** DynamoDB のテーブル名として許可する形式（ワイルドカードや区切り文字を弾く） */
 const DYNAMODB_TABLE_NAME_PATTERN = /^[a-zA-Z0-9_.-]{3,255}$/;
+
+/**
+ * Web 検索の API キーを入れた Secrets Manager のシークレット名を渡す環境変数名。
+ * テーブル名と同じく agentcore.json を唯一の定義元とし、ここでは読むだけにする。
+ *
+ * 未設定なら権限も付けない。エージェント側もこの環境変数が無ければ検索を
+ * 無効にして動くので、「キーを登録していない環境」はそのまま検索なしで動く。
+ */
+const SEARCH_API_KEY_SECRET_ENV_NAME = 'TAVILY_API_KEY_SECRET_ID';
+
+/**
+ * Secrets Manager のシークレット名として許可する形式。
+ * サービスが許すのは英数字と /_+=.@- で、ワイルドカードは含まれない。
+ * ARN を文字列連結で組み立てる以上、`*` を仕込まれると権限が広がるため
+ * ここで弾く（テーブル名と同じ理由）。
+ */
+const SECRET_NAME_PATTERN = /^[a-zA-Z0-9/_+=.@-]{1,512}$/;
 
 export interface AgentCoreStackProps extends StackProps {
   /**
@@ -103,6 +120,35 @@ export class AgentCoreStack extends Stack {
             // GSI 経由で読むためインデックスも対象にするが、実際に使う
             // owner-index だけに限定する（今後 GSI が増えても自動で広がらない）
             resources: [tableArn, `${tableArn}/index/${OWNER_INDEX_NAME}`],
+          })
+        );
+      }
+
+      // Web 検索の API キーはリポジトリにも agentcore.json にも置かず、
+      // Secrets Manager に手で登録しておく。エージェントへ渡すのは名前だけで、
+      // 値を読む権限をここで（そのシークレット1つに限って）与える。
+      const secretName = agent.envVars?.find(
+        v => v.name === SEARCH_API_KEY_SECRET_ENV_NAME
+      )?.value;
+      if (secretName) {
+        if (!SECRET_NAME_PATTERN.test(secretName)) {
+          throw new Error(
+            `${SEARCH_API_KEY_SECRET_ENV_NAME} の値が不正です: "${secretName}"（使用できるのは英数字と /_+=.@- の1〜512文字）`
+          );
+        }
+        environment.runtime.role.addToPrincipalPolicy(
+          new iam.PolicyStatement({
+            actions: ['secretsmanager:GetSecretValue'],
+            // Secrets Manager は ARN の末尾に6文字のランダムな接尾辞を付ける。
+            // 名前だけでは ARN が確定しないため、既存スタックと同じく `-*` で受ける
+            resources: [
+              Stack.of(this).formatArn({
+                service: 'secretsmanager',
+                resource: 'secret',
+                resourceName: `${secretName}-*`,
+                arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+              }),
+            ],
           })
         );
       }

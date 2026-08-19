@@ -49,7 +49,7 @@ def agent_stub(monkeypatch):
     monkeypatch.setattr(main, "Agent", FakeAgent)
     monkeypatch.setattr(main, "load_model", lambda: object())
     monkeypatch.setattr(main, "_get_owner_sub", lambda context: OWNER_SUB)
-    monkeypatch.setattr(main, "_build_tools", lambda owner_sub: [])
+    monkeypatch.setattr(main, "_build_tools", lambda owner_sub, search_enabled=None: [])
     return FakeAgent
 
 
