@@ -61,6 +61,11 @@ SEARCH_DEPTH = "basic"
 MAX_SNIPPET_LENGTH = 400
 MAX_TITLE_LENGTH = 120
 MAX_URL_LENGTH = 500
+# 検索結果を寄せる国。指定しないと、日本語で検索しても同じ蔵の海外向けページ
+# （例: 旭酒造の台湾サイト dassai.com/tw）や中華圏の日本酒メディアが上位に来る。
+# 相談しているのは日本にいるユーザーで、知りたいのは日本での発売や相場なので、
+# 日本の情報源に寄せる
+SEARCH_COUNTRY = "japan"
 # HTTP のタイムアウト（秒）。相談の応答を待たせすぎない
 HTTP_TIMEOUT = 10
 # 読み込むレスポンスの上限バイト数。巨大な応答でメモリを使い切らせない
@@ -146,6 +151,9 @@ class WebSearch:
         self._secrets_client = secrets_client
         self._urlopen = urlopen or urllib.request.urlopen
         self._api_key: Optional[str] = None
+        # country パラメータを送るか。API 側に拒否されたら False に倒して、
+        # 以降は付けずに検索する（下の _search_once を参照）
+        self._send_country = True
         self._lock = threading.Lock()
         # 取得失敗のクールダウン明け時刻
         self._retry_after = 0.0
@@ -183,6 +191,49 @@ class WebSearch:
             self._api_key = api_key
             return api_key
 
+    def _search_once(self, api_key: str, query: str, count: int, with_country: bool):
+        """Tavily を1回叩く。戻り値は (応答, HTTP ステータス)。
+
+        失敗したときの応答は None にして、ステータスだけ呼び出し側へ返す
+        （国指定が原因かどうかを、呼び出し側が status で判断できるように）。
+        """
+        params = {
+            "query": query,
+            "max_results": count,
+            "search_depth": SEARCH_DEPTH,
+            # 要約の生成と本文の全文取得はどちらも課金と入力量を増やす。
+            # 判断はこちらのモデルにさせるので、検索結果の抜粋だけでよい
+            "include_answer": False,
+            "include_raw_content": False,
+        }
+        if with_country:
+            params["country"] = SEARCH_COUNTRY
+
+        request = urllib.request.Request(
+            TAVILY_SEARCH_URL,
+            data=json.dumps(params).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+            method="POST",
+        )
+        try:
+            with self._urlopen(request, timeout=HTTP_TIMEOUT) as response:
+                return (
+                    json.loads(
+                        response.read(MAX_RESPONSE_BYTES).decode("utf-8", "replace")
+                    ),
+                    200,
+                )
+        except urllib.error.HTTPError as err:
+            # ステータスだけ残す。本文には API キーに関する情報が載りうる
+            log.warning("Tavily の検索が失敗しました: HTTP %s", err.code)
+            return None, err.code
+        except Exception as err:
+            log.warning("Tavily の検索が失敗しました: %s", type(err).__name__)
+            return None, None
+
     def search(self, query: str, max_results: Optional[int] = None) -> dict:
         """Web を検索する。戻り値は {"results": [...]} か {"error": "..."}。
 
@@ -207,38 +258,23 @@ class WebSearch:
         if not api_key:
             return {"error": "Web 検索は今使えません（API キーを取得できません）"}
 
-        body = json.dumps(
-            {
-                "query": search_query,
-                "max_results": count,
-                "search_depth": SEARCH_DEPTH,
-                # 要約の生成と本文の全文取得はどちらも課金と入力量を増やす。
-                # 判断はこちらのモデルにさせるので、検索結果の抜粋だけでよい
-                "include_answer": False,
-                "include_raw_content": False,
-            }
-        ).encode("utf-8")
-        request = urllib.request.Request(
-            TAVILY_SEARCH_URL,
-            data=body,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-            method="POST",
+        payload, status = self._search_once(
+            api_key, search_query, count, with_country=self._send_country
         )
-
-        try:
-            with self._urlopen(request, timeout=HTTP_TIMEOUT) as response:
-                payload = json.loads(
-                    response.read(MAX_RESPONSE_BYTES).decode("utf-8", "replace")
-                )
-        except urllib.error.HTTPError as err:
-            # ステータスだけ残す。本文には API キーに関する情報が載りうる
-            log.warning("Tavily の検索が失敗しました: HTTP %s", err.code)
-            return {"error": "Web 検索に失敗しました"}
-        except Exception as err:
-            log.warning("Tavily の検索が失敗しました: %s", type(err).__name__)
+        # 国指定を付けたリクエストだけが弾かれたなら、パラメータ名か値が
+        # API に受け付けられていない。1回だけ外して取り直し、以降は付けない。
+        # 国指定は結果の質を上げるためのもので、検索そのものより優先度は低い
+        if payload is None and self._send_country and status in (400, 422):
+            log.warning(
+                "Tavily が country パラメータを受け付けませんでした（HTTP %s）。"
+                "以降は指定せずに検索します",
+                status,
+            )
+            self._send_country = False
+            payload, status = self._search_once(
+                api_key, search_query, count, with_country=False
+            )
+        if payload is None:
             return {"error": "Web 検索に失敗しました"}
 
         if not isinstance(payload, dict):

@@ -287,6 +287,14 @@ class Test検索のシステムプロンプト:
         # 作り変えさせない（それらしい URL を書かれると出典の意味がない）
         assert "そのまま写すこと" in prompt
 
+    def test_日本語の情報源を優先させる(self):
+        # 実機で旭酒造の台湾サイトが出典になった。API 側の国指定と
+        # 二段構えにして、海外向けページを根拠にしないよう促す
+        prompt = _build_system_prompt([], search_enabled=True)
+
+        assert "日本語の情報源を優先する" in prompt
+        assert "海外向けサイト" in prompt
+
     def test_好みの差し込みと両立する(self):
         prompt = _build_system_prompt(["辛口の純米が好き"], search_enabled=True)
 
