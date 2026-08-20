@@ -1,4 +1,13 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(bash scripts/aws-sso-login.sh:*)",
+      "Bash(aws sso login:*)",
+      "Bash(aws sts get-caller-identity:*)",
+      "mcp__github__subscribe_pr_activity",
+      "mcp__github__unsubscribe_pr_activity"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -18,6 +27,17 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/deny-aws-writes.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*__create_pull_request",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/pr-watch-reminder.mjs"
           }
         ]
       }
