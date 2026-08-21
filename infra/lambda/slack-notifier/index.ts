@@ -48,6 +48,9 @@ interface HealthEvent {
   time?: string;
   detail?: {
     service?: string;
+    eventArn?: string;
+    eventRegion?: string;
+    eventScopeCode?: string;
     eventTypeCode?: string;
     eventTypeCategory?: string;
     startTime?: string;
@@ -375,6 +378,40 @@ async function postToSlack(blocks: unknown[], fallbackText: string): Promise<voi
   }
 }
 
+/**
+ * 受け取った Health イベントをログに残す。
+ *
+ * Slack に流すだけだと、後から「何が届いたのか」を AWS 側から追えない。
+ * Health API（describe-events）は Business 以上のサポート契約がないと呼べず、
+ * EventBridge も既定ではイベントを保存しないため、通知が流れたあとは
+ * Slack の画面が唯一の記録になってしまう。実際 2026-08-21 の Connect の
+ * 障害通知では、中身を確かめるのにスクリーンショットが要った。
+ *
+ * アラームの方は CloudWatch のアラーム履歴に残るので、ここでは Health だけ書き出す。
+ */
+function logHealthEvent(event: HealthEvent): void {
+  const detail = event.detail ?? {};
+  console.log(
+    JSON.stringify({
+      kind: 'aws-health-event',
+      service: detail.service,
+      eventArn: detail.eventArn,
+      eventTypeCode: detail.eventTypeCode,
+      eventTypeCategory: detail.eventTypeCategory,
+      // PUBLIC はリージョン全体の公開情報で、こちらのリソースに影響するとは限らない。
+      // 使っていないサービスの通知が届いたときの切り分けに要る
+      eventScopeCode: detail.eventScopeCode,
+      // region は通知の配信先。実際に影響を受けたのは eventRegion の方
+      eventRegion: detail.eventRegion ?? event.region,
+      startTime: detail.startTime,
+      endTime: detail.endTime,
+      affectedEntityCount: (detail.affectedEntities ?? []).length,
+      // 本文は数千文字になることがあるので頭だけ残す
+      description: clip(detail.eventDescription?.[0]?.latestDescription ?? '', 1000),
+    }),
+  );
+}
+
 export const handler = async (event: SnsEvent): Promise<void> => {
   for (const record of event.Records) {
     const { Subject, Message, Timestamp } = record.Sns;
@@ -385,6 +422,8 @@ export const handler = async (event: SnsEvent): Promise<void> => {
     try {
       const parsed: unknown = JSON.parse(Message);
       if (isHealthEvent(parsed)) {
+        // Slack 送信より先に出す。送信に失敗しても記録は残したい
+        logHealthEvent(parsed);
         blocks = buildHealthBlocks(parsed);
         const service = parsed.detail?.service ?? '不明';
         const category = parsed.detail?.eventTypeCategory ?? '';

@@ -438,3 +438,133 @@ describe('元から壊れた文字が混ざっていても落とす', () => {
     expect(collectStrings(blocks).join('')).toContain('🍶S3');
   });
 });
+
+// Slack に流すだけだと、後から中身を AWS 側から追えない。
+// Health API はサポート契約が要り、EventBridge もイベントを保存しないため、
+// ここでログに残しておかないと Slack の画面が唯一の記録になる
+describe('Health イベントをログに残す', () => {
+  /** console.log に出た JSON のうち、Health イベントの行だけ拾う */
+  async function capturedHealthLogs(message: string): Promise<Record<string, unknown>[]> {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await buildBlocksForMessage(message);
+      return spy.mock.calls
+        .map(([line]) => line)
+        .filter((line): line is string => typeof line === 'string')
+        .map((line) => {
+          try {
+            return JSON.parse(line) as Record<string, unknown>;
+          } catch {
+            return {};
+          }
+        })
+        .filter((parsed) => parsed.kind === 'aws-health-event');
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  // 2026-08-21 に実際に届いたもの
+  const connectIssue = {
+    service: 'CONNECT',
+    eventArn: 'arn:aws:health:ap-northeast-1::event/CONNECT/AWS_CONNECT_OPERATIONAL_ISSUE/example',
+    eventRegion: 'ap-northeast-1',
+    eventScopeCode: 'PUBLIC',
+    eventTypeCode: 'AWS_CONNECT_OPERATIONAL_ISSUE',
+    eventTypeCategory: 'issue',
+    startTime: '2026-08-21T02:02:22Z',
+    endTime: '2026-08-21T02:40:02Z',
+    eventDescription: [{ latestDescription: '[RESOLVED] Increased Error Rates' }],
+  };
+
+  it('あとから追うのに要る項目が揃っている', async () => {
+    const [logged] = await capturedHealthLogs(healthMessage(connectIssue));
+    expect(logged).toMatchObject({
+      service: 'CONNECT',
+      eventTypeCode: 'AWS_CONNECT_OPERATIONAL_ISSUE',
+      eventTypeCategory: 'issue',
+      eventScopeCode: 'PUBLIC',
+      eventRegion: 'ap-northeast-1',
+      startTime: '2026-08-21T02:02:22Z',
+      endTime: '2026-08-21T02:40:02Z',
+      description: '[RESOLVED] Increased Error Rates',
+    });
+  });
+
+  // 使っていないサービスの通知が届いたとき、PUBLIC か ACCOUNT_SPECIFIC かで
+  // 「こちらのリソースの話か」がすぐ分かる
+  it('リージョン全体の公開イベントかどうかが残る', async () => {
+    const [logged] = await capturedHealthLogs(
+      healthMessage({ ...connectIssue, eventScopeCode: 'ACCOUNT_SPECIFIC' }),
+    );
+    expect(logged.eventScopeCode).toBe('ACCOUNT_SPECIFIC');
+  });
+
+  // eventRegion がない古い形でも、配信先のリージョンで代替する
+  it('eventRegion がなければ配信先のリージョンで補う', async () => {
+    const { eventRegion: _omitted, ...withoutRegion } = connectIssue;
+    const [logged] = await capturedHealthLogs(healthMessage(withoutRegion));
+    expect(logged.eventRegion).toBe('ap-northeast-1');
+  });
+
+  it('影響を受けるリソースの件数が残る', async () => {
+    const [logged] = await capturedHealthLogs(
+      healthMessage({
+        ...connectIssue,
+        affectedEntities: [{ entityValue: 'arn:aws:x:::1' }, { entityValue: 'arn:aws:x:::2' }],
+      }),
+    );
+    expect(logged.affectedEntityCount).toBe(2);
+  });
+
+  // CloudWatch Logs の1イベントには上限がある。
+  // 本文は数千文字になることがあるため、丸ごとは載せない
+  it('長い本文は切り詰める', async () => {
+    const [logged] = await capturedHealthLogs(
+      healthMessage({
+        ...connectIssue,
+        eventDescription: [{ latestDescription: 'あ'.repeat(5000) }],
+      }),
+    );
+    expect((logged.description as string).length).toBeLessThanOrEqual(1000);
+  });
+
+  // アラームは CloudWatch のアラーム履歴に残るので、ここで重ねて出す必要はない
+  it('アラームでは出さない', async () => {
+    const logs = await capturedHealthLogs(
+      JSON.stringify({ AlarmName: 'dev-sakekasu-ocr-errors', NewStateValue: 'ALARM' }),
+    );
+    expect(logs).toHaveLength(0);
+  });
+
+  // 記録を残すのが目的なので、Slack が落ちているときこそ残っていてほしい
+  it('Slack への送信が失敗しても残る', async () => {
+    const mod = await import('../index.ts');
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({ ok: false, status: 500 }) as Response) as typeof fetch;
+    try {
+      await expect(
+        mod.handler({
+          Records: [
+            {
+              Sns: {
+                Subject: null,
+                Message: healthMessage(connectIssue),
+                Timestamp: '2026-08-21T02:02:22Z',
+              },
+            },
+          ],
+        }),
+      ).rejects.toThrow();
+      const logged = spy.mock.calls
+        .map(([line]) => line)
+        .filter((line): line is string => typeof line === 'string')
+        .filter((line) => line.includes('aws-health-event'));
+      expect(logged).toHaveLength(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      spy.mockRestore();
+    }
+  });
+});
