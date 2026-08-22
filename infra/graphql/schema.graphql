@@ -23,6 +23,9 @@ type PurchaseRecord {
   storeName: String!
   price: Int!
   quantity: Int
+  # まだ飲みきっていない本数。まとめ買いした記録を1本ずつ消費するために持つ。
+  # 未設定の記録（この項目より前に作ったもの）は quantity と同じとみなす
+  remainingQuantity: Int
   purchaseDate: AWSDate!
   category: SakeCategory!
   memo: String
@@ -173,6 +176,8 @@ input CreatePurchaseRecordInput {
   storeName: String!
   price: Int!
   quantity: Int
+  # 登録時は quantity と同じ値を入れる（1本も飲んでいない状態）
+  remainingQuantity: Int
   purchaseDate: AWSDate!
   category: SakeCategory!
   memo: String
@@ -190,6 +195,7 @@ input UpdatePurchaseRecordInput {
   storeName: String
   price: Int
   quantity: Int
+  remainingQuantity: Int
   purchaseDate: AWSDate
   category: SakeCategory
   memo: String

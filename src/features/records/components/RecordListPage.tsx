@@ -15,7 +15,6 @@ import { ImageModal } from '@/features/image/components/ImageModal';
 import { TastingNoteBackfill } from '@/features/tasting/components/TastingNoteBackfill';
 import { buildLinkedDrinkingIndex } from '../lib/linkedDrinking';
 import type { UnifiedRecord } from '../types';
-import type { DrinkingStatus } from '@/types/schema';
 
 interface RecordListPageProps {
   /** 在庫（購入記録）から飲酒登録へ進むときのコールバック */
@@ -58,28 +57,8 @@ export function RecordListPage({ onDrinkFromStock }: RecordListPageProps = {}) {
     handleSuccess,
   );
 
-  // 飲みきりステータスの楽観的更新（openedAtUpdate が undefined の場合は開封日時を変更しない）
-  const handleStatusOptimisticUpdate = useCallback(
-    (id: string, newStatus: DrinkingStatus, openedAtUpdate?: string | null) => {
-      patchRecord(id, {
-        drinkingStatus: newStatus,
-        ...(openedAtUpdate !== undefined && { openedAt: openedAtUpdate }),
-      });
-    },
-    [patchRecord],
-  );
-
-  const handleStatusRollback = useCallback(
-    (id: string, oldStatus: DrinkingStatus) => {
-      patchRecord(id, { drinkingStatus: oldStatus });
-    },
-    [patchRecord],
-  );
-
-  const { updateStatus, isUpdating: isStatusUpdating } = useUpdateDrinkingStatus(
-    handleStatusOptimisticUpdate,
-    handleStatusRollback,
-  );
+  // 飲みきりステータスの更新（楽観的更新とロールバックは patchRecord に任せる）
+  const { updateStatus, isUpdating: isStatusUpdating } = useUpdateDrinkingStatus(patchRecord);
 
   // 購入記録 → 紐づいた飲酒記録の感想を引くための索引
   const linkedDrinkingIndex = useMemo(

@@ -16,6 +16,7 @@ import { usePurchaseForm } from '@/features/purchase/hooks/usePurchaseForm';
 import { usePastRatingHint } from '@/features/purchase/hooks/usePastRatingHint';
 import { PastRatingHint } from '@/features/purchase/components/PastRatingHint';
 import type { PurchaseFormData } from '@/features/purchase/types';
+import type { BottleStock } from '@/features/records/lib/bottleCount';
 import { ImageUploadArea } from '@/features/image/components/ImageUploadArea';
 import { useOcrTrigger } from '@/features/image/hooks/useOcrTrigger';
 import { useImageUrls } from '@/features/image/hooks/useImageUrls';
@@ -36,6 +37,8 @@ interface PurchaseFormProps {
   existingImageKey?: string | null;
   /** 編集対象が既に持っている画像キー一覧 */
   existingImageKeys?: string[];
+  /** 編集対象の本数と残本数（本数を書き換えたときの残本数計算に使う） */
+  existingBottles?: BottleStock;
 }
 
 export function PurchaseForm({
@@ -44,6 +47,7 @@ export function PurchaseForm({
   initialData,
   existingImageKey,
   existingImageKeys,
+  existingBottles,
 }: PurchaseFormProps) {
   const isEditMode = recordId !== undefined;
   const {
@@ -56,7 +60,7 @@ export function PurchaseForm({
     handleBlur,
     handleSubmit,
     imageUpload,
-  } = usePurchaseForm({ recordId, initialData, existingImageKey, existingImageKeys });
+  } = usePurchaseForm({ recordId, initialData, existingImageKey, existingImageKeys, existingBottles });
 
   // 編集時は「今ある写真の続きに足す」と分かるよう、登録済みの画像も並べる
   const { imageUrls: existingImageUrls } = useImageUrls(existingImageKeys ?? EMPTY_KEYS);
