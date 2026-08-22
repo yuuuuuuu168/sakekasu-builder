@@ -1,0 +1,87 @@
+# sommelier/ の変更を main へマージしたら、ソムリエ Runtime を自動デプロイする。
+#
+# これまでソムリエだけは手動の `agentcore deploy` だった。infra/ を対象にする
+# deploy.yml が `sommelier/**` を見ていないため、マージしても何も起きず、
+# 「マージ済みなのに動いているのは前の版」という状態が起きていた
+# （PR #176 のマージ後に実際に起きた）。
+#
+# infra/ とワークフローを分けているのは、paths がワークフロー単位でしか
+# 効かないため。1つにまとめると、ソムリエだけの変更で infra のデプロイまで
+# 走ることになる。デプロイ先のスタックが別なら、走る条件も分けておく。
+name: deploy-sommelier
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sommelier/**'
+      - '.github/workflows/deploy-sommelier.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+# 同じスタックへの同時デプロイを防ぐ。infra 側（cdk-deploy）とは別グループに
+# する。デプロイ先が別なので、待たせ合う理由がない。
+# 後続を打ち切らないのは deploy.yml と同じ理由で、最後の main の状態を
+# 必ず反映させるため
+concurrency:
+  group: agentcore-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sommelier/agentcore/cdk
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sommelier/agentcore/cdk/package-lock.json
+      # CodeZip の梱包は uv でエージェントの依存を入れる（ARM64 向けに
+      # クロスコンパイルする）。無いと synth の時点で落ちる
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: sommelier/app/sommelier/uv.lock
+      # 依存の取得とテストは AWS の認証情報を入れる前に済ませる（deploy.yml と
+      # 同じ理由。認証後に npm ci を走らせると、乗っ取られた依存の
+      # インストール時スクリプトが AWS_SESSION_TOKEN を読めてしまう）
+      - run: npm ci --ignore-scripts
+      # デプロイ直前の最後の関門を2つ通す。
+      #
+      # エージェント本体（pytest）: 認証・無害化・記憶の読み書きはここでしか
+      # 見ていない。sommelier/** は test.yml の paths に入っておらず、PR では
+      # 走らないため、出す手前で必ず1回通す
+      - name: エージェントのテスト
+        working-directory: sommelier/app/sommelier
+        run: uv run --group dev pytest
+      # CDK 側（synth）: 記憶が作られるか・エージェントが ID を受け取れるか・
+      # 読み書きの権限があるか。ここが欠けた状態で出すと、エージェントは
+      # 記憶なしのまま黙って動き続ける（フェイルオープン設計なので
+      # 実行時エラーにならない）
+      - run: npm test
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::<アプリのアカウント ID>:role/sakekasu-github-actions-deploy
+          aws-region: ap-northeast-1
+      # `agentcore deploy` ではなく CDK を直接叩く。
+      # `agentcore deploy` は本体の処理に入る前に cdk/ の依存を最新へ書き換えて
+      # npm install まで走らせるため、上の npm test が確かめた版と実際に
+      # デプロイされる版がずれる。lock のまま出すために CDK を直接使う
+      # （cdk.json の app が dist/bin/cdk.js なので、先に build が要る）。
+      #
+      # スタックは1つ（AgentCore-sommelier-dev）だが、aws-targets.json に
+      # 環境が増えれば増える。--all にして、増やしたときに設定側だけで済ませる。
+      #
+      # `npx cdk` ではなく `npx aws-cdk` なのは、このパッケージ自身が
+      # bin.cdk として CDK アプリ（dist/bin/cdk.js）を宣言しているため。
+      # npx は自パッケージの bin を優先するので、`npx cdk deploy` は CLI では
+      # なくアプリを引数なしで実行して**何もせず成功する**（デプロイした気に
+      # なったまま CI が緑になる）
+      - run: npm run build
+      - run: npx aws-cdk deploy --all --require-approval never
