@@ -2,9 +2,9 @@ import { useCallback, useMemo, useState } from 'react';
 import type { UnifiedRecord } from '@/features/records/types';
 import { useAuth } from '@/features/auth/AuthContext';
 import {
-  clearSkippedIds,
-  loadSkippedIds,
-  saveSkippedIds,
+  loadSkippedKeys,
+  saveSkippedKeys,
+  skipKey,
 } from '@/features/tasting/lib/skippedStorage';
 import { selectTastingNoteTargets } from '@/features/tasting/lib/backfillTargets';
 import { requestTastingNote } from '@/features/tasting/lib/requestTastingNote';
@@ -33,8 +33,6 @@ export interface UseTastingNoteBackfillReturn {
   skippedCount: number;
   /** 一括追記を始める。終わったら結果を返す */
   run: () => Promise<BackfillProgress>;
-  /** 書けなかった記録の記憶を消して、もう一度対象に戻す */
-  retrySkipped: () => void;
   isRunning: boolean;
   progress: BackfillProgress;
 }
@@ -43,6 +41,9 @@ const IDLE_PROGRESS: BackfillProgress = { done: 0, total: 0, written: 0, skipped
 
 /**
  * 機能追加より前に登録した記録へ、テイスティングノートをまとめて書き足す。
+ *
+ * 一度書けなかった記録は控えて対象から外す。控えは記録IDと銘柄名の組みなので、
+ * 銘柄名を直せば（OCR の読み取りミスを直したときなど）自動でまた対象に入る。
  *
  * 1件ずつ直列に処理する。まとめて投げると Bedrock を呼ぶ Lambda の予約枠
  * （api-stack.ts の TASTING_NOTE_RESERVED_CONCURRENCY）を一人で使い切り、
@@ -63,8 +64,8 @@ export function useTastingNoteBackfill(
   // 「書けなかった記録」を読み直す合図。実行のたびに増やす
   const [skippedRevision, setSkippedRevision] = useState(0);
 
-  const skippedIds = useMemo(
-    () => new Set(loadSkippedIds(userId)),
+  const skippedKeys = useMemo(
+    () => new Set(loadSkippedKeys(userId)),
     // skippedRevision は localStorage を読み直すための依存
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [userId, skippedRevision],
@@ -72,24 +73,19 @@ export function useTastingNoteBackfill(
 
   const eligible = useMemo(() => selectTastingNoteTargets(records), [records]);
   const targets = useMemo(
-    () => eligible.filter((record) => !skippedIds.has(record.id)),
-    [eligible, skippedIds],
+    () => eligible.filter((record) => !skippedKeys.has(skipKey(record.id, record.sakeName))),
+    [eligible, skippedKeys],
   );
   const skippedCount = eligible.length - targets.length;
 
-  const retrySkipped = useCallback(() => {
-    clearSkippedIds(userId);
-    setSkippedRevision((prev) => prev + 1);
-  }, [userId]);
-
   const run = useCallback(async (): Promise<BackfillProgress> => {
     // 実行中に一覧が変わってもその回の対象は動かさない（同じ記録を二度処理しない）
-    const skipped = new Set(loadSkippedIds(userId));
+    const skipped = new Set(loadSkippedKeys(userId));
     const queue = selectTastingNoteTargets(records).filter(
-      (record) => !skipped.has(record.id),
+      (record) => !skipped.has(skipKey(record.id, record.sakeName)),
     );
     // 今回書けなかった記録。次回の対象から外すために控える
-    const failedIds: string[] = [];
+    const failedKeys: string[] = [];
     const result: BackfillProgress = { done: 0, total: queue.length, written: 0, skipped: 0 };
 
     setIsRunning(true);
@@ -125,15 +121,15 @@ export function useTastingNoteBackfill(
         } else {
           // ノートを起こせなかった記録。同じ銘柄名なら次も同じ結果になるので控える
           result.skipped += 1;
-          failedIds.push(record.id);
+          failedKeys.push(skipKey(record.id, record.sakeName));
         }
 
         result.done += 1;
         setProgress({ ...result });
       }
     } finally {
-      if (failedIds.length > 0) {
-        saveSkippedIds(userId, failedIds);
+      if (failedKeys.length > 0) {
+        saveSkippedKeys(userId, failedKeys);
         setSkippedRevision((prev) => prev + 1);
       }
       setIsRunning(false);
@@ -142,5 +138,5 @@ export function useTastingNoteBackfill(
     return result;
   }, [records, onMemoUpdated, userId]);
 
-  return { targets, skippedCount, run, retrySkipped, isRunning, progress };
+  return { targets, skippedCount, run, isRunning, progress };
 }
