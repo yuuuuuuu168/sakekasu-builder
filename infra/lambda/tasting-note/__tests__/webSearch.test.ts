@@ -4,14 +4,28 @@
  * 検索結果は外部サイトの文面がそのままモデルへのプロンプトに入るので、
  * 危険文字を落とせているか・想定外の形を捨てられるかを見る。
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+const { mockSecretsSend } = vi.hoisted(() => ({ mockSecretsSend: vi.fn() }));
 
 vi.mock('@aws-sdk/client-secrets-manager', () => ({
-  SecretsManagerClient: vi.fn(),
-  GetSecretValueCommand: vi.fn(),
+  SecretsManagerClient: class {
+    send = mockSecretsSend;
+  },
+  GetSecretValueCommand: class {
+    constructor(input: Record<string, unknown>) {
+      Object.assign(this, input);
+    }
+  },
 }));
 
-import { cleanText, extractApiKey, extractResults } from '../webSearch.js';
+import {
+  cleanText,
+  extractApiKey,
+  extractResults,
+  resetSearchState,
+  searchSake,
+} from '../webSearch.js';
 
 describe('cleanText', () => {
   it('タグや擬似 JSON に使える文字を落とす', () => {
@@ -112,5 +126,114 @@ describe('extractResults', () => {
 
     expect(results[0].snippet).not.toContain('<');
     expect(results[0].snippet).not.toContain('>');
+  });
+});
+
+
+describe('searchSake', () => {
+  const originalFetch = globalThis.fetch;
+  const originalSecretId = process.env.TAVILY_API_KEY_SECRET_ID;
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  /** Tavily の応答を組み立てる */
+  function tavilyResponse(results: { title: string; content: string }[]) {
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ results }),
+    };
+  }
+
+  /** 送ったクエリを順に返す */
+  function sentQueries(): string[] {
+    return fetchSpy.mock.calls.map(
+      (call) => JSON.parse((call[1] as { body: string }).body).query as string,
+    );
+  }
+
+  beforeEach(() => {
+    resetSearchState();
+    mockSecretsSend.mockReset();
+    mockSecretsSend.mockResolvedValue({ SecretString: 'tvly-testkey' });
+    process.env.TAVILY_API_KEY_SECRET_ID = 'dev-sakekasu/sommelier/tavily-api-key';
+    fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (originalSecretId === undefined) {
+      delete process.env.TAVILY_API_KEY_SECRET_ID;
+    } else {
+      process.env.TAVILY_API_KEY_SECRET_ID = originalSecretId;
+    }
+  });
+
+  it('1本目で取れたら2本目は投げない', async () => {
+    fetchSpy.mockResolvedValueOnce(tavilyResponse([{ title: '蔵元', content: '華やかな吟醸香' }]));
+
+    const results = await searchSake(['獺祭 日本酒 味わい 特徴', '獺祭 日本酒']);
+
+    expect(results).toEqual([{ title: '蔵元', snippet: '華やかな吟醸香' }]);
+    expect(sentQueries()).toEqual(['獺祭 日本酒 味わい 特徴']);
+  });
+
+  // 限定品は「味わい 特徴」付きだと一致するページが無いことがある
+  it('1本目が0件なら条件を緩めて2本目を試す', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(tavilyResponse([]))
+      .mockResolvedValueOnce(tavilyResponse([{ title: '蔵元', content: '山廃仕込み' }]));
+
+    const results = await searchSake(['地酒 日本酒 味わい 特徴', '地酒 日本酒']);
+
+    expect(results).toEqual([{ title: '蔵元', snippet: '山廃仕込み' }]);
+    expect(sentQueries()).toEqual(['地酒 日本酒 味わい 特徴', '地酒 日本酒']);
+  });
+
+  it('1本目が通信に失敗しても2本目を試す', async () => {
+    fetchSpy
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce(tavilyResponse([{ title: '蔵元', content: '山廃仕込み' }]));
+
+    const results = await searchSake(['地酒 日本酒 味わい 特徴', '地酒 日本酒']);
+
+    expect(results).toHaveLength(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('HTTP エラーでも2本目を試す', async () => {
+    fetchSpy
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => '' })
+      .mockResolvedValueOnce(tavilyResponse([{ title: '蔵元', content: '山廃仕込み' }]));
+
+    const results = await searchSake(['地酒 日本酒 味わい 特徴', '地酒 日本酒']);
+
+    expect(results).toHaveLength(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  // どちらでも取れなければ、そこで諦める（費用と待ち時間の上限）
+  it('2本とも取れなければ空で返し、3本目は投げない', async () => {
+    fetchSpy.mockResolvedValue(tavilyResponse([]));
+
+    const results = await searchSake(['a', 'b', 'c']);
+
+    expect(results).toEqual([]);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  // 鍵を登録していない環境では検索なしで動く（ローカル・新環境）
+  it('シークレット名が未設定なら検索しない', async () => {
+    delete process.env.TAVILY_API_KEY_SECRET_ID;
+
+    expect(await searchSake(['獺祭 日本酒'])).toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('鍵を取得できなければ検索しない', async () => {
+    mockSecretsSend.mockRejectedValue(new Error('denied'));
+
+    expect(await searchSake(['獺祭 日本酒'])).toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
