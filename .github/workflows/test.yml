@@ -21,6 +21,7 @@ on:
     paths:
       - 'infra/**'
       - 'src/**'
+      - 'sommelier/**'
       - 'package.json'
       - 'package-lock.json'
       - 'eslint.config.js'
@@ -32,6 +33,7 @@ on:
     paths:
       - 'infra/**'
       - 'src/**'
+      - 'sommelier/**'
       - 'package.json'
       - 'package-lock.json'
       - 'eslint.config.js'
@@ -103,3 +105,41 @@ jobs:
       # それらの依存はそれぞれの node_modules にあるため import が解決できずに
       # 落ちる。infra のテストは上のジョブが見ているので、ここは重ならない
       - run: npx vitest run src/
+
+  # ソムリエ（sommelier/**）も、infra・フロントと同じ理由でどこにも属して
+  # いなかった（Issue #188）。pytest も CDK の synth テストも、これまでは
+  # deploy-sommelier.yml のデプロイ直前でしか動いていない。それだと気づける
+  # のがマージした後で、落ちれば main の自動デプロイが赤いまま止まる。
+  #
+  # deploy 側のテストはこの追加後も残す。deploy.yml が同じ理由で npm test を
+  # 重複させているのと同じで、paths の条件やマージの経路によってはこちらが
+  # 走らないことがあるため、本番へ出す手前でもう1回通す
+  sommelier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sommelier/agentcore/cdk/package-lock.json
+      # CDK の synth テストは CodeZip の梱包を伴い、その中で uv が
+      # エージェントの依存を ARM64 向けに入れる。無いと synth が落ちる。
+      # このリポジトリは v10 のような移動タグを打たないため、パッチまで指定する
+      # （移動タグ前提で書いてジョブが即落ちした。PR #187）
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: sommelier/app/sommelier/uv.lock
+      # エージェント本体。認証・無害化・記憶の読み書きはここでしか見ていない
+      - name: エージェントのテスト
+        working-directory: sommelier/app/sommelier
+        run: uv run --group dev pytest
+      # CDK 側。記憶が作られるか・エージェントが ID を受け取れるか・
+      # 読み書きの権限があるかを synth で確かめる。ここが欠けた状態で出すと、
+      # エージェントは記憶なしのまま黙って動き続ける（フェイルオープン設計）
+      #
+      # --ignore-scripts の理由は他のジョブと同じ
+      - name: CDK のテスト
+        working-directory: sommelier/agentcore/cdk
+        run: npm ci --ignore-scripts && npm test
