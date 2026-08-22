@@ -16,14 +16,17 @@ interface TastingNoteBackfillProps {
  * 機能追加より前に登録したウイスキー・日本酒へ、テイスティングノートを
  * まとめて書き足すための案内。
  *
- * 対象が無ければ何も出さない。一度追記すればその記録は対象から外れるので、
- * 全部書き終われば自然に消える
+ * **今できることが無ければ何も出さない。** 追記が済んだ記録も、調べても
+ * 書けなかった記録も対象から外れるので、押しても何も起きない状態のバナーは
+ * 画面に残らない。銘柄名を直せば対象に戻り、そのときまた出る
  */
 export function TastingNoteBackfill({ records, onMemoUpdated }: TastingNoteBackfillProps) {
-  const { targets, skippedCount, run, retrySkipped, isRunning, progress } =
-    useTastingNoteBackfill(records, onMemoUpdated);
+  const { targets, skippedCount, run, isRunning, progress } = useTastingNoteBackfill(
+    records,
+    onMemoUpdated,
+  );
 
-  if (targets.length === 0 && skippedCount === 0 && !isRunning) return null;
+  if (targets.length === 0 && !isRunning) return null;
 
   const handleClick = async () => {
     const result = await run();
@@ -38,21 +41,13 @@ export function TastingNoteBackfill({ records, onMemoUpdated }: TastingNoteBackf
     );
   };
 
-  // 書けなかった記録の案内。同じ銘柄名では結果も同じになるため、
-  // そのまま押し直しても増えないことが分かる文言にする
+  // 件数が実際の未記載数と食い違って見えるので、外している分は添えておく。
+  // 押し直しても結果は変わらないため、ここから再挑戦はさせない
   const skippedNote =
     skippedCount > 0 ? (
-      <span className="text-gray-500 dark:text-gray-500">
+      <span className="text-gray-500 dark:text-gray-500" data-testid="tasting-note-backfill-skipped">
         {' '}
-        書けなかった {skippedCount}件は対象から外しています。
-        <button
-          type="button"
-          onClick={retrySkipped}
-          className="underline underline-offset-2 hover:text-indigo-wa dark:hover:text-dark-gold"
-          data-testid="tasting-note-backfill-retry-skipped"
-        >
-          もう一度試す
-        </button>
+        （調べても書けなかった {skippedCount}件を除く）
       </span>
     ) : null;
 
@@ -71,7 +66,7 @@ export function TastingNoteBackfill({ records, onMemoUpdated }: TastingNoteBackf
           <span>
             テイスティングノート未記載のウイスキー・日本酒が{' '}
             <span className="font-bold text-indigo-wa dark:text-dark-gold">{targets.length}</span>
-            件あります。
+            件あります
             {skippedNote}
           </span>
         )}
@@ -81,7 +76,7 @@ export function TastingNoteBackfill({ records, onMemoUpdated }: TastingNoteBackf
         type="button"
         size="sm"
         onClick={handleClick}
-        disabled={isRunning || targets.length === 0}
+        disabled={isRunning}
         data-testid="tasting-note-backfill-button"
       >
         {isRunning ? (

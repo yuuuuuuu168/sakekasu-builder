@@ -131,20 +131,24 @@ describe('useTastingNoteBackfill', () => {
     expect(result.current.skippedCount).toBe(1);
   });
 
-  it('もう一度試すと対象に戻る', async () => {
+  // 控えは記録IDと銘柄名の組み。OCR の読み取りミスを直したら、
+  // 別の鍵になってもう一度試される
+  it('銘柄名を直すと対象に戻る', async () => {
     queueGenerated(null);
 
-    const { result, rerender } = renderHook(() =>
-      useTastingNoteBackfill([record({ sakeName: '聞いたことのない酒' })], vi.fn()),
+    const { result, rerender } = renderHook(
+      ({ sakeName }: { sakeName: string }) =>
+        useTastingNoteBackfill([record({ sakeName })], vi.fn()),
+      { initialProps: { sakeName: '獺采 純米大吟醸' } },
     );
 
     await act(async () => {
       await result.current.run();
     });
-    rerender();
-    act(() => {
-      result.current.retrySkipped();
-    });
+    rerender({ sakeName: '獺采 純米大吟醸' });
+    expect(result.current.targets).toEqual([]);
+
+    rerender({ sakeName: '獺祭 純米大吟醸' });
 
     expect(result.current.targets).toHaveLength(1);
     expect(result.current.skippedCount).toBe(0);
