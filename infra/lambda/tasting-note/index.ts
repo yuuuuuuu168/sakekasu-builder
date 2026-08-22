@@ -142,20 +142,35 @@ export async function handler(event: AppSyncEvent): Promise<TastingNoteResult> {
 
   // 知らない銘柄だけ Web で調べ直す。日本酒の地酒・限定品はここで拾う。
   // 検索できなければ空配列が返り、下の2回目は1回目と同じ結果になる
-  const results = await searchSake(buildSearchQuery(sakeName, category));
+  const results = await searchSake(buildSearchQueries(sakeName, category));
   if (results.length === 0) {
-    logSummary(category, fromKnowledge, 'none');
+    logSummary(category, fromKnowledge, 'none', 0);
     return fromKnowledge;
   }
 
   const fromWeb = await generateNote(sakeName, category, results);
-  logSummary(category, fromWeb, fromWeb.tastingNote !== null ? 'web' : 'none');
+  logSummary(
+    category,
+    fromWeb,
+    fromWeb.tastingNote !== null ? 'web' : 'none',
+    results.length,
+  );
   return fromWeb;
 }
 
-/** 銘柄名から検索クエリを組み立てる */
-export function buildSearchQuery(sakeName: string, category: NotableCategory): string {
-  return `${sakeName} ${CATEGORY_PROMPT[category].label} 味わい 特徴`;
+/**
+ * 銘柄名から検索クエリを組み立てる。前から順に試される。
+ *
+ * 1本目は味わいの記述に当たりやすい形。これで0件だったり通信に失敗したりした
+ * ときのために、2本目は銘柄名とカテゴリだけに緩める。限定品や季節商品は
+ * 「味わい 特徴」を付けると一致するページが無くなることがある
+ */
+export function buildSearchQueries(
+  sakeName: string,
+  category: NotableCategory,
+): string[] {
+  const label = CATEGORY_PROMPT[category].label;
+  return [`${sakeName} ${label} 味わい 特徴`, `${sakeName} ${label}`];
 }
 
 /**
@@ -172,17 +187,24 @@ function formatSearchResults(results: SearchResult[]): string {
   return `<web_data>\n${body}\n</web_data>`;
 }
 
-/** 書けたかどうかだけをログに残す。銘柄名は利用者の記録そのものなので出さない */
+/**
+ * 書けたかどうかだけをログに残す。銘柄名は利用者の記録そのものなので出さない。
+ *
+ * `searchHits` を残すのは、書けなかったときに「検索で何も見つからなかった」のか
+ * 「見つかったが、その銘柄の話ではなかった」のかを後から切り分けるため
+ */
 function logSummary(
   category: NotableCategory,
   result: TastingNoteResult,
   source: 'knowledge' | 'web' | 'none',
+  searchHits?: number,
 ): void {
   console.log(
     '[TastingNote] generation summary:',
     JSON.stringify({
       category,
       source,
+      searchHits,
       noteGenerated: result.tastingNote !== null,
       servingGenerated: result.recommendedServing !== null,
     }),

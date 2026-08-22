@@ -42,8 +42,21 @@ const SEARCH_COUNTRY = 'japan';
 const MAX_SNIPPET_LENGTH = 400;
 const MAX_TITLE_LENGTH = 120;
 
-/** HTTP のタイムアウト（ミリ秒）。登録の待ち時間に直結するので短く切る */
-const HTTP_TIMEOUT_MS = 6000;
+/**
+ * HTTP のタイムアウト（ミリ秒）。登録の待ち時間に直結するので短く切る。
+ *
+ * 最大2回試すので、検索にかかる時間はこの倍が上限になる。モデルの2回分と
+ * 合わせても Lambda のタイムアウト（25秒）に収まる長さにしてある
+ */
+const HTTP_TIMEOUT_MS = 5000;
+
+/**
+ * 1回の生成で検索を試す回数の上限。
+ *
+ * 1回目で取れなかったときに、条件を変えてもう一度だけ試す。回数を増やすほど
+ * 費用と待ち時間が伸びるので、上限はここで決めて呼び出し側には委ねない
+ */
+const MAX_SEARCH_ATTEMPTS = 2;
 
 /** 読み込むレスポンスの上限バイト数 */
 const MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -164,10 +177,14 @@ async function loadApiKey(secretId: string, now: number): Promise<string | null>
 /**
  * 銘柄名を Web で調べる。
  *
- * 失敗しても投げない。検索できなければ空配列を返し、呼び出し側は
+ * 渡されたクエリを順に試し、結果が取れた時点で返す。1つ目で取れなかった
+ * （通信に失敗した・0件だった）ときの受け皿として、呼び出し側は条件を緩めた
+ * クエリを2つ目に置く。試す回数の上限はこのモジュールが決める。
+ *
+ * 失敗しても投げない。最後まで取れなければ空配列を返し、呼び出し側は
  * 学習知識だけの結果をそのまま使う
  */
-export async function searchSake(query: string): Promise<SearchResult[]> {
+export async function searchSake(queries: string[]): Promise<SearchResult[]> {
   const secretId = process.env.TAVILY_API_KEY_SECRET_ID;
   if (!secretId) {
     // 鍵を登録していない環境では検索なしで動く（ローカル・新環境）
@@ -179,6 +196,17 @@ export async function searchSake(query: string): Promise<SearchResult[]> {
     return [];
   }
 
+  for (const query of queries.slice(0, MAX_SEARCH_ATTEMPTS)) {
+    const results = await searchOnce(apiKey, query);
+    if (results.length > 0) {
+      return results;
+    }
+  }
+  return [];
+}
+
+/** Tavily を1回だけ叩く。失敗・0件のどちらでも空配列を返す */
+async function searchOnce(apiKey: string, query: string): Promise<SearchResult[]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
   try {
