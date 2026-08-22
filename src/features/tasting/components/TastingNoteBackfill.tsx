@@ -20,9 +20,10 @@ interface TastingNoteBackfillProps {
  * 全部書き終われば自然に消える
  */
 export function TastingNoteBackfill({ records, onMemoUpdated }: TastingNoteBackfillProps) {
-  const { targets, run, isRunning, progress } = useTastingNoteBackfill(records, onMemoUpdated);
+  const { targets, skippedCount, run, retrySkipped, isRunning, progress } =
+    useTastingNoteBackfill(records, onMemoUpdated);
 
-  if (targets.length === 0 && !isRunning) return null;
+  if (targets.length === 0 && skippedCount === 0 && !isRunning) return null;
 
   const handleClick = async () => {
     const result = await run();
@@ -36,6 +37,24 @@ export function TastingNoteBackfill({ records, onMemoUpdated }: TastingNoteBackf
         : `${result.written}件に追記しました`,
     );
   };
+
+  // 書けなかった記録の案内。同じ銘柄名では結果も同じになるため、
+  // そのまま押し直しても増えないことが分かる文言にする
+  const skippedNote =
+    skippedCount > 0 ? (
+      <span className="text-gray-500 dark:text-gray-500">
+        {' '}
+        書けなかった {skippedCount}件は対象から外しています。
+        <button
+          type="button"
+          onClick={retrySkipped}
+          className="underline underline-offset-2 hover:text-indigo-wa dark:hover:text-dark-gold"
+          data-testid="tasting-note-backfill-retry-skipped"
+        >
+          もう一度試す
+        </button>
+      </span>
+    ) : null;
 
   return (
     <div
@@ -52,7 +71,8 @@ export function TastingNoteBackfill({ records, onMemoUpdated }: TastingNoteBackf
           <span>
             テイスティングノート未記載のウイスキー・日本酒が{' '}
             <span className="font-bold text-indigo-wa dark:text-dark-gold">{targets.length}</span>
-            件あります
+            件あります。
+            {skippedNote}
           </span>
         )}
       </div>
@@ -61,7 +81,7 @@ export function TastingNoteBackfill({ records, onMemoUpdated }: TastingNoteBackf
         type="button"
         size="sm"
         onClick={handleClick}
-        disabled={isRunning}
+        disabled={isRunning || targets.length === 0}
         data-testid="tasting-note-backfill-button"
       >
         {isRunning ? (
