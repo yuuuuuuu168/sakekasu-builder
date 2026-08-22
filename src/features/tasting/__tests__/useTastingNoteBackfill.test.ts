@@ -15,6 +15,11 @@ vi.mock('aws-amplify/api', () => ({
   generateClient: () => ({ graphql: mockGraphql }),
 }));
 
+// 「書けなかった記録」はユーザーごとに localStorage へ控えるため、認証を差し替える
+vi.mock('@/features/auth/AuthContext', () => ({
+  useAuth: () => ({ user: { userId: 'user-1' } }),
+}));
+
 function record(overrides: Partial<UnifiedRecord> = {}): UnifiedRecord {
   return {
     id: 'p-1',
@@ -44,6 +49,7 @@ function queueUpdated() {
 describe('useTastingNoteBackfill', () => {
   beforeEach(() => {
     mockGraphql.mockReset();
+    localStorage.clear();
   });
 
   it('未記載の記録に追記し、画面へ反映する', async () => {
@@ -105,6 +111,61 @@ describe('useTastingNoteBackfill', () => {
     expect(mockGraphql).toHaveBeenCalledTimes(1);
     expect(onMemoUpdated).not.toHaveBeenCalled();
     expect(result.current.progress).toEqual({ done: 1, total: 1, written: 0, skipped: 1 });
+  });
+
+  // temperature 0 で同じ銘柄名を投げれば答えも同じになる。控えておかないと
+  // バナーが同じ件数を出し続け、押すたびに同じ結果を繰り返す
+  it('書けなかった記録を次回の対象から外す', async () => {
+    queueGenerated(null);
+
+    const { result, rerender } = renderHook(() =>
+      useTastingNoteBackfill([record({ sakeName: '聞いたことのない酒' })], vi.fn()),
+    );
+
+    await act(async () => {
+      await result.current.run();
+    });
+    rerender();
+
+    expect(result.current.targets).toEqual([]);
+    expect(result.current.skippedCount).toBe(1);
+  });
+
+  it('もう一度試すと対象に戻る', async () => {
+    queueGenerated(null);
+
+    const { result, rerender } = renderHook(() =>
+      useTastingNoteBackfill([record({ sakeName: '聞いたことのない酒' })], vi.fn()),
+    );
+
+    await act(async () => {
+      await result.current.run();
+    });
+    rerender();
+    act(() => {
+      result.current.retrySkipped();
+    });
+
+    expect(result.current.targets).toHaveLength(1);
+    expect(result.current.skippedCount).toBe(0);
+  });
+
+  // 保存の失敗は一時的なことがあるので、対象からは外さない
+  it('保存に失敗した記録は対象に残す', async () => {
+    queueGenerated('バニラの香り');
+    mockGraphql.mockRejectedValueOnce(new Error('boom'));
+
+    const { result, rerender } = renderHook(() =>
+      useTastingNoteBackfill([record()], vi.fn()),
+    );
+
+    await act(async () => {
+      await result.current.run();
+    });
+    rerender();
+
+    expect(result.current.targets).toHaveLength(1);
+    expect(result.current.skippedCount).toBe(0);
   });
 
   it('1件失敗しても残りを続ける', async () => {

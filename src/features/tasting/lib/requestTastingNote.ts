@@ -4,20 +4,22 @@ import type { NotableCategory, TastingNote } from './tastingNoteMemo';
 
 const client = generateClient();
 
-/** 何も書けなかったときの戻り値。呼び出し側は失敗と同じ扱いでよい */
-const EMPTY_NOTE: TastingNote = { tastingNote: null, recommendedServing: null };
-
 /**
  * 銘柄名からテイスティングノートを取り寄せる。
  *
  * **失敗しても投げない。** これは記録の登録に付随する処理で、ノートが取れない
- * ことを理由に登録そのものを止めたくない。取れなければ空のまま返し、
- * 備考には何も足さずに保存を続ける
+ * ことを理由に登録そのものを止めたくない。取れなければ備考に何も足さずに
+ * 保存を続ける。
+ *
+ * 戻り値は2種類を区別する。呼び出しそのものが失敗したときは `null`、
+ * モデルが「その銘柄は知らない」と答えたときは中身が null のノート。
+ * 前者はやり直せば結果が変わりうるが、後者は同じ銘柄名なら何度呼んでも同じで、
+ * 一括追記が「書けなかった記録」を控えるかどうかの判断がここで分かれる
  */
 export async function requestTastingNote(
   sakeName: string,
   category: NotableCategory,
-): Promise<TastingNote> {
+): Promise<TastingNote | null> {
   try {
     const result = await client.graphql({
       query: generateTastingNote,
@@ -26,7 +28,7 @@ export async function requestTastingNote(
 
     if ('errors' in result && result.errors && result.errors.length > 0) {
       console.error('generateTastingNote errors:', result.errors);
-      return EMPTY_NOTE;
+      return null;
     }
 
     const data = (result as { data?: { generateTastingNote?: TastingNote | null } }).data
@@ -38,6 +40,6 @@ export async function requestTastingNote(
     };
   } catch (error) {
     console.error('generateTastingNote failed:', error);
-    return EMPTY_NOTE;
+    return null;
   }
 }
