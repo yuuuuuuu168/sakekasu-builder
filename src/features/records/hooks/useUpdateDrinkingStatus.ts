@@ -2,61 +2,68 @@ import { useState } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { updatePurchaseRecord } from '@/graphql/mutations';
 import type { DrinkingStatus } from '@/types/schema';
+import type { UnifiedRecord } from '../types';
+import { getRemainingBottles, planStatusChange } from '../lib/bottleCount';
 import { toast } from 'sonner';
 
 const client = generateClient();
 
 interface UseUpdateDrinkingStatusReturn {
-  updateStatus: (id: string, newStatus: DrinkingStatus) => Promise<void>;
+  /**
+   * 購入記録のステータスを動かす。
+   * bottles は飲みきる本数（飲みきりへ進めるときだけ意味を持つ）。
+   */
+  updateStatus: (record: UnifiedRecord, newStatus: DrinkingStatus, bottles?: number) => Promise<void>;
   isUpdating: boolean;
 }
 
 /**
- * ステータス遷移に応じた openedAt の更新値を返す。
- * undefined は「変更しない」（FINISHED 遷移時は開封日時を保持する）。
+ * 飲みきりステータスの更新。
+ *
+ * まとめ買いした記録では、飲みきり操作が「1本ぶん減らす」意味になる（Issue #159）。
+ * 残本数がまだあるなら記録は未開封へ戻り、0本になったときだけ飲みきりになる。
+ * 何をどう書き換えるかの判断は bottleCount.ts の純粋関数に置いてある。
+ *
+ * patchRecord は一覧の楽観的更新に使う。失敗したら操作前の値をそのまま書き戻す
+ * （更新前の記録を受け取っているので、戻す値を推測しなくてよい）。
  */
-function getOpenedAtUpdate(newStatus: DrinkingStatus): string | null | undefined {
-  switch (newStatus) {
-    case 'IN_PROGRESS':
-      return new Date().toISOString();
-    case 'NOT_STARTED':
-      return null;
-    case 'FINISHED':
-      return undefined;
-  }
-}
-
 export function useUpdateDrinkingStatus(
-  onOptimisticUpdate: (id: string, newStatus: DrinkingStatus, openedAtUpdate?: string | null) => void,
-  onRollback: (id: string, oldStatus: DrinkingStatus) => void,
+  patchRecord: (id: string, patch: Partial<UnifiedRecord>) => void,
 ): UseUpdateDrinkingStatusReturn {
   const [isUpdating, setIsUpdating] = useState(false);
 
-  const updateStatus = async (id: string, newStatus: DrinkingStatus) => {
+  const updateStatus = async (record: UnifiedRecord, newStatus: DrinkingStatus, bottles?: number) => {
     setIsUpdating(true);
 
-    const openedAtUpdate = getOpenedAtUpdate(newStatus);
+    const update = planStatusChange(record, newStatus, { bottles, now: new Date().toISOString() });
+    const previous: Partial<UnifiedRecord> = {
+      drinkingStatus: record.drinkingStatus,
+      remainingQuantity: record.remainingQuantity,
+      openedAt: record.openedAt,
+    };
 
-    // 現在のステータスをロールバック用に推定（呼び出し元で管理）
-    onOptimisticUpdate(id, newStatus, openedAtUpdate);
+    patchRecord(record.id, {
+      drinkingStatus: update.drinkingStatus,
+      remainingQuantity: update.remainingQuantity,
+      ...(update.openedAt !== undefined && { openedAt: update.openedAt }),
+    });
 
     try {
       await client.graphql({
         query: updatePurchaseRecord,
         variables: {
           input: {
-            id,
-            drinkingStatus: newStatus,
-            ...(openedAtUpdate !== undefined && { openedAt: openedAtUpdate }),
+            id: record.id,
+            drinkingStatus: update.drinkingStatus,
+            remainingQuantity: update.remainingQuantity,
+            ...(update.openedAt !== undefined && { openedAt: update.openedAt }),
           },
         },
       });
-      toast.success('ステータスを更新しました');
+      toast.success(getSuccessMessage(record, update.drinkingStatus, update.remainingQuantity));
     } catch (error) {
       console.error('Failed to update drinking status:', error);
-      // ロールバックは呼び出し元に委任
-      const oldStatus = getReversedStatus(newStatus);
-      onRollback(id, oldStatus);
+      patchRecord(record.id, previous);
       toast.error('ステータスの更新に失敗しました');
     } finally {
       setIsUpdating(false);
@@ -66,14 +73,19 @@ export function useUpdateDrinkingStatus(
   return { updateStatus, isUpdating };
 }
 
-/** ステータス遷移を戻すためのヘルパー（ロールバック時の推測用） */
-function getReversedStatus(status: DrinkingStatus): DrinkingStatus {
-  switch (status) {
-    case 'IN_PROGRESS':
-      return 'NOT_STARTED';
-    case 'FINISHED':
-      return 'IN_PROGRESS';
-    case 'NOT_STARTED':
-      return 'IN_PROGRESS';
+/**
+ * 完了メッセージ。
+ * まとめ買いを1本ずつ飲んだときは、残りが何本になったかまで伝える
+ * （画面上はステータスが未開封へ戻るだけなので、減ったことが分かりにくい）
+ */
+function getSuccessMessage(
+  record: UnifiedRecord,
+  nextStatus: DrinkingStatus,
+  remaining: number,
+): string {
+  const finished = getRemainingBottles(record) - remaining;
+  if (finished > 0 && nextStatus !== 'FINISHED') {
+    return `${finished}本を飲みきりました。残り${remaining}本です`;
   }
+  return 'ステータスを更新しました';
 }

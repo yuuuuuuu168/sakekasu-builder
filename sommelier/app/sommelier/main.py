@@ -471,6 +471,9 @@ _PURCHASE_RECORD_FIELDS = (
     "storeName",
     "price",
     "quantity",
+    # まだ飲みきっていない本数。まとめ買いを1本ずつ消費できるようにしたため、
+    # 在庫として残っているのは quantity ではなくこちら（未設定なら quantity と同じ）
+    "remainingQuantity",
     "purchaseDate",
     "category",
     "memo",
@@ -731,7 +734,8 @@ def _build_tools(owner_sub: str, search_enabled: Optional[bool] = None) -> list:
 
         Returns:
             購入記録のリスト。各項目は sakeName, storeName, price, purchaseDate,
-            category, memo, drinkingStatus などを含む。
+            category, memo, drinkingStatus などを含む。手元に残っている本数は
+            remainingQuantity（未設定なら quantity、飲みきりなら0本）。
         """
         if not owner_sub:
             return {"error": "認証情報（owner_sub）が取得できません"}

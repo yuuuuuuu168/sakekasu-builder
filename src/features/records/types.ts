@@ -16,6 +16,8 @@ export interface UnifiedRecord {
   // 購入記録固有
   storeName?: string;
   quantity?: number; // 購入本数（1以上、未設定時は1扱い）
+  /** まだ飲みきっていない本数（未設定なら quantity と同じ扱い。Issue #159） */
+  remainingQuantity?: number;
   drinkingStatus?: DrinkingStatus;
   openedAt?: string | null; // 開封日時（飲み中に変更した日時、AWSDateTime）
   // 飲酒記録固有

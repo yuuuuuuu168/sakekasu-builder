@@ -39,6 +39,8 @@ export function toPurchaseUnifiedRecord(
     memo: record.memo ?? undefined,
     storeName: record.storeName,
     quantity: record.quantity ?? 1,
+    // 残本数を持たない記録は quantity 側で補完する（bottleCount.ts が面倒をみる）
+    remainingQuantity: record.remainingQuantity ?? undefined,
     drinkingStatus: record.drinkingStatus ?? 'NOT_STARTED',
     openedAt: record.openedAt ?? null,
     imageKey: record.imageKey,

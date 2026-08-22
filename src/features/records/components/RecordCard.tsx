@@ -5,10 +5,12 @@ import { CATEGORY_FILTER_OPTIONS, DRINKING_STATUS_DISPLAY } from '../types';
 import { DeleteButton } from './DeleteButton';
 import { EditButton } from './EditButton';
 import { ConfirmDialog } from './ConfirmDialog';
+import { FinishBottlesDialog } from './FinishBottlesDialog';
 import { RecordMemo } from './RecordMemo';
 import { useImageUrl } from '@/features/image/hooks/useImageUrl';
 import { toThumbnailKey } from '@/features/image/lib/thumbnailKey';
 import type { LinkedDrinkingSummary } from '../lib/linkedDrinking';
+import { getBottleBreakdown, getRemainingBottles, toBottleCount } from '../lib/bottleCount';
 import type { DrinkingStatus } from '@/types/schema';
 
 interface RecordCardProps {
@@ -19,8 +21,11 @@ interface RecordCardProps {
   onEdit?: (record: UnifiedRecord) => void;
   /** サムネイルクリック時のコールバック（imageKeys, 銘柄名, クリックされたインデックスを通知） */
   onImageClick?: (imageKeys: string[], sakeName: string, index: number) => void;
-  /** 飲みきりステータス変更時のコールバック */
-  onDrinkingStatusChange?: (id: string, newStatus: DrinkingStatus) => void;
+  /**
+   * 飲みきりステータス変更時のコールバック。
+   * bottles は飲みきる本数（まとめ買いの記録で何本ぶんかを指定する）
+   */
+  onDrinkingStatusChange?: (record: UnifiedRecord, newStatus: DrinkingStatus, bottles?: number) => void;
   isStatusUpdating?: boolean;
   /** 在庫から飲酒登録へ進むときのコールバック（購入記録のみ） */
   onDrinkFromStock?: (record: UnifiedRecord) => void;
@@ -67,6 +72,20 @@ function getOpenedDaysLabel(openedAt: string | null | undefined): string | null 
   const days = Math.floor((startOfDay(new Date()) - startOfDay(opened)) / 86_400_000);
   if (days < 0) return null;
   return days === 0 ? '今日開封' : `開封から${days}日`;
+}
+
+/**
+ * まとめ買いした記録の内訳ラベル（「飲み中 1本 / 未開封 2本」）。
+ * 1本しかない記録ではステータスのバッジと同じことを言うだけなので出さない。
+ */
+function getBottleBreakdownLabel(record: UnifiedRecord): string | null {
+  if (toBottleCount(record.quantity) <= 1) return null;
+
+  const { notStarted, inProgress } = getBottleBreakdown(record);
+  const parts: string[] = [];
+  if (inProgress > 0) parts.push(`飲み中 ${inProgress}本`);
+  if (notStarted > 0) parts.push(`未開封 ${notStarted}本`);
+  return parts.length > 0 ? parts.join(' / ') : null;
 }
 
 /** カテゴリ値から日本語ラベルを取得 */
@@ -205,14 +224,35 @@ function RecordThumbnail({
 
 export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick, onDrinkingStatusChange, isStatusUpdating, onDrinkFromStock, linkedDrinking }: RecordCardProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [finishOpen, setFinishOpen] = useState(false);
   const isPurchase = record.type === 'purchase';
   const priceText = formatPrice(record.price);
   // 飲みきった在庫からは登録できないようにする
   const canDrinkFromStock =
     isPurchase && !!onDrinkFromStock && (record.drinkingStatus ?? 'NOT_STARTED') !== 'FINISHED';
+  const remainingBottles = isPurchase ? getRemainingBottles(record) : 0;
+  const breakdownLabel = isPurchase ? getBottleBreakdownLabel(record) : null;
 
   const handleThumbnailClick = (index: number) => {
     onImageClick?.(record.imageKeys, record.sakeName, index);
+  };
+
+  // ステータスのバッジを押したとき。まとめ買いの記録を飲みきるときだけ、
+  // 何本ぶんかをダイアログで聞いてから減らす
+  const handleStatusClick = () => {
+    if (!onDrinkingStatusChange || !record.drinkingStatus) return;
+
+    const nextStatus = getNextStatus(record.drinkingStatus);
+    if (nextStatus === 'FINISHED' && remainingBottles > 1) {
+      setFinishOpen(true);
+      return;
+    }
+    onDrinkingStatusChange(record, nextStatus);
+  };
+
+  const handleFinishBottles = (bottles: number) => {
+    setFinishOpen(false);
+    onDrinkingStatusChange?.(record, 'FINISHED', bottles);
   };
 
   return (
@@ -284,11 +324,7 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
               {record.drinkingStatus && (
               <button
                 type="button"
-                onClick={() => {
-                  if (onDrinkingStatusChange && record.drinkingStatus) {
-                    onDrinkingStatusChange(record.id, getNextStatus(record.drinkingStatus));
-                  }
-                }}
+                onClick={handleStatusClick}
                 disabled={isStatusUpdating}
                 className={`rounded-lg px-3 py-1.5 text-sm font-bold shadow-sm transition-all hover:scale-105 hover:shadow-md active:scale-95 disabled:opacity-50 ${DRINKING_STATUS_STYLES[record.drinkingStatus]}`}
                 data-testid="drinking-status"
@@ -296,6 +332,14 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
               >
                 {DRINKING_STATUS_ICONS[record.drinkingStatus]} {DRINKING_STATUS_DISPLAY[record.drinkingStatus]}
               </button>
+              )}
+              {breakdownLabel && (
+                <span
+                  className="text-xs font-medium text-gray-600 dark:text-gray-300"
+                  data-testid="bottle-breakdown"
+                >
+                  {breakdownLabel}
+                </span>
               )}
               {record.drinkingStatus === 'IN_PROGRESS' && getOpenedDaysLabel(record.openedAt) && (
                 <span
@@ -351,6 +395,11 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
               <span data-testid="quantity">📦 {record.quantity}本</span>
             )}
 
+            {/* 1本ずつ飲んで購入本数より減っていれば、残りも出す */}
+            {isPurchase && remainingBottles < toBottleCount(record.quantity) && (
+              <span data-testid="remaining-quantity">残り {remainingBottles}本</span>
+            )}
+
             {/* 飲酒記録: 飲み方 */}
             {!isPurchase && record.drinkingMethod && (
               <span data-testid="drinking-method">🍶 {record.drinkingMethod}</span>
@@ -399,6 +448,19 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
           )}
         </div>
       </div>
+
+      {/* まとめ買いを飲みきるときの本数入力。
+          開くたびに作り直して、前回入力した本数を持ち越さないようにする */}
+      {isPurchase && finishOpen && (
+        <FinishBottlesDialog
+          open
+          onOpenChange={setFinishOpen}
+          sakeName={record.sakeName}
+          remaining={remainingBottles}
+          isUpdating={!!isStatusUpdating}
+          onConfirm={handleFinishBottles}
+        />
+      )}
 
       {/* 削除確認ダイアログ */}
       <ConfirmDialog

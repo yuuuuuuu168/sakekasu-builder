@@ -8,6 +8,8 @@ import type { UseFormValidationReturn } from '@/features/purchase/hooks/useFormV
 import type { UsePurchaseStorageReturn } from '@/features/purchase/hooks/usePurchaseStorage';
 import type { UseImageUploadReturn } from '@/features/image/hooks/useImageUpload';
 import { getTodayString } from '@/lib/dateUtils';
+import { remainingAfterQuantityChange, toBottleCount } from '@/features/records/lib/bottleCount';
+import type { BottleStock } from '@/features/records/lib/bottleCount';
 
 export interface UsePurchaseFormOptions {
   /** 編集対象の記録ID。指定時は「編集モード」となり、更新mutationを呼ぶ */
@@ -18,6 +20,11 @@ export interface UsePurchaseFormOptions {
   existingImageKey?: string | null;
   /** 編集対象が既に持っている画像キー一覧。追加分はこの後ろに足す */
   existingImageKeys?: string[];
+  /**
+   * 編集対象が持っている本数と残本数。
+   * 本数を書き換えたときに、飲んだぶんを保ったまま残本数を合わせるのに使う（Issue #159）
+   */
+  existingBottles?: BottleStock;
 }
 
 export interface UsePurchaseFormReturn {
@@ -52,6 +59,7 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
     initialData,
     existingImageKey = null,
     existingImageKeys,
+    existingBottles,
   } = options ?? {};
   const isEditMode = recordId !== undefined;
 
@@ -102,11 +110,19 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
       setFormData((prev) => ({ ...prev, memo }));
     }
 
+    // 本数を書き換えたときだけ残本数も直す。飲んだ本数は変わらないので、
+    // 3本のうち1本飲んだ記録を5本に直したら残りは4本になる
+    const nextQuantity = parseInt(dataToSave.quantity, 10);
+    const remainingUpdate =
+      existingBottles && nextQuantity !== toBottleCount(existingBottles.quantity)
+        ? { remainingQuantity: remainingAfterQuantityChange(existingBottles, nextQuantity) }
+        : undefined;
+
     // 編集モード: 画像を足していれば既存の後ろに追記する。フォームはリセットしない
     if (isEditMode) {
       if (imageUpload.imageFiles.length === 0) {
         // 画像に触っていない更新では画像の項目自体を送らない（既存キーを維持する）
-        const result = await updatePurchase(recordId, dataToSave);
+        const result = await updatePurchase(recordId, dataToSave, remainingUpdate);
         setSubmitResult(result);
         return;
       }
@@ -124,6 +140,7 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
         // 一覧のサムネイルが勝手に入れ替わらないようにする
         imageKey: existingImageKey ?? uploaded[0] ?? null,
         imageKeys: merged,
+        ...remainingUpdate,
       });
 
       if (result.success) {
@@ -168,6 +185,7 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
     imageUpload,
     existingImageKey,
     existingImageKeys,
+    existingBottles,
     fillMemo,
   ]);
 
