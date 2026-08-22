@@ -104,6 +104,14 @@ type OcrResult {
   rawTexts: [String!]!
 }
 
+# 銘柄名から起こしたテイスティングノート。
+# 知らない銘柄では作り話をさせず、両方 null で返る
+type TastingNote {
+  tastingNote: String
+  # おすすめの飲み方。ウイスキーのときだけ入る（日本酒は常に null）
+  recommendedServing: String
+}
+
 # クエリ
 type Query {
   getPurchaseRecord(id: ID!): PurchaseRecord
@@ -153,6 +161,10 @@ type Mutation {
   # S3 の実体を消して、もう片方の画像まで見えなくなる。実体ごと複製して
   # それぞれの記録が自分の画像を持つ形にする
   copyImages(sourceKeys: [String!]!, recordType: String!, recordId: ID!): [String!]!
+  # 銘柄名からテイスティングノートを起こす。備考へ書くのは呼び出し側の仕事。
+  # category は WHISKY / NIHONSHU のみ受け付け、それ以外はエラーになる
+  # （ビール・ワイン等には記載しない、という要件を API 側でも担保する）
+  generateTastingNote(sakeName: String!, category: SakeCategory!): TastingNote!
 }
 
 # 購入記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）

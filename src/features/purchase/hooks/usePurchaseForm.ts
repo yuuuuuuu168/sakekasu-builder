@@ -3,6 +3,7 @@ import type { PurchaseFormData, SaveResult } from '@/features/purchase/types';
 import { useFormValidation } from '@/features/purchase/hooks/useFormValidation';
 import { usePurchaseStorage } from '@/features/purchase/hooks/usePurchaseStorage';
 import { useImageUpload } from '@/features/image/hooks/useImageUpload';
+import { useTastingNote } from '@/features/tasting/hooks/useTastingNote';
 import type { UseFormValidationReturn } from '@/features/purchase/hooks/useFormValidation';
 import type { UsePurchaseStorageReturn } from '@/features/purchase/hooks/usePurchaseStorage';
 import type { UseImageUploadReturn } from '@/features/image/hooks/useImageUpload';
@@ -23,6 +24,8 @@ export interface UsePurchaseFormReturn {
   formData: PurchaseFormData;
   errors: UseFormValidationReturn['errors'];
   isSaving: UsePurchaseStorageReturn['isSaving'];
+  /** テイスティングノートの生成中フラグ（登録ボタンの表示に使う） */
+  isGeneratingNote: boolean;
   submitResult: SaveResult | null;
   handleChange: (field: keyof PurchaseFormData, value: string) => void;
   handleBlur: (field: keyof PurchaseFormData) => void;
@@ -63,6 +66,7 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
   const { errors, validateField, isValid, clearErrors } = useFormValidation();
   const { savePurchase, updatePurchase, isSaving } = usePurchaseStorage();
   const imageUpload = useImageUpload({ alreadyAttached });
+  const { fillMemo, isGenerating: isGeneratingNote } = useTastingNote();
 
   const handleChange = useCallback(
     (field: keyof PurchaseFormData, value: string) => {
@@ -85,11 +89,24 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
       return;
     }
 
+    // ウイスキー・日本酒なら、保存する前に備考へテイスティングノートを足す。
+    // 画像を選んだ時点ではなく登録ボタンを押した時点で動かすのは、銘柄名が
+    // OCR の後に手で直されることがあるため。
+    //
+    // 生成に失敗しても memo は元のまま返るので、登録そのものは止まらない
+    const memo = await fillMemo(formData.memo, formData.sakeName, formData.category);
+    const dataToSave: PurchaseFormData = { ...formData, memo };
+    // 画面にも反映する。編集モードでは保存後もフォームが残るため、
+    // 足した行が見えないと「書かれたのかどうか」が分からない
+    if (memo !== formData.memo) {
+      setFormData((prev) => ({ ...prev, memo }));
+    }
+
     // 編集モード: 画像を足していれば既存の後ろに追記する。フォームはリセットしない
     if (isEditMode) {
       if (imageUpload.imageFiles.length === 0) {
         // 画像に触っていない更新では画像の項目自体を送らない（既存キーを維持する）
-        const result = await updatePurchase(recordId, formData);
+        const result = await updatePurchase(recordId, dataToSave);
         setSubmitResult(result);
         return;
       }
@@ -102,7 +119,7 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
 
       const base = existingImageKeys ?? [];
       const merged = [...base, ...uploaded];
-      const result = await updatePurchase(recordId, formData, {
+      const result = await updatePurchase(recordId, dataToSave, {
         // 代表画像は既存を優先する。差し替えではなく追加なので、
         // 一覧のサムネイルが勝手に入れ替わらないようにする
         imageKey: existingImageKey ?? uploaded[0] ?? null,
@@ -130,7 +147,7 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
       imageKey = imageKeys[0] ?? null;
     }
 
-    const result = await savePurchase(formData, { imageKey, imageKeys });
+    const result = await savePurchase(dataToSave, { imageKey, imageKeys });
 
     if (result.success) {
       setFormData(getInitialFormData());
@@ -151,12 +168,14 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
     imageUpload,
     existingImageKey,
     existingImageKeys,
+    fillMemo,
   ]);
 
   return {
     formData,
     errors,
     isSaving,
+    isGeneratingNote,
     submitResult,
     handleChange,
     handleBlur,

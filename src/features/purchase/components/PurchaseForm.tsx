@@ -50,6 +50,7 @@ export function PurchaseForm({
     formData,
     errors,
     isSaving,
+    isGeneratingNote,
     submitResult,
     handleChange,
     handleBlur,
@@ -79,7 +80,7 @@ export function PurchaseForm({
     },
   );
 
-  const isSubmitting = isSaving || imageUpload.isUploading || isAnalyzing;
+  const isSubmitting = isSaving || imageUpload.isUploading || isAnalyzing || isGeneratingNote;
 
   // リピート判定リマインド: 銘柄名にマッチする過去の飲酒評価を表示
   const { summaries: pastRatings } = usePastRatingHint(formData.sakeName);
@@ -264,7 +265,13 @@ export function PurchaseForm({
         {isSubmitting ? (
           <>
             <Loader2 className="size-4 animate-spin" />
-            {imageUpload.isUploading ? '画像アップロード中...' : isEditMode ? '更新中...' : '登録中...'}
+            {imageUpload.isUploading
+              ? '画像アップロード中...'
+              : isGeneratingNote
+                ? 'テイスティングノート生成中...'
+                : isEditMode
+                  ? '更新中...'
+                  : '登録中...'}
           </>
         ) : isEditMode ? (
           '🍶 更新する'

@@ -34,6 +34,7 @@
 | 機能 | 補足 |
 |------|------|
 | ラベル画像の OCR | 銘柄名・カテゴリ・産地・アルコール度数を抽出。項目ごとの確信度つき |
+| テイスティングノートの自動記載 | 購入登録の時点で備考に書き足す。ウイスキーは飲み方も。既存の記録は一覧から一括で追記できる |
 | 写真1枚で購入登録 | 画像を選ぶと自動で OCR が走る。価格・店名は手入力（[#49](https://github.com/yuuuuuu168/sakekasu-builder/issues/49)） |
 | ソムリエ相談 | 在庫相談・ペアリング・銘柄レコメンド・酒知識 Q&A（[#51](https://github.com/yuuuuuu168/sakekasu-builder/issues/51)） |
 | ソムリエへの写真添付 | 店の棚や品書きの写真から、好みに合う1〜3本を選んでもらう（[#44](https://github.com/yuuuuuu168/sakekasu-builder/issues/44)） |
@@ -54,7 +55,7 @@
 
 | 機能 | 補足 |
 |------|------|
-| 監視とアラート通知 | 22アラーム（AI・サービス正常性・外形監視・カナリア）と AWS Health を Slack へ。デプロイ前に手動登録あり |
+| 監視とアラート通知 | 23アラーム（AI・サービス正常性・外形監視・カナリア）と AWS Health を Slack へ。デプロイ前に手動登録あり |
 | 新規ユーザー登録の Slack 通知 | Cognito Post Confirmation → SNS（[#66](https://github.com/yuuuuuu168/sakekasu-builder/issues/66)） |
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuu168/sakekasu-builder/issues/92)） |
 | DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。コンソール側の設定あり（[#67](https://github.com/yuuuuuu168/sakekasu-builder/issues/67)） |
@@ -170,6 +171,23 @@
 - 登録時、購入記録が**未開封なら自動で「飲み中」**にして開封日時も記録する（飲み中・飲みきりは変更しない）
 - 購入記録カードに、紐づいた飲酒記録の**件数・平均評価・最新メモ**を表示する
 - フォーム上部のバナーから紐づけを解除できる。解除しても入力内容は消えない
+
+### テイスティングノートの自動記載
+
+「この酒がどんな味だったか」を後から思い出せるように、購入登録の時点で備考へ書き足す。対象は**ウイスキーと日本酒だけ**で、ウイスキーにはおすすめの飲み方も付ける。ビール・ワイン・焼酎・その他には何も書かない。
+
+```
+テイスティングノート: バニラと蜂蜜の甘い香り。余韻は長く、かすかにスモーキー
+おすすめの飲み方: ストレートかトワイスアップで香りを開かせるのがおすすめ
+```
+
+- **走るのは登録ボタンを押した時点**。画像を選んだ時点ではない。銘柄名は OCR のあとに手で直されることがあり、画像側に紐づけると直す前の名前でノートを書いてしまう
+- **知らない銘柄には何も書かない**。モデルにはまず「知っているか」を答えさせ（`isKnown`）、知らなければ全項目 null で返す。それらしい文章が備考に残ると、後から見て本当にその酒の話なのか判断できなくなる
+- **失敗しても登録は止めない**。ノートが取れなければ備考は元のまま保存される。付随情報のために記録そのものを落とさない
+- **同じ行を積み上げない**。備考の行頭が `テイスティングノート:` なら記載済みとして扱い、再編集・再保存でも書き足さない
+- **既存の記録は一覧から一括で追記**。ノート未記載のウイスキー・日本酒があれば一覧上部に件数が出て、そこから追記できる。1件ずつ直列に処理するので、Bedrock を呼ぶ Lambda の予約枠を一人で使い切らない
+
+生成は AppSync の `generateTastingNote` ミューテーション（Lambda `tasting-note`）が受ける。カテゴリの判定は画面側だけでなく Lambda 側でも行い、対象外のカテゴリでは Bedrock を呼ばずに落とす。呼び出し1回が課金につながるため、API を直接叩かれたときの歯止めをサーバー側にも置いている。
 
 ### 画像表示の高速化
 
@@ -443,7 +461,7 @@ AWS Health ──────────┤
 
 アラームは**発報だけでなく復旧も通知する**ので、鳴りっぱなしなのか直ったのかが Slack だけで分かる。
 
-### 監視項目（22アラーム）
+### 監視項目（23アラーム）
 
 | 分類 | 監視対象 | 発報条件 |
 |------|---------|---------|
@@ -452,7 +470,7 @@ AWS Health ──────────┤
 | AI・OCR | Lambda エラー | 15分で3回以上 |
 | AI・OCR | スロットル | 15分で1回以上 |
 | サービス | AppSync 5XX | 5分で5回以上 |
-| サービス | Lambda エラー（presigned-url / ocr-analyzer） | 15分で5回以上 |
+| サービス | Lambda エラー（presigned-url / ocr-analyzer / tasting-note） | 15分で5回以上 |
 | サービス | DynamoDB スロットル（2テーブル） | 5分で1回以上 |
 | サービス | 画像削除の失敗 | 1時間で5回以上 |
 | 外形監視 | フロント配信 / ソムリエ Runtime / AppSync | 2回続けて到達不可 |
@@ -583,7 +601,7 @@ npx cdk deploy sakekasu-dev-monitoring -c env=dev \
 
 ### 費用の目安
 
-概算で**月5ドル前後**。内訳は CloudWatch アラーム22件（$0.10/件）とカスタムメトリクス8種（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。カナリアの Bedrock 呼び出しは月120回・短い応答のため数円程度。
+概算で**月5ドル前後**。内訳は CloudWatch アラーム23件（$0.10/件）とカスタムメトリクス8種（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。カナリアの Bedrock 呼び出しは月120回・短い応答のため数円程度。
 
 ## 毎日の利用料金 Slack 通知（Issue #92）
 
@@ -683,7 +701,7 @@ SLO とエラーバジェット消費アラームも入れていない。しき�
 - AWS S3（画像ストレージ）
 - Amplify（フロントエンドホスティング）
 - Amazon Bedrock AgentCore Runtime + AgentCore Memory + Strands Agents（Python）※ソムリエ
-- Amazon Bedrock（Claude Haiku 4.5）※OCR・ソムリエ
+- Amazon Bedrock（Claude Haiku 4.5）※OCR・テイスティングノート・ソムリエ
 - react-day-picker（カレンダー）/ qrcode.react（MFA の QR コード）
 - Vitest + Testing Library + fast-check（フロント）、Jest（CDK）、pytest（ソムリエ）
 
@@ -699,14 +717,15 @@ src/
     stats/       # 統計ダッシュボード
     calendar/    # カレンダー表示
     image/       # 画像添付・OCR・サムネイル
+    tasting/     # テイスティングノートの生成と備考への追記
     sommelier/   # ソムリエ相談チャット（Runtime 呼び出し）
   components/    # 共通コンポーネント（shadcn/ui, ThemeProvider 等）
 infra/
   lib/           # CDK スタック（auth / api / monitoring / health-global /
                  #                billing-notifier / devops-agent / github-oidc）
   graphql/       # AppSync GraphQL スキーマ
-  lambda/        # Lambda 関数（presigned-url, ocr-analyzer, health-check,
-                 #              slack-notifier, sommelier-canary,
+  lambda/        # Lambda 関数（presigned-url, ocr-analyzer, tasting-note,
+                 #              health-check, slack-notifier, sommelier-canary,
                  #              signup-notifier, billing-notifier,
                  #              devops-agent-webhook）
   scripts/       # amplify_outputs.json 生成、サムネイルのバックフィル
