@@ -9,6 +9,7 @@ function purchase(
     id?: string;
     category?: SakeCategory;
     quantity?: number;
+    remainingQuantity?: number;
     drinkingStatus?: DrinkingStatus;
   } = {},
 ): UnifiedRecord {
@@ -21,6 +22,7 @@ function purchase(
     category: overrides.category ?? 'NIHONSHU',
     storeName: '酒屋',
     quantity: overrides.quantity,
+    remainingQuantity: overrides.remainingQuantity,
     drinkingStatus: overrides.drinkingStatus,
     imageKeys: [],
     createdAt: '2026-01-10T00:00:00.000Z',
@@ -90,6 +92,29 @@ describe('summarizeInventory', () => {
 
   it('本数が未設定なら1本として数える', () => {
     expect(pick([purchase({ quantity: undefined })], 'NIHONSHU').total).toBe(1);
+  });
+
+  // Issue #159: まとめ買いを1本ずつ飲めるようにした
+  it('飲み中でも開封しているのは1本ぶんで、残りは未開封として数える', () => {
+    const records = [purchase({ quantity: 3, remainingQuantity: 3, drinkingStatus: 'IN_PROGRESS' })];
+
+    const nihonshu = pick(records, 'NIHONSHU');
+    expect(nihonshu.total).toBe(3);
+    expect(nihonshu.inProgress).toBe(1);
+    expect(nihonshu.notStarted).toBe(2);
+  });
+
+  it('3本のうち1本を飲みきったら残り2本が在庫に残る', () => {
+    const records = [purchase({ quantity: 3, remainingQuantity: 2, drinkingStatus: 'NOT_STARTED' })];
+
+    expect(pick(records, 'NIHONSHU').total).toBe(2);
+  });
+
+  // 残本数を購入本数で補完する処理が飲みきりまで拾うと、在庫が復活してしまう
+  it('残本数を持たない飲みきりの記録は在庫に数えない', () => {
+    const records = [purchase({ quantity: 3, remainingQuantity: undefined, drinkingStatus: 'FINISHED' })];
+
+    expect(pick(records, 'NIHONSHU').total).toBe(0);
   });
 
   it('飲酒記録と対象外カテゴリは数えない', () => {

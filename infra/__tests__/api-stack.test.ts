@@ -318,6 +318,30 @@ describe('ApiStack', () => {
     });
   });
 
+  // Issue #159: まとめ買いした酒を1本ずつ飲みきるために残本数を持たせた。
+  // フロントは一覧クエリでこの項目を選択しているので、スキーマから落ちると
+  // 購入記録の取得そのものが失敗する
+  describe('購入記録の残本数', () => {
+    const schema = readFileSync(
+      path.join(path.dirname(url.fileURLToPath(import.meta.url)), '../graphql/schema.graphql'),
+      'utf-8',
+    );
+
+    /** 型・入力の定義本文を切り出す */
+    function definitionOf(name: string): string {
+      const match = schema.match(new RegExp(`(?:type|input) ${name} \\{([^}]*)\\}`));
+      expect(match, `${name} の定義が見つからない`).not.toBeNull();
+      return match![1];
+    }
+
+    it.each(['PurchaseRecord', 'CreatePurchaseRecordInput', 'UpdatePurchaseRecordInput'])(
+      '%s が remainingQuantity を持つ',
+      (name) => {
+        expect(definitionOf(name)).toMatch(/remainingQuantity: Int/);
+      },
+    );
+  });
+
   // 在庫からの開封は未開封のときだけ更新する（openedAt の上書き防止）
   it('markPurchaseOpened リゾルバーが未開封を条件にしている', () => {
     template.hasResourceProperties('AWS::AppSync::Resolver', {

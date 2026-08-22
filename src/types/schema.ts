@@ -25,6 +25,11 @@ export interface PurchaseRecordType extends BaseRecord {
   storeName: string;
   price: number;
   quantity: number | null;
+  /**
+   * まだ飲みきっていない本数（Issue #159）。
+   * この項目より前に作った記録では null になるので、読むときは quantity で補完する。
+   */
+  remainingQuantity: number | null;
   purchaseDate: string;
   category: SakeCategory;
   memo: string | null;

@@ -40,6 +40,7 @@ export function EditRecordDialog({ record, onOpenChange, onUpdated }: EditRecord
               initialData={unifiedToPurchaseFormData(record)}
               existingImageKey={record.imageKey}
               existingImageKeys={record.imageKeys}
+              existingBottles={record}
               onSubmitSuccess={handleSuccess}
             />
           )}
