@@ -43,8 +43,13 @@ jobs:
           cache: npm
           cache-dependency-path: sommelier/agentcore/cdk/package-lock.json
       # CodeZip の梱包は uv でエージェントの依存を入れる（ARM64 向けに
-      # クロスコンパイルする）。無いと synth の時点で落ちる
-      - uses: astral-sh/setup-uv@v10
+      # クロスコンパイルする）。無いと synth の時点で落ちる。
+      #
+      # 他のアクションと違ってパッチまで含めて指定しているのは、この
+      # リポジトリが v10 のような移動タグを打たないため（打っている前提で
+      # 書いたら "unable to resolve action" でジョブが即落ちした）。
+      # 上げるときは https://github.com/astral-sh/setup-uv/releases を見る
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
           cache-dependency-glob: sommelier/app/sommelier/uv.lock
