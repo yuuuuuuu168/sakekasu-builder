@@ -91,7 +91,11 @@ function buildApplicationStacks(app: cdk.App): void {
     envName: env,
     graphqlApi: apiStack.graphqlApi,
     tables: [apiStack.purchaseTable, apiStack.drinkingTable],
-    functions: [apiStack.presignedUrlFunction, apiStack.ocrAnalyzerFunction],
+    functions: [
+      apiStack.presignedUrlFunction,
+      apiStack.ocrAnalyzerFunction,
+      apiStack.tastingNoteFunction,
+    ],
     ocrFunction: apiStack.ocrAnalyzerFunction,
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
     signupNotifyFailMetricFilter: authStack.signupNotifyFailMetricFilter,

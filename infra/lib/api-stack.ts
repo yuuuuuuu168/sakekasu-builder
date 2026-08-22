@@ -116,6 +116,18 @@ const BEDROCK_INFERENCE_REGIONS = ['ap-northeast-1', 'ap-northeast-3'];
 const OCR_RESERVED_CONCURRENCY = 20;
 
 /**
+ * テイスティングノート生成 Lambda に取り置く同時実行数。
+ *
+ * OCR と同じく1回の呼び出しが Bedrock の課金につながるので天井を置く。
+ * OCR より小さいのは、送るのが銘柄名の文字列だけで所要時間が短く、
+ * 既存記録への一括追記も画面側で1件ずつ直列に呼ぶため。
+ *
+ * 予約はアカウント単位で積み上がる。合計は __tests__/lambda-config.test.ts で
+ * 見張っている（足すときはそちらの EXPECTED_RESERVATIONS も直すこと）
+ */
+const TASTING_NOTE_RESERVED_CONCURRENCY = 5;
+
+/**
  * Application Signals の計装を関数に入れる（Issue #86）。
  *
  * レイヤー・起動ラッパー・IAM ポリシーの3点は**セットでしか意味を持たない**。
@@ -266,6 +278,8 @@ export class ApiStack extends cdk.Stack {
   public readonly presignedUrlFunction: NodejsFunction;
   /** ラベル画像 OCR Lambda（監視スタックから参照する） */
   public readonly ocrAnalyzerFunction: NodejsFunction;
+  /** テイスティングノート生成 Lambda（監視スタックから参照する） */
+  public readonly tastingNoteFunction: NodejsFunction;
   /**
    * 画像削除失敗のメトリクスフィルター。
    * アラーム自体は監視スタック側で作る（通知先の SNS を参照すると
@@ -578,6 +592,66 @@ export class ApiStack extends cdk.Stack {
     ocrDataSource.createResolver('AnalyzeSakeLabelResolver', {
       typeName: 'Mutation',
       fieldName: 'analyzeSakeLabel',
+    });
+
+    // テイスティングノート生成 Lambda。
+    //
+    // OCR と同じ Bedrock のモデルを呼ぶが、関数は分けている。OCR は画像を運ぶ
+    // ので実行時間もメモリも一桁違い、同じ関数に相乗りさせると SLO の遅延が
+    // どちらの話なのか読めなくなる。予約同時実行も、片方の暴走がもう片方を
+    // 巻き込まない形にしたい
+    const tastingNoteFunctionName = `${props.envName}-sakekasu-tasting-note`;
+    this.tastingNoteFunction = new NodejsFunction(this, 'TastingNoteFunction', {
+      functionName: tastingNoteFunctionName,
+      runtime: Runtime.NODEJS_22_X,
+      logGroup: lambdaLogGroup(this, 'TastingNoteLogGroup', tastingNoteFunctionName),
+      entry: path.join(
+        path.dirname(url.fileURLToPath(import.meta.url)),
+        '../lambda/tasting-note/index.ts',
+      ),
+      handler: 'handler',
+      // 画像を運ばないぶん OCR より短く終わるが、モデルの応答待ちは同じ桁。
+      // 20 秒で足りなければ諦めて、登録そのものは通す（フロントは失敗しても
+      // 記録の保存を止めない）
+      timeout: cdk.Duration.seconds(20),
+      memorySize: 256,
+      architecture: Architecture.X86_64,
+      tracing: Tracing.ACTIVE,
+      reservedConcurrentExecutions: TASTING_NOTE_RESERVED_CONCURRENCY,
+      environment: {
+        BEDROCK_MODEL_ID,
+      },
+      bundling: {
+        format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
+        mainFields: ['module', 'main'],
+        banner:
+          "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+      },
+    });
+
+    // Bedrock InvokeModel 権限。許可する ARN の考え方は OCR 側と同じ
+    // （推論プロファイル本体と、その振り先の foundation-model の両方が要る）
+    this.tastingNoteFunction.addToRolePolicy(
+      new cdk.aws_iam.PolicyStatement({
+        actions: ['bedrock:InvokeModel'],
+        resources: [
+          `arn:${this.partition}:bedrock:${this.region}:${this.account}:inference-profile/${BEDROCK_MODEL_ID}`,
+          ...BEDROCK_INFERENCE_REGIONS.map(
+            (region) =>
+              `arn:${this.partition}:bedrock:${region}::foundation-model/${BEDROCK_FOUNDATION_MODEL_ID}`,
+          ),
+        ],
+      }),
+    );
+
+    const tastingNoteDataSource = this.graphqlApi.addLambdaDataSource(
+      'TastingNoteDataSource',
+      this.tastingNoteFunction,
+    );
+
+    tastingNoteDataSource.createResolver('GenerateTastingNoteResolver', {
+      typeName: 'Mutation',
+      fieldName: 'generateTastingNote',
     });
 
     // リゾルバーを登録
