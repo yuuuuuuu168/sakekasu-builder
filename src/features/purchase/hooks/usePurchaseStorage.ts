@@ -8,6 +8,11 @@ const client = generateClient();
 export interface SavePurchaseOptions {
   imageKey?: string | null;
   imageKeys?: string[];
+  /**
+   * 更新後の残本数（まだ飲みきっていない本数）。
+   * 本数を編集したときだけ渡す。渡さなければサーバ側の値をそのまま残す
+   */
+  remainingQuantity?: number;
 }
 
 export interface UsePurchaseStorageReturn {
@@ -40,6 +45,8 @@ export function usePurchaseStorage(): UsePurchaseStorageReturn {
             storeName: data.storeName,
             price: parseInt(data.price, 10),
             quantity: parseInt(data.quantity, 10),
+            // 登録した時点では1本も飲んでいない
+            remainingQuantity: parseInt(data.quantity, 10),
             purchaseDate: data.purchaseDate,
             category: data.category,
             memo: data.memo || undefined,
@@ -83,6 +90,10 @@ export function usePurchaseStorage(): UsePurchaseStorageReturn {
             purchaseDate: data.purchaseDate,
             category: data.category,
             memo: data.memo || null,
+            // 本数を変えたときだけ残本数も合わせる（飲んだ本数は保ったまま）
+            ...(options?.remainingQuantity !== undefined && {
+              remainingQuantity: options.remainingQuantity,
+            }),
             // 画像を触らない更新では送らない。undefined を送ると
             // 既存のキーを消してしまう（更新式は渡されたフィールドだけを SET する）
             // 空配列は送らない。サーバー側で弾かれるうえ、意味としても

@@ -81,6 +81,8 @@ describe('Property 7: PurchaseRecordのラウンドトリップ', () => {
         expect(passedInput.storeName).toBe(formData.storeName);
         expect(passedInput.price).toBe(parseInt(formData.price, 10));
         expect(passedInput.quantity).toBe(parseInt(formData.quantity, 10));
+        // 登録した時点では1本も飲んでいないので、残本数は購入本数と同じ（Issue #159）
+        expect(passedInput.remainingQuantity).toBe(parseInt(formData.quantity, 10));
         expect(passedInput.purchaseDate).toBe(formData.purchaseDate);
         expect(passedInput.category).toBe(formData.category);
         expect(passedInput.memo).toBe(formData.memo || undefined);
