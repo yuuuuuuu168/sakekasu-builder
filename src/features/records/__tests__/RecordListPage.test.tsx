@@ -11,6 +11,12 @@ vi.mock('@/components/ThemeToggle', () => ({
   ThemeToggle: () => <div data-testid="theme-toggle" />,
 }));
 
+// 一括追記のバナーは「書けなかった記録」をユーザーごとに控えるため認証を見る。
+// このテストは AuthProvider を張らないので差し替える
+vi.mock('@/features/auth/AuthContext', () => ({
+  useAuth: () => ({ user: { userId: 'user-1' } }),
+}));
+
 import { RecordListPage } from '../components/RecordListPage';
 import { useRecordList } from '../hooks/useRecordList';
 

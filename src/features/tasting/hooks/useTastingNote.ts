@@ -46,7 +46,8 @@ export function useTastingNote(): UseTastingNoteReturn {
       setIsGenerating(true);
       try {
         const note = await requestTastingNote(trimmedName, category);
-        return appendTastingNoteToMemo(memo, note);
+        // 呼び出しに失敗したときは備考を触らない（登録そのものは止めない）
+        return note ? appendTastingNoteToMemo(memo, note) : memo;
       } finally {
         inFlightRef.current -= 1;
         if (inFlightRef.current === 0) {

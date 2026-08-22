@@ -600,6 +600,15 @@ export class ApiStack extends cdk.Stack {
     // ので実行時間もメモリも一桁違い、同じ関数に相乗りさせると SLO の遅延が
     // どちらの話なのか読めなくなる。予約同時実行も、片方の暴走がもう片方を
     // 巻き込まない形にしたい
+    // Web 検索（Tavily）の API キーを入れた Secrets Manager の名前。
+    //
+    // ソムリエが使っているものと同じ鍵を指す。同じ用途の鍵を2つ登録すると、
+    // 手作業で入れ替えるときに片方だけ古いまま残る。値はリポジトリに置かず、
+    // 渡すのは名前だけで、読む権限をこの1つに限って与える。
+    //
+    // 鍵が未登録の環境では検索は無効として動く（Lambda 側が空で返す）
+    const tavilyApiKeySecretName = `${props.envName}-sakekasu/sommelier/tavily-api-key`;
+
     const tastingNoteFunctionName = `${props.envName}-sakekasu-tasting-note`;
     this.tastingNoteFunction = new NodejsFunction(this, 'TastingNoteFunction', {
       functionName: tastingNoteFunctionName,
@@ -610,16 +619,18 @@ export class ApiStack extends cdk.Stack {
         '../lambda/tasting-note/index.ts',
       ),
       handler: 'handler',
-      // 画像を運ばないぶん OCR より短く終わるが、モデルの応答待ちは同じ桁。
-      // 20 秒で足りなければ諦めて、登録そのものは通す（フロントは失敗しても
-      // 記録の保存を止めない）
-      timeout: cdk.Duration.seconds(20),
+      // 知らない銘柄では「学習知識で1回 → Web 検索 → 検索結果つきでもう1回」と
+      // 三段になる。実測でモデルが1回 1〜3秒、検索は6秒で打ち切るので、
+      // 一番遅い経路でも 15 秒には収まる。それでも足りなければ諦めて、
+      // 登録そのものは通す（フロントは失敗しても記録の保存を止めない）
+      timeout: cdk.Duration.seconds(25),
       memorySize: 256,
       architecture: Architecture.X86_64,
       tracing: Tracing.ACTIVE,
       reservedConcurrentExecutions: TASTING_NOTE_RESERVED_CONCURRENCY,
       environment: {
         BEDROCK_MODEL_ID,
+        TAVILY_API_KEY_SECRET_ID: tavilyApiKeySecretName,
       },
       bundling: {
         format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
@@ -640,6 +651,22 @@ export class ApiStack extends cdk.Stack {
             (region) =>
               `arn:${this.partition}:bedrock:${region}::foundation-model/${BEDROCK_FOUNDATION_MODEL_ID}`,
           ),
+        ],
+      }),
+    );
+
+    // Web 検索の API キーを読む権限。名前だけでは ARN が確定しないため、
+    // 既存スタック（監視・DevOps Agent）と同じく `-*` で受ける
+    this.tastingNoteFunction.addToRolePolicy(
+      new cdk.aws_iam.PolicyStatement({
+        actions: ['secretsmanager:GetSecretValue'],
+        resources: [
+          this.formatArn({
+            service: 'secretsmanager',
+            resource: 'secret',
+            resourceName: `${tavilyApiKeySecretName}-*`,
+            arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+          }),
         ],
       }),
     );
