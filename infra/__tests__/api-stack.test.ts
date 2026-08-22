@@ -297,8 +297,8 @@ describe('ApiStack', () => {
 
   // Requirements 3.5, 4.6: AppSync リゾルバーが存在する
   it('AppSync リゾルバーが存在する', () => {
-    // CRUD 13本 + markPurchaseOpened + getDownloadUrls + copyImages
-    template.resourceCountIs('AWS::AppSync::Resolver', 16);
+    // CRUD 13本 + markPurchaseOpened + getDownloadUrls + copyImages + generateTastingNote
+    template.resourceCountIs('AWS::AppSync::Resolver', 17);
   });
 
   // 在庫から飲むときに購入記録の写真を引き継ぐ経路
@@ -425,26 +425,35 @@ describe('ApiStack', () => {
       });
     };
 
-    /** 許可している ARN を平坦化して返す */
-    const allowedResources = () => {
-      const [statement] = invokeModelAllowStatements();
-      return [statement?.Resource].flat().map(flattenArn);
-    };
+    /** 1つの文が許可している ARN を平坦化して返す */
+    const resourcesOf = (statement: Record<string, unknown> | undefined) =>
+      [statement?.Resource].flat().map(flattenArn);
 
-    /** OCR Lambda に渡しているモデルID */
-    const ocrModelId = () => {
+    /** すべての Allow 文が許可している ARN */
+    const allowedResources = () => invokeModelAllowStatements().flatMap(resourcesOf);
+
+    /** 指定した Lambda に渡しているモデルID */
+    const modelIdOf = (functionName: string) => {
       const [fn] = Object.values(
         template.findResources('AWS::Lambda::Function', {
-          Properties: { FunctionName: 'dev-sakekasu-ocr-analyzer' },
+          Properties: { FunctionName: functionName },
         }),
       );
       return fn?.Properties?.Environment?.Variables?.BEDROCK_MODEL_ID as string | undefined;
     };
 
+    /** Bedrock を呼ぶ関数。増えたらここに足す（許可の中身は全関数で同じ） */
+    const BEDROCK_FUNCTIONS = ['dev-sakekasu-ocr-analyzer', 'dev-sakekasu-tasting-note'];
+
     it('推論プロファイルとその振り先 foundation-model だけを許可している', () => {
-      expect(invokeModelAllowStatements()).toHaveLength(1);
-      // 部分一致ではなく全量で見る。増えた ARN も減った ARN もここで落ちる
-      expect(allowedResources()).toEqual(EXPECTED_RESOURCES);
+      const statements = invokeModelAllowStatements();
+      // Bedrock を呼ぶ関数の数だけ文がある。関数を足したのに権限を付け忘れた
+      // 場合も、逆に無関係な関数へ広げた場合もここで落ちる
+      expect(statements).toHaveLength(BEDROCK_FUNCTIONS.length);
+      for (const statement of statements) {
+        // 部分一致ではなく全量で見る。増えた ARN も減った ARN もここで落ちる
+        expect(resourcesOf(statement)).toEqual(EXPECTED_RESOURCES);
+      }
     });
 
     // 元の `*` に戻す以外に、`bedrock:*::foundation-model/*` のように
@@ -457,11 +466,17 @@ describe('ApiStack', () => {
     });
 
     // モデルを差し替えたときに ARN の更新を忘れると、デプロイは通るのに
-    // OCR だけが AccessDeniedException で止まる。ここで気づけるようにする
-    it('Lambda に渡すモデルIDと許可した推論プロファイルが一致している', () => {
-      expect(ocrModelId()).toBe(EXPECTED_MODEL_ID);
-      expect(allowedResources()[0]).toContain(`:inference-profile/${EXPECTED_MODEL_ID}`);
-    });
+    // Bedrock を呼ぶ処理だけが AccessDeniedException で止まる。
+    // ここで気づけるようにする
+    it.each(BEDROCK_FUNCTIONS)(
+      '%s に渡すモデルIDと許可した推論プロファイルが一致している',
+      (functionName) => {
+        expect(modelIdOf(functionName)).toBe(EXPECTED_MODEL_ID);
+        expect(allowedResources()).toContain(
+          `arn:\${AWS::Partition}:bedrock:\${AWS::Region}:\${AWS::AccountId}:inference-profile/${EXPECTED_MODEL_ID}`,
+        );
+      },
+    );
 
     // Lambda 側にモデルIDのリテラルが残っていると、CDK の定数だけを書き換えた
     // ときに両者がずれる。ずれても CDK のテストは全部通ってしまうため、
@@ -470,17 +485,20 @@ describe('ApiStack', () => {
     // 「既定値へ落ちないこと」自体はここでは見ない。ソースの文字列検査では
     // 書き方を変えるだけですり抜けられるため、環境変数を外して実際に呼ぶ
     // lambda/ocr-analyzer/__tests__/resolveModelId.test.ts のほうで見ている
-    it('OCR Lambda のソースにモデルIDのリテラルが残っていない', () => {
-      const source = readFileSync(
-        path.join(
-          path.dirname(url.fileURLToPath(import.meta.url)),
-          '../lambda/ocr-analyzer/index.ts',
-        ),
-        'utf-8',
-      );
+    it.each(['ocr-analyzer', 'tasting-note'])(
+      '%s Lambda のソースにモデルIDのリテラルが残っていない',
+      (lambdaDir) => {
+        const source = readFileSync(
+          path.join(
+            path.dirname(url.fileURLToPath(import.meta.url)),
+            `../lambda/${lambdaDir}/index.ts`,
+          ),
+          'utf-8',
+        );
 
-      expect(source).not.toContain('anthropic.claude');
-    });
+        expect(source).not.toContain('anthropic.claude');
+      },
+    );
   });
 
   // 推論プロファイルIDと基盤モデルIDの対応チェック（Issue #82）。
@@ -559,10 +577,13 @@ describe('ApiStack', () => {
     //
     // 1 回の呼び出しが Bedrock の課金につながるので、暴走したときの費用に
     // 天井を置く。アカウント上限を上げたことで設定できるようになった（Issue #82 の続き）
-    it('OCR だけ同時実行の上限を切っている', () => {
+    it.each([
+      ['dev-sakekasu-ocr-analyzer', 20],
+      ['dev-sakekasu-tasting-note', 5],
+    ])('%s は同時実行の上限を切っている', (functionName, reserved) => {
       template.hasResourceProperties('AWS::Lambda::Function', {
-        FunctionName: 'dev-sakekasu-ocr-analyzer',
-        ReservedConcurrentExecutions: 20,
+        FunctionName: functionName,
+        ReservedConcurrentExecutions: reserved,
       });
     });
 

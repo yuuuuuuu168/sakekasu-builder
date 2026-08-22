@@ -426,7 +426,7 @@ describe('Lambda のランタイム', () => {
     it('api-stack.ts の NodejsFunction を取りこぼさない', () => {
       const source = readFileSync(path.join(libDir, 'api-stack.ts'), 'utf8');
 
-      expect(countLive(source, /new NodejsFunction\(/)).toBe(2);
+      expect(countLive(source, /new NodejsFunction\(/)).toBe(3);
     });
   });
 
@@ -521,12 +521,14 @@ describe('Lambda のランタイム', () => {
    * 予約を入れている関数と、その数。
    *
    * 合計だけを見張っても、1 つ消えて別の 1 つが残っていれば気づけない。
-   * どちらも別々の理由で入れている（OCR は Bedrock の費用、DevOps Agent は
-   * 調査が一斉に立ち上がるのを防ぐため）ので、消えたら落ちるようにする。
+   * それぞれ別の理由で入れている（OCR とテイスティングノートは Bedrock の費用、
+   * DevOps Agent は調査が一斉に立ち上がるのを防ぐため）ので、消えたら落ちる
+   * ようにする。
    * 予約を足したり外したりするときは、ここも一緒に直すこと
    */
   const EXPECTED_RESERVATIONS: Record<string, number> = {
     [`${SYNTH_ENV_NAME}-sakekasu-ocr-analyzer`]: 20,
+    [`${SYNTH_ENV_NAME}-sakekasu-tasting-note`]: 5,
     [`${SYNTH_ENV_NAME}-sakekasu-devops-agent-webhook`]: 2,
   };
 
