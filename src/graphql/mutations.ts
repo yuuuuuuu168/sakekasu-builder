@@ -159,3 +159,12 @@ export const copyImages = /* GraphQL */ `
     copyImages(sourceKeys: $sourceKeys, recordType: $recordType, recordId: $recordId)
   }
 `;
+
+export const generateTastingNote = /* GraphQL */ `
+  mutation GenerateTastingNote($sakeName: String!, $category: SakeCategory!) {
+    generateTastingNote(sakeName: $sakeName, category: $category) {
+      tastingNote
+      recommendedServing
+    }
+  }
+`;

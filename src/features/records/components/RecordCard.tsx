@@ -5,6 +5,7 @@ import { CATEGORY_FILTER_OPTIONS, DRINKING_STATUS_DISPLAY } from '../types';
 import { DeleteButton } from './DeleteButton';
 import { EditButton } from './EditButton';
 import { ConfirmDialog } from './ConfirmDialog';
+import { RecordMemo } from './RecordMemo';
 import { useImageUrl } from '@/features/image/hooks/useImageUrl';
 import { toThumbnailKey } from '@/features/image/lib/thumbnailKey';
 import type { LinkedDrinkingSummary } from '../lib/linkedDrinking';
@@ -355,6 +356,10 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
               <span data-testid="drinking-method">🍶 {record.drinkingMethod}</span>
             )}
           </div>
+
+          {/* 備考（テイスティングノートもここに入る）。長いものは2行で切って、
+              クリックで全文に広げる */}
+          {record.memo && <RecordMemo memo={record.memo} />}
 
           {/* 購入記録: 紐づいた飲酒記録の感想 */}
           {isPurchase && linkedDrinking && (

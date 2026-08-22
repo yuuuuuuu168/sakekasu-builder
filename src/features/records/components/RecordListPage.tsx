@@ -12,6 +12,7 @@ import { EmptyState } from './EmptyState';
 import { LoadingState } from './LoadingState';
 import { ErrorState } from './ErrorState';
 import { ImageModal } from '@/features/image/components/ImageModal';
+import { TastingNoteBackfill } from '@/features/tasting/components/TastingNoteBackfill';
 import { buildLinkedDrinkingIndex } from '../lib/linkedDrinking';
 import type { UnifiedRecord } from '../types';
 import type { DrinkingStatus } from '@/types/schema';
@@ -86,6 +87,14 @@ export function RecordListPage({ onDrinkFromStock }: RecordListPageProps = {}) {
     [allRecords],
   );
 
+  // 一括追記したテイスティングノートを、再取得を待たずに一覧へ反映する
+  const handleMemoUpdated = useCallback(
+    (id: string, memo: string) => {
+      patchRecord(id, { memo });
+    },
+    [patchRecord],
+  );
+
   // 編集ダイアログの状態管理
   const [editingRecord, setEditingRecord] = useState<UnifiedRecord | null>(null);
 
@@ -131,6 +140,13 @@ export function RecordListPage({ onDrinkFromStock }: RecordListPageProps = {}) {
         {!isLoading && !error && (
           <div className="mb-4">
             <InventorySummary records={allRecords} />
+          </div>
+        )}
+
+        {/* 機能追加より前の記録へテイスティングノートを書き足す案内 */}
+        {!isLoading && !error && (
+          <div className="mb-4 empty:mb-0">
+            <TastingNoteBackfill records={allRecords} onMemoUpdated={handleMemoUpdated} />
           </div>
         )}
 
