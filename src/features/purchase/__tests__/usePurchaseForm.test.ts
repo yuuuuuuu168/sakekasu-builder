@@ -143,3 +143,55 @@ describe('usePurchaseForm', () => {
     expect(result.current.submitResult).toEqual(errorResult);
   });
 });
+
+// Feature: 詳細スペック項目の記録対応（Issue #87）
+describe('usePurchaseForm の詳細スペック', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockIsSaving = false;
+    mockIsValid.mockReturnValue(true);
+    mockSavePurchase.mockResolvedValue({ success: true });
+  });
+
+  it('入力した詳細スペックが保存時に渡される', async () => {
+    const { result } = renderHook(() => usePurchaseForm());
+
+    act(() => {
+      result.current.specs.handleSpecChange('brewery', '旭酒造株式会社');
+    });
+    await act(async () => {
+      await result.current.handleSubmit();
+    });
+
+    const options = mockSavePurchase.mock.calls[0][1];
+    expect(options.specs.brewery).toBe('旭酒造株式会社');
+  });
+
+  it('詳細スペックが不正なら保存しない', async () => {
+    const { result } = renderHook(() => usePurchaseForm());
+
+    act(() => {
+      result.current.specs.handleSpecChange('ricePolishingRatio', '999');
+    });
+    await act(async () => {
+      await result.current.handleSubmit();
+    });
+
+    expect(mockSavePurchase).not.toHaveBeenCalled();
+    // 送信を試みた時点で、触っていない項目のエラーも表示に回る
+    expect(result.current.specs.specErrors.ricePolishingRatio).toBeDefined();
+  });
+
+  it('登録に成功したら詳細スペックの入力もリセットされる', async () => {
+    const { result } = renderHook(() => usePurchaseForm());
+
+    act(() => {
+      result.current.specs.handleSpecChange('brewery', '旭酒造株式会社');
+    });
+    await act(async () => {
+      await result.current.handleSubmit();
+    });
+
+    expect(result.current.specs.specs.brewery).toBe('');
+  });
+});

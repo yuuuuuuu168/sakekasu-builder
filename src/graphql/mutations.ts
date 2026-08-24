@@ -11,6 +11,18 @@ export const createPurchaseRecord = /* GraphQL */ `
       purchaseDate
       category
       memo
+      brewery
+      region
+      alcoholPercentage
+      volumeMl
+      specificName
+      ricePolishingRatio
+      sakeMeterValue
+      acidity
+      aminoAcidity
+      riceVariety
+      yeast
+      labelDescription
       imageKey
       imageKeys
       drinkingStatus
@@ -34,6 +46,18 @@ export const updatePurchaseRecord = /* GraphQL */ `
       purchaseDate
       category
       memo
+      brewery
+      region
+      alcoholPercentage
+      volumeMl
+      specificName
+      ricePolishingRatio
+      sakeMeterValue
+      acidity
+      aminoAcidity
+      riceVariety
+      yeast
+      labelDescription
       imageKey
       imageKeys
       drinkingStatus
@@ -75,6 +99,18 @@ export const createDrinkingRecord = /* GraphQL */ `
       drinkingMethod
       rating
       memo
+      brewery
+      region
+      alcoholPercentage
+      volumeMl
+      specificName
+      ricePolishingRatio
+      sakeMeterValue
+      acidity
+      aminoAcidity
+      riceVariety
+      yeast
+      labelDescription
       imageKey
       imageKeys
       purchaseRecordId
@@ -97,6 +133,18 @@ export const updateDrinkingRecord = /* GraphQL */ `
       drinkingMethod
       rating
       memo
+      brewery
+      region
+      alcoholPercentage
+      volumeMl
+      specificName
+      ricePolishingRatio
+      sakeMeterValue
+      acidity
+      aminoAcidity
+      riceVariety
+      yeast
+      labelDescription
       imageKey
       imageKeys
       createdAt
@@ -145,12 +193,32 @@ export const analyzeSakeLabel = /* GraphQL */ `
       category
       region
       alcoholPercentage
+      brewery
+      volumeMl
+      specificName
+      ricePolishingRatio
+      sakeMeterValue
+      acidity
+      aminoAcidity
+      riceVariety
+      yeast
+      labelDescription
       confidence
       fieldConfidence {
         sakeName
         category
         region
         alcoholPercentage
+        brewery
+        volumeMl
+        specificName
+        ricePolishingRatio
+        sakeMeterValue
+        acidity
+        aminoAcidity
+        riceVariety
+        yeast
+        labelDescription
       }
     }
   }

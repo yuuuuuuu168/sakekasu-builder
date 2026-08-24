@@ -106,6 +106,8 @@ function AppContent() {
       category: record.category,
       // 写真を選ばなかったときに、購入記録の写真を複製して引き継ぐ
       imageKeys: record.imageKeys,
+      // 蔵元や精米歩合は同じ酒なので打ち直させない
+      specs: record.specs,
     });
     setStockDraftKey((key) => key + 1);
     setCurrentPage('drinking');

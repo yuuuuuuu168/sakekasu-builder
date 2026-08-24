@@ -3,6 +3,8 @@ import { generateClient } from 'aws-amplify/api';
 import { createDrinkingRecord, updateDrinkingRecord } from '@/graphql/mutations';
 import type { DrinkingFormData } from '../types';
 import type { SaveResult } from '../../purchase/types';
+import type { SakeSpecFormData } from '@/features/specs/types';
+import { specsToCreateInput, specsToUpdateInput } from '@/features/specs/lib/sakeSpecs';
 
 const client = generateClient();
 
@@ -11,6 +13,13 @@ export interface SaveDrinkingOptions {
   imageKeys?: string[];
   /** 在庫（購入記録）から登録する場合の紐づけ先 */
   purchaseRecordId?: string | null;
+  /**
+   * 詳細スペックの入力値（Issue #87）。
+   *
+   * 作成では値のある項目だけを載せ、更新では空欄を null として送る。
+   * 更新で省いてしまうと、入力欄を空にしても以前の値が残る
+   */
+  specs?: SakeSpecFormData;
 }
 
 export interface UseDrinkingStorageReturn {
@@ -24,7 +33,7 @@ export interface UseDrinkingStorageReturn {
   updateDrinking: (
     id: string,
     data: DrinkingFormData,
-    options?: { imageKey?: string | null; imageKeys?: string[] },
+    options?: SaveDrinkingOptions,
   ) => Promise<SaveResult>;
   isSaving: boolean;
 }
@@ -47,6 +56,7 @@ export function useDrinkingStorage(): UseDrinkingStorageReturn {
             drinkingMethod: data.drinkingMethod,
             rating: data.rating,
             memo: data.memo || undefined,
+            ...(options?.specs ? specsToCreateInput(options.specs) : {}),
             imageKey: options?.imageKey ?? null,
             imageKeys: options?.imageKeys?.length ? options.imageKeys : undefined,
             purchaseRecordId: options?.purchaseRecordId ?? undefined,
@@ -71,7 +81,7 @@ export function useDrinkingStorage(): UseDrinkingStorageReturn {
   const updateDrinking = async (
     id: string,
     data: DrinkingFormData,
-    options?: { imageKey?: string | null; imageKeys?: string[] },
+    options?: SaveDrinkingOptions,
   ): Promise<SaveResult> => {
     setIsSaving(true);
     try {
@@ -88,6 +98,7 @@ export function useDrinkingStorage(): UseDrinkingStorageReturn {
             drinkingMethod: data.drinkingMethod,
             rating: data.rating,
             memo: data.memo || null,
+            ...(options?.specs ? specsToUpdateInput(options.specs) : {}),
             // 画像を触らない更新では送らない。undefined を送ると
             // 既存のキーを消してしまう（更新式は渡されたフィールドだけを SET する）
             // 空配列は送らない。サーバー側で弾かれるうえ、意味としても

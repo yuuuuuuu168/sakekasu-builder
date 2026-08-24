@@ -5,6 +5,7 @@ import type { UnifiedRecord } from '../types';
 import {
   unifiedToPurchaseFormData,
   unifiedToDrinkingFormData,
+  unifiedToSpecFormData,
 } from '../lib/recordToFormData';
 
 export interface EditRecordDialogProps {
@@ -38,6 +39,7 @@ export function EditRecordDialog({ record, onOpenChange, onUpdated }: EditRecord
               key={record.id}
               recordId={record.id}
               initialData={unifiedToPurchaseFormData(record)}
+              initialSpecs={unifiedToSpecFormData(record)}
               existingImageKey={record.imageKey}
               existingImageKeys={record.imageKeys}
               existingBottles={record}
@@ -49,6 +51,7 @@ export function EditRecordDialog({ record, onOpenChange, onUpdated }: EditRecord
               key={record.id}
               recordId={record.id}
               initialData={unifiedToDrinkingFormData(record)}
+              initialSpecs={unifiedToSpecFormData(record)}
               existingImageKey={record.imageKey}
               existingImageKeys={record.imageKeys}
               onSubmitSuccess={handleSuccess}

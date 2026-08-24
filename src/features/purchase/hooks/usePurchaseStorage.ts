@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { createPurchaseRecord, updatePurchaseRecord } from '@/graphql/mutations';
 import type { PurchaseFormData, SaveResult } from '@/features/purchase/types';
+import type { SakeSpecFormData } from '@/features/specs/types';
+import { specsToCreateInput, specsToUpdateInput } from '@/features/specs/lib/sakeSpecs';
 
 const client = generateClient();
 
@@ -13,6 +15,13 @@ export interface SavePurchaseOptions {
    * 本数を編集したときだけ渡す。渡さなければサーバ側の値をそのまま残す
    */
   remainingQuantity?: number;
+  /**
+   * 詳細スペックの入力値（Issue #87）。
+   *
+   * 作成では値のある項目だけを載せ、更新では空欄を null として送る。
+   * 更新で省いてしまうと、入力欄を空にしても以前の値が残る
+   */
+  specs?: SakeSpecFormData;
 }
 
 export interface UsePurchaseStorageReturn {
@@ -50,6 +59,7 @@ export function usePurchaseStorage(): UsePurchaseStorageReturn {
             purchaseDate: data.purchaseDate,
             category: data.category,
             memo: data.memo || undefined,
+            ...(options?.specs ? specsToCreateInput(options.specs) : {}),
             imageKey: options?.imageKey ?? null,
             imageKeys: options?.imageKeys?.length ? options.imageKeys : undefined,
             drinkingStatus: 'NOT_STARTED',
@@ -90,6 +100,7 @@ export function usePurchaseStorage(): UsePurchaseStorageReturn {
             purchaseDate: data.purchaseDate,
             category: data.category,
             memo: data.memo || null,
+            ...(options?.specs ? specsToUpdateInput(options.specs) : {}),
             // 本数を変えたときだけ残本数も合わせる（飲んだ本数は保ったまま）
             ...(options?.remainingQuantity !== undefined && {
               remainingQuantity: options.remainingQuantity,

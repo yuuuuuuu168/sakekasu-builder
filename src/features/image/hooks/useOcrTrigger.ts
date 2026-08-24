@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useOcrAnalysis } from './useOcrAnalysis';
+import { useOcrAnalysis, type OcrResult } from './useOcrAnalysis';
 import type { UseImageUploadReturn } from './useImageUpload';
 import type { SakeCategory } from '@/features/purchase/types';
+import { SPEC_FIELD_NAMES, type SpecFieldName } from '@/features/specs/types';
+import type { OcrSpecValues } from '@/features/specs/lib/sakeSpecs';
 import { CATEGORY_DISPLAY_NAMES } from '@/components/form/CategorySelect';
 
 export interface OcrMessage {
@@ -13,8 +15,13 @@ export interface OcrMessage {
 export interface OcrDetectedInfo {
   sakeName: string;
   category: SakeCategory | null;
-  region: string | null;
-  alcoholPercentage: number | null;
+  /**
+   * 詳細スペックの読み取り結果（産地・アルコール度数を含む。Issue #88）。
+   * 読み取れなかった項目は入らないので、そのまま入力欄へ流し込める
+   */
+  specs: OcrSpecValues;
+  /** 確信度が低く、目視確認を促したい詳細スペックの項目 */
+  lowConfidenceSpecFields: SpecFieldName[];
 }
 
 export interface OcrDetectedOptions {
@@ -33,6 +40,29 @@ function markIfLowConfidence(label: string, confidence: number | undefined): str
   return confidence !== undefined && confidence < LOW_CONFIDENCE_THRESHOLD
     ? `${label}（要確認）`
     : label;
+}
+
+/**
+ * 解析結果から、値の入った詳細スペックだけを取り出す。
+ *
+ * 読み取れなかった項目（null）を落としておくと、フォーム側は
+ * 「渡ってきた項目 = 埋める項目」として扱える
+ */
+function pickDetectedSpecs(result: OcrResult): OcrSpecValues {
+  return Object.fromEntries(
+    SPEC_FIELD_NAMES.filter((field) => result[field] != null).map((field) => [
+      field,
+      result[field],
+    ]),
+  );
+}
+
+/** 値は読み取れたが確信度が低い項目。入力欄に「要確認」を付けるのに使う */
+function pickLowConfidenceSpecFields(result: OcrResult): SpecFieldName[] {
+  return SPEC_FIELD_NAMES.filter(
+    (field) =>
+      result[field] != null && (result.fieldConfidence?.[field] ?? 0) < LOW_CONFIDENCE_THRESHOLD,
+  );
 }
 
 /** 同一ファイルの再解析を防ぐための識別子 */
@@ -67,8 +97,8 @@ export function useOcrTrigger(
         {
           sakeName: result.sakeName,
           category: result.category ?? null,
-          region: result.region ?? null,
-          alcoholPercentage: result.alcoholPercentage ?? null,
+          specs: pickDetectedSpecs(result),
+          lowConfidenceSpecFields: pickLowConfidenceSpecFields(result),
         },
         { isAuto },
       );
@@ -107,9 +137,13 @@ export function useOcrTrigger(
     resetOcr();
   }, [resetOcr]);
 
-  // 銘柄名以外に読み取れた項目（カテゴリ・産地・度数）を成功メッセージに併記する。
-  // 確信度が低い項目には「（要確認）」を付けて目視確認を促す
+  // 銘柄名以外に読み取れたものを成功メッセージに併記する。
+  // カテゴリは確信度が低ければ「（要確認）」を付け、詳細スペックは件数だけ伝える
+  // （項目ごとの「要確認」は入力欄の側に出す。12項目を全部並べると読めない）
   const fieldConfidence = ocrResult?.fieldConfidence;
+  const detectedSpecCount = ocrResult?.sakeName
+    ? Object.keys(pickDetectedSpecs(ocrResult)).length
+    : 0;
   const details = ocrResult?.sakeName
     ? [
         ocrResult.category
@@ -118,15 +152,7 @@ export function useOcrTrigger(
               fieldConfidence?.category,
             )
           : null,
-        ocrResult.region
-          ? markIfLowConfidence(ocrResult.region, fieldConfidence?.region)
-          : null,
-        ocrResult.alcoholPercentage != null
-          ? markIfLowConfidence(
-              `${ocrResult.alcoholPercentage}%`,
-              fieldConfidence?.alcoholPercentage,
-            )
-          : null,
+        detectedSpecCount > 0 ? `詳細スペック${detectedSpecCount}件` : null,
       ].filter((v): v is string => v != null)
     : [];
 

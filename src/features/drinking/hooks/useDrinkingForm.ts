@@ -8,6 +8,10 @@ import { useDrinkingStorage } from './useDrinkingStorage';
 import { useImageUpload } from '@/features/image/hooks/useImageUpload';
 import type { UseImageUploadReturn } from '@/features/image/hooks/useImageUpload';
 import { copyRecordImages } from '@/features/image/lib/copyRecordImages';
+import { useSakeSpecs } from '@/features/specs/hooks/useSakeSpecs';
+import type { UseSakeSpecsReturn } from '@/features/specs/hooks/useSakeSpecs';
+import type { SakeSpecFormData } from '@/features/specs/types';
+import { specsToFormData } from '@/features/specs/lib/sakeSpecs';
 import { getTodayString } from '@/lib/dateUtils';
 
 export interface UseDrinkingFormOptions {
@@ -15,6 +19,8 @@ export interface UseDrinkingFormOptions {
   recordId?: string;
   /** フォームの初期値（編集モードでのプリフィル用） */
   initialData?: DrinkingFormData;
+  /** 詳細スペックの初期値（編集モードでのプリフィル用。Issue #87） */
+  initialSpecs?: SakeSpecFormData;
   /** 在庫（購入記録）から登録する場合の紐づけ情報 */
   stockDraft?: StockDrinkDraft | null;
   /** 在庫からの登録が完了したときの通知（紐づけ解除に使う） */
@@ -43,6 +49,8 @@ export interface UseDrinkingFormReturn {
   errorMessage: string | null;
   /** 画像アップロード関連 */
   imageUpload: UseImageUploadReturn;
+  /** 詳細スペック（任意項目）の入力状態 */
+  specs: UseSakeSpecsReturn;
 }
 
 export function getInitialDrinkingFormData(placeName: string = ''): DrinkingFormData {
@@ -75,6 +83,7 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
   const {
     recordId,
     initialData,
+    initialSpecs,
     stockDraft,
     onStockDrinkSaved,
     existingImageKey = null,
@@ -94,6 +103,10 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
   const { errors, validateField, isValid, clearErrors } = useDrinkingValidation();
   const { saveDrinking, updateDrinking, isSaving } = useDrinkingStorage();
   const imageUpload = useImageUpload({ alreadyAttached });
+  // 編集時の初期値が最優先。無ければ在庫（購入記録）から引き継いだスペックを使う
+  const specs = useSakeSpecs(
+    initialSpecs ?? (stockDraft?.specs ? specsToFormData(stockDraft.specs) : undefined),
+  );
 
   const isFormValid = Object.keys(errors).length === 0;
 
@@ -134,7 +147,11 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
       setSuccessMessage(null);
       setErrorMessage(null);
 
-      if (!isValid(formData)) {
+      // 詳細スペックの検証も通してから保存する。
+      // isValid は必ず呼んでエラー表示を更新したいので、|| の短絡に頼らず両方評価する
+      const isBaseValid = isValid(formData);
+      const isSpecValid = specs.validateSpecs();
+      if (!isBaseValid || !isSpecValid) {
         return;
       }
 
@@ -156,7 +173,10 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
           };
         }
 
-        const result = await updateDrinking(recordId, formData, imageOptions);
+        const result = await updateDrinking(recordId, formData, {
+          ...imageOptions,
+          specs: specs.specs,
+        });
         if (result.success) {
           // 追記済みのファイルを残すと、次の保存で二重に足される
           if (imageOptions) imageUpload.clearImage();
@@ -199,6 +219,7 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
         imageKey,
         imageKeys,
         purchaseRecordId: stockDraft?.purchaseRecordId ?? null,
+        specs: specs.specs,
       });
 
       if (!result.success) {
@@ -223,6 +244,7 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
       // 飲んだ場所を保持してリセット
       setFormData(getInitialDrinkingFormData(formData.placeName));
       clearErrors();
+      specs.resetSpecs();
       imageUpload.clearImage();
       setSuccessMessage(message);
     } finally {
@@ -242,6 +264,7 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
     onStockDrinkSaved,
     existingImageKey,
     existingImageKeys,
+    specs,
   ]);
 
   return {
@@ -256,5 +279,6 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
     successMessage,
     errorMessage,
     imageUpload,
+    specs,
   };
 }

@@ -11,6 +11,18 @@ export const getPurchaseRecord = /* GraphQL */ `
       purchaseDate
       category
       memo
+      brewery
+      region
+      alcoholPercentage
+      volumeMl
+      specificName
+      ricePolishingRatio
+      sakeMeterValue
+      acidity
+      aminoAcidity
+      riceVariety
+      yeast
+      labelDescription
       imageKey
       imageKeys
       drinkingStatus
@@ -35,6 +47,18 @@ export const listPurchaseRecords = /* GraphQL */ `
         purchaseDate
         category
         memo
+        brewery
+        region
+        alcoholPercentage
+        volumeMl
+        specificName
+        ricePolishingRatio
+        sakeMeterValue
+        acidity
+        aminoAcidity
+        riceVariety
+        yeast
+        labelDescription
         imageKey
         imageKeys
         drinkingStatus
@@ -60,6 +84,18 @@ export const getDrinkingRecord = /* GraphQL */ `
       drinkingMethod
       rating
       memo
+      brewery
+      region
+      alcoholPercentage
+      volumeMl
+      specificName
+      ricePolishingRatio
+      sakeMeterValue
+      acidity
+      aminoAcidity
+      riceVariety
+      yeast
+      labelDescription
       imageKey
       imageKeys
       purchaseRecordId
@@ -83,6 +119,18 @@ export const listDrinkingRecords = /* GraphQL */ `
         drinkingMethod
         rating
         memo
+        brewery
+        region
+        alcoholPercentage
+        volumeMl
+        specificName
+        ricePolishingRatio
+        sakeMeterValue
+        acidity
+        aminoAcidity
+        riceVariety
+        yeast
+        labelDescription
         imageKey
         imageKeys
         purchaseRecordId
