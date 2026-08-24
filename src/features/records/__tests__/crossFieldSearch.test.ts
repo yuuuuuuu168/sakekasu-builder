@@ -15,6 +15,20 @@ const purchase: UnifiedRecord = {
   category: 'NIHONSHU',
   storeName: 'カクヤス 渋谷店',
   memo: 'ボーナスで奮発した',
+  specs: {
+    brewery: '旭酒造株式会社',
+    region: '山口県',
+    alcoholPercentage: 16,
+    volumeMl: 720,
+    specificName: '純米大吟醸',
+    ricePolishingRatio: 23,
+    sakeMeterValue: null,
+    acidity: null,
+    aminoAcidity: null,
+    riceVariety: '山田錦',
+    yeast: '協会9号',
+    labelDescription: '洗練された香りと透明感のある味わい。',
+  },
   imageKeys: [],
   createdAt: '2026-01-10T00:00:00.000Z',
   updatedAt: '2026-01-10T00:00:00.000Z',
@@ -137,5 +151,28 @@ describe('表記ゆれを越えた検索', () => {
 
   it('従来の曖昧検索は引き続き効く', () => {
     expect(filterRecords(records, search('獺大吟'))).toEqual([purchase]);
+  });
+});
+
+// Feature: 詳細スペック項目の記録対応（Issue #87）: スペックからも記録を探せる
+describe('詳細スペックの横断', () => {
+  it('蔵元で引ける', () => {
+    expect(filterRecords(records, search('旭酒造'))).toEqual([purchase]);
+  });
+
+  it('産地で引ける', () => {
+    expect(filterRecords(records, search('山口県'))).toEqual([purchase]);
+  });
+
+  it('酒米で引ける', () => {
+    expect(filterRecords(records, search('山田錦'))).toEqual([purchase]);
+  });
+
+  it('酵母で引ける', () => {
+    expect(filterRecords(records, search('協会9号'))).toEqual([purchase]);
+  });
+
+  it('紹介文は検索対象にしない（ありふれた語で無関係な記録が並ぶため）', () => {
+    expect(filterRecords(records, search('透明感'))).toEqual([]);
   });
 });

@@ -7,6 +7,7 @@ import { EditButton } from './EditButton';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FinishBottlesDialog } from './FinishBottlesDialog';
 import { RecordMemo } from './RecordMemo';
+import { RecordSpecs } from './RecordSpecs';
 import { useImageUrl } from '@/features/image/hooks/useImageUrl';
 import { toThumbnailKey } from '@/features/image/lib/thumbnailKey';
 import type { LinkedDrinkingSummary } from '../lib/linkedDrinking';
@@ -405,6 +406,9 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
               <span data-testid="drinking-method">🍶 {record.drinkingMethod}</span>
             )}
           </div>
+
+          {/* 詳細スペック（Issue #87）。値のある項目だけを畳んで置く */}
+          <RecordSpecs specs={record.specs} />
 
           {/* 備考（テイスティングノートもここに入る）。長いものは2行で切って、
               クリックで全文に広げる */}

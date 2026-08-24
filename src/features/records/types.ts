@@ -1,5 +1,6 @@
 import type { SakeCategory } from '../purchase/types';
 import type { DrinkingStatus } from '@/types/schema';
+import type { SakeSpecs } from '@/features/specs/types';
 
 // 記録種別
 export type RecordType = 'purchase' | 'drinking';
@@ -13,6 +14,11 @@ export interface UnifiedRecord {
   date: string; // YYYY-MM-DD（purchaseDate or drinkingDate）
   category: SakeCategory;
   memo?: string;
+  /**
+   * 詳細スペック（Issue #87）。任意項目なので、1つも入力していない記録では
+   * 各項目が null になる。項目自体が無かった頃の記録では undefined
+   */
+  specs?: SakeSpecs;
   // 購入記録固有
   storeName?: string;
   quantity?: number; // 購入本数（1以上、未設定時は1扱い）

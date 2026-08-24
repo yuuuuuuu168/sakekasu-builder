@@ -104,6 +104,7 @@ describe('usePurchaseForm の本数編集', () => {
   it('本数を触っていない更新では残本数を送らない', async () => {
     await submitWithQuantity('3');
 
-    expect(updateOptions()).toBeUndefined();
+    // 詳細スペックは毎回送るので、残本数だけが載っていないことを見る
+    expect(updateOptions()).not.toHaveProperty('remainingQuantity');
   });
 });

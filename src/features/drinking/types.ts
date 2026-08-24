@@ -1,4 +1,5 @@
 import type { SakeCategory } from '../purchase/types';
+import type { SakeSpecs } from '../specs/types';
 
 // 飲み方の型定義
 export type DrinkingMethod = string;
@@ -19,6 +20,13 @@ export interface StockDrinkDraft {
    * 同じ酒なのに買った記録にだけ写真が出る状態を避ける
    */
   imageKeys?: string[];
+  /**
+   * 購入記録に入力済みの詳細スペック（Issue #87）。
+   *
+   * 同じ酒なので蔵元も精米歩合も変わらない。買ったときに書いたものを
+   * 飲んだ記録でもう一度打ち直させない
+   */
+  specs?: SakeSpecs;
 }
 
 /** 在庫から飲む場合の「飲んだ場所」の初期値 */

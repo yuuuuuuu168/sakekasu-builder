@@ -103,10 +103,12 @@ describe('PurchaseForm 自動OCR（写真1枚で購入登録）', () => {
     const sakeNameInput = screen.getByTestId('input-sakeName') as HTMLInputElement;
     expect(sakeNameInput.value).toBe('獺祭 純米大吟醸45');
 
-    // カテゴリ・メモ（産地・度数）も反映される
+    // カテゴリと詳細スペック（産地・度数）も反映される
     expect(screen.getByTestId('input-category').textContent).toContain('日本酒');
-    const memoInput = screen.getByTestId('input-memo') as HTMLTextAreaElement;
-    expect(memoInput.value).toBe('産地: 山口県 / アルコール度数: 16%');
+    expect((screen.getByTestId('input-spec-region') as HTMLInputElement).value).toBe('山口県');
+    expect((screen.getByTestId('input-spec-alcoholPercentage') as HTMLInputElement).value).toBe(
+      '16',
+    );
   });
 
   it('自動実行では入力済みの銘柄名を上書きしない', async () => {
@@ -120,10 +122,9 @@ describe('PurchaseForm 自動OCR（写真1枚で購入登録）', () => {
     });
 
     expect(mockAnalyzeImage).toHaveBeenCalledTimes(1);
-    // 銘柄名は保持しつつ、カテゴリ・メモは反映される
+    // 銘柄名は保持しつつ、カテゴリ・詳細スペックは反映される
     expect(sakeNameInput.value).toBe('久保田');
-    const memoInput = screen.getByTestId('input-memo') as HTMLTextAreaElement;
-    expect(memoInput.value).toBe('産地: 山口県 / アルコール度数: 16%');
+    expect((screen.getByTestId('input-spec-region') as HTMLInputElement).value).toBe('山口県');
   });
 
   it('解析済みの画像に対して自動OCRが重複実行されない', async () => {

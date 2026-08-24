@@ -108,7 +108,7 @@ describe('PurchaseForm OCR 統合テスト', () => {
     });
   });
 
-  it('OCR がカテゴリ・産地・度数を返した場合、カテゴリ選択とメモに反映される', async () => {
+  it('OCR がカテゴリ・産地・度数を返した場合、カテゴリ選択と詳細スペックに反映される', async () => {
     mockAnalyzeImage.mockResolvedValue({
       sakeName: '獺祭',
       category: 'NIHONSHU',
@@ -130,9 +130,13 @@ describe('PurchaseForm OCR 統合テスト', () => {
     // カテゴリ選択に日本酒が反映される
     expect(screen.getByTestId('input-category').textContent).toContain('日本酒');
 
-    // メモ欄に産地・度数が追記される
-    const memoInput = screen.getByTestId('input-memo') as HTMLTextAreaElement;
-    expect(memoInput.value).toBe('産地: 山口県 / アルコール度数: 16%');
+    // 産地・度数は詳細スペックの入力欄に入る（Issue #87 で保存先ができた）
+    expect((screen.getByTestId('input-spec-region') as HTMLInputElement).value).toBe('山口県');
+    expect((screen.getByTestId('input-spec-alcoholPercentage') as HTMLInputElement).value).toBe(
+      '16',
+    );
+    // メモ欄は OCR では触らない
+    expect((screen.getByTestId('input-memo') as HTMLTextAreaElement).value).toBe('');
   });
 
   it('OCR がカテゴリ・産地・度数を返さない場合、カテゴリとメモは変更されない', async () => {

@@ -66,6 +66,35 @@ describe('DrinkingForm 在庫との紐づけ', () => {
     expect(screen.getByTestId('input-drinkingMethod')).toBeInTheDocument();
   });
 
+  it('在庫に入力済みの詳細スペックを引き継ぐ（Issue #87）', () => {
+    render(
+      <DrinkingForm
+        stockDraft={{
+          ...whiskyDraft,
+          specs: {
+            brewery: 'サントリー',
+            region: '大阪府',
+            alcoholPercentage: 43,
+            volumeMl: null,
+            specificName: null,
+            ricePolishingRatio: null,
+            sakeMeterValue: null,
+            acidity: null,
+            aminoAcidity: null,
+            riceVariety: null,
+            yeast: null,
+            labelDescription: null,
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('input-spec-brewery')).toHaveValue('サントリー');
+    expect(screen.getByTestId('input-spec-alcoholPercentage')).toHaveValue(43);
+    // ウイスキーなので日本酒向けの項目は出さない
+    expect(screen.queryByTestId('input-spec-ricePolishingRatio')).not.toBeInTheDocument();
+  });
+
   it('紐づけありで登録すると purchaseRecordId が送信される', async () => {
     render(<DrinkingForm stockDraft={beerDraft} />);
 
