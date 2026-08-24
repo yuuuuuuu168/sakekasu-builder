@@ -171,7 +171,7 @@ const LABEL_TOOL = {
       ricePolishingRatio: {
         type: ['number', 'null'],
         description:
-          '精米歩合の数値のみ（例: "精米歩合 50%" → 50）。%記号は含めない。麹米と掛米で値が違う場合はよく磨いた方（小さい方）。読み取れない場合は null',
+          '精米歩合の数値のみ（例: "精米歩合 50%" → 50）。%記号は含めない。麹米と掛米で値が違う場合はよく磨いた方（小さい方）。labelTexts に精米歩合の記載を書き出せた場合だけ入れる。読み取れない場合は null',
       },
       ricePolishingRatioConfidence: {
         type: 'number',
@@ -182,7 +182,7 @@ const LABEL_TOOL = {
       sakeMeterValue: {
         type: ['number', 'null'],
         description:
-          '日本酒度の数値のみ（例: "日本酒度 +3" → 3、"日本酒度 -5" → -5）。符号はそのまま保つ。読み取れない場合は null',
+          '日本酒度の数値のみ（例: "日本酒度 +3" → 3、"日本酒度 -5" → -5）。符号はそのまま保つ。labelTexts に日本酒度の記載を書き出せた場合だけ入れる。読み取れない場合は null',
       },
       sakeMeterValueConfidence: {
         type: 'number',
@@ -192,7 +192,7 @@ const LABEL_TOOL = {
       },
       acidity: {
         type: ['number', 'null'],
-        description: '酸度の数値のみ（例: 1.4）。読み取れない場合は null',
+        description: '酸度の数値のみ（例: 1.4）。labelTexts に酸度の記載を書き出せた場合だけ入れる。一般的な値で埋めない。読み取れない場合は null',
       },
       acidityConfidence: {
         type: 'number',
@@ -202,7 +202,7 @@ const LABEL_TOOL = {
       },
       aminoAcidity: {
         type: ['number', 'null'],
-        description: 'アミノ酸度の数値のみ（例: 1.2）。読み取れない場合は null',
+        description: 'アミノ酸度の数値のみ（例: 1.2）。labelTexts にアミノ酸度の記載を書き出せた場合だけ入れる。一般的な値で埋めない。読み取れない場合は null',
       },
       aminoAcidityConfidence: {
         type: 'number',
@@ -536,7 +536,7 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
 - 酒米（riceVariety）は品種名だけを書く。原材料欄の「米（国産）」「米こうじ（国産米）」は品種名ではないので含めない
 - 精米歩合・日本酒度・酸度・アミノ酸度は、ラベルにその項目名が書かれている数値だけを採る。近くにある別の数値を当てはめない
 - 紹介文（labelDescription）はラベルに印刷された商品説明のみ。無ければ null
-- ラベルに書かれていない項目は、推測せず null にする
+- **labelTexts に書き出していない値は、どの項目にも入れないでください。** ラベルに数値が見当たらないときに、日本酒として一般的な値（精米歩合60、日本酒度+3、酸度1.4、アミノ酸度1.2 など）を埋めるのは誤りです。読み取れない項目は null にし、確信度も 0 にしてください
 
 銘柄名（sakeName）は基本ブランド名だけに丸めず、商品を特定する表現をすべて含めた正式な商品名で抽出してください。例:
 - 「ARRAN PORT CASK FINISH」→「アラン ポートカスク」

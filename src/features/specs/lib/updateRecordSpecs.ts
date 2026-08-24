@@ -1,7 +1,7 @@
 import { generateClient } from 'aws-amplify/api';
 import { updatePurchaseRecord, updateDrinkingRecord } from '@/graphql/mutations';
 import type { RecordType } from '@/features/records/types';
-import type { SakeSpecs } from '../types';
+import { SPEC_FIELD_NAMES, type SakeSpecs } from '../types';
 
 const client = generateClient();
 
@@ -13,9 +13,13 @@ const client = generateClient();
  * 上書きしかねない。更新式は渡した項目だけを SET するため、埋める項目だけを
  * 送れば他は元のまま残る。
  *
- * **値の無い項目は送らない。** ここで null を送ると、利用者が手で入れた値まで
+ * 既定では**値の無い項目を送らない**。ここで null を送ると、利用者が手で入れた値まで
  * 消える。空欄で消せるのはフォームから明示的に消したときだけにする
- * （usePurchaseStorage の specsToUpdateInput がその役目を持つ）
+ * （usePurchaseStorage の specsToUpdateInput がその役目を持つ）。
+ *
+ * `replace` を渡したときだけ、読み取れなかった項目に null を送って丸ごと
+ * 入れ替える。写真から読み直して以前の値を正すための口で、間違って書き込まれた
+ * 値が残らないようにする
  *
  * 成功したかどうかだけを返す（失敗の理由は呼び出し側で使わないため）
  */
@@ -23,10 +27,12 @@ export async function updateRecordSpecs(
   id: string,
   type: RecordType,
   specs: Partial<SakeSpecs>,
+  { replace = false }: { replace?: boolean } = {},
 ): Promise<boolean> {
-  const filled = Object.fromEntries(
-    Object.entries(specs).filter(([, value]) => value != null),
-  );
+  const filled = replace
+    ? Object.fromEntries(SPEC_FIELD_NAMES.map((key) => [key, specs[key] ?? null]))
+    : Object.fromEntries(Object.entries(specs).filter(([, value]) => value != null));
+
   if (Object.keys(filled).length === 0) {
     return false;
   }

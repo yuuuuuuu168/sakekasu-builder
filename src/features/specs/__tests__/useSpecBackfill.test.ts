@@ -37,10 +37,22 @@ function record(overrides: Partial<UnifiedRecord> = {}): UnifiedRecord {
   };
 }
 
-/** 解析の応答を積む。null の項目は読めなかったぶん */
-function queueAnalyzed(specs: Record<string, unknown>) {
+/**
+ * 解析の応答を積む。null の項目は読めなかったぶん。
+ *
+ * 一括読み取りは確信度の低い項目を書かないので、値のある項目には十分な
+ * 確信度を添える（低確信度の扱いは専用のテストで見る）
+ */
+function queueAnalyzed(specs: Record<string, unknown>, confidence?: Record<string, number>) {
+  const fieldConfidence =
+    confidence ??
+    Object.fromEntries(
+      Object.entries(specs)
+        .filter(([, value]) => value != null)
+        .map(([key]) => [key, 0.95]),
+    );
   mockGraphql.mockResolvedValueOnce({
-    data: { analyzeSakeLabel: { sakeName: '獺祭 純米大吟醸', ...specs } },
+    data: { analyzeSakeLabel: { sakeName: '獺祭 純米大吟醸', ...specs, fieldConfidence } },
   });
 }
 
@@ -138,7 +150,7 @@ describe('useSpecBackfill', () => {
   it('銘柄名が読めない写真（裏ラベルのみ等）も読めなかった扱いになる', async () => {
     // 銘柄名が読めないと Lambda 側が他の項目も採用しないため、全項目 null で返る
     mockGraphql.mockResolvedValueOnce({
-      data: { analyzeSakeLabel: { sakeName: null, brewery: null } },
+      data: { analyzeSakeLabel: { sakeName: null, brewery: null, fieldConfidence: {} } },
     });
 
     const { result } = renderHook(() => useSpecBackfill([record()], vi.fn()));
@@ -228,5 +240,133 @@ describe('useSpecBackfill', () => {
     };
     expect(call.variables.imageKey).toBe('sub-1/purchase/p-1/front.jpg');
     expect(call.variables.additionalImageKeys).toEqual(['sub-1/purchase/p-1/back.jpg']);
+  });
+
+  it('確信度の低い項目は書き込まない（人の目を経ずに保存まで進むため）', async () => {
+    queueAnalyzed(
+      { brewery: '旭酒造株式会社', ricePolishingRatio: 23 },
+      { brewery: 0.95, ricePolishingRatio: 0.5 },
+    );
+    queueUpdated();
+
+    const { result } = renderHook(() => useSpecBackfill([record()], vi.fn()));
+    await act(async () => {
+      await result.current.run();
+    });
+
+    const input = lastInput();
+    expect(input.brewery).toBe('旭酒造株式会社');
+    expect('ricePolishingRatio' in input).toBe(false);
+  });
+
+  it('確信度がちょうど 0.7 の項目は書き込む（境界値）', async () => {
+    queueAnalyzed({ ricePolishingRatio: 23 }, { ricePolishingRatio: 0.7 });
+    queueUpdated();
+
+    const { result } = renderHook(() => useSpecBackfill([record()], vi.fn()));
+    await act(async () => {
+      await result.current.run();
+    });
+
+    expect(lastInput().ricePolishingRatio).toBe(23);
+  });
+
+  it('全項目が低確信度なら、読めなかった扱いで更新を投げない', async () => {
+    queueAnalyzed({ brewery: '旭酒造株式会社' }, { brewery: 0.4 });
+
+    const { result } = renderHook(() => useSpecBackfill([record()], vi.fn()));
+    await act(async () => {
+      const progress = await result.current.run();
+      expect(progress.written).toBe(0);
+    });
+
+    expect(mockGraphql).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Feature: 読み取りの精度を上げたあとに、以前の結果を正す
+describe('useSpecBackfill の読み直し', () => {
+  beforeEach(() => {
+    mockGraphql.mockReset();
+    localStorage.clear();
+  });
+
+  it('すでにスペックが入っている記録も対象にする', () => {
+    const { result } = renderHook(() =>
+      useSpecBackfill([record({ specs: pickSakeSpecs({ brewery: '誤った蔵元' }) })], vi.fn()),
+    );
+
+    expect(result.current.targets).toHaveLength(0);
+    expect(result.current.rereadTargets).toHaveLength(1);
+  });
+
+  it('読み取れなかった項目は空にして入れ替える（誤った値を残さない）', async () => {
+    queueAnalyzed({ brewery: '旭酒造株式会社' });
+    queueUpdated();
+
+    const { result } = renderHook(() =>
+      useSpecBackfill(
+        [record({ specs: pickSakeSpecs({ brewery: '誤った蔵元', ricePolishingRatio: 60 }) })],
+        vi.fn(),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.run({ reread: true });
+    });
+
+    const input = lastInput();
+    expect(input.brewery).toBe('旭酒造株式会社');
+    // 読めなかった項目は null を送って消す
+    expect(input.ricePolishingRatio).toBeNull();
+    expect(input.yeast).toBeNull();
+  });
+
+  it('何も読めなくても空で入れ替える', async () => {
+    queueAnalyzed({ brewery: null });
+    queueUpdated();
+
+    const { result } = renderHook(() =>
+      useSpecBackfill([record({ specs: pickSakeSpecs({ ricePolishingRatio: 60 }) })], vi.fn()),
+    );
+
+    await act(async () => {
+      await result.current.run({ reread: true });
+    });
+
+    expect(lastInput().ricePolishingRatio).toBeNull();
+  });
+
+  it('一度読み直したら案内を出さない（用が済んだあとも出し続けない）', async () => {
+    queueAnalyzed({ brewery: '旭酒造株式会社' });
+    queueUpdated();
+
+    const { result, rerender } = renderHook(() =>
+      useSpecBackfill([record({ specs: pickSakeSpecs({ brewery: '誤った蔵元' }) })], vi.fn()),
+    );
+
+    expect(result.current.rereadTargets).toHaveLength(1);
+
+    await act(async () => {
+      await result.current.run({ reread: true });
+    });
+
+    rerender();
+    expect(result.current.rereadTargets).toHaveLength(0);
+  });
+
+  it('読み直しでは、前回読めなかった控えも無視して対象にする', async () => {
+    // 1回目: 読めずに控えられる
+    queueAnalyzed({ brewery: null });
+    const { result, rerender } = renderHook(() => useSpecBackfill([record()], vi.fn()));
+
+    await act(async () => {
+      await result.current.run();
+    });
+    rerender();
+    expect(result.current.targets).toHaveLength(0);
+
+    // 読み直しの対象には残っている
+    expect(result.current.rereadTargets).toHaveLength(1);
   });
 });
