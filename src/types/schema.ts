@@ -7,6 +7,7 @@
  */
 
 import type { SakeCategory } from '@/features/purchase/types';
+import type { SakeSpecs } from '@/features/specs/types';
 
 // 飲みきりステータス
 export type DrinkingStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'FINISHED';
@@ -19,8 +20,9 @@ interface BaseRecord {
   updatedAt: string;
 }
 
-// PurchaseRecord モデル型
-export interface PurchaseRecordType extends BaseRecord {
+// PurchaseRecord モデル型。詳細スペック（Issue #87）は任意なので、
+// 項目を持たない既存の記録では SakeSpecs の各項目が null になる
+export interface PurchaseRecordType extends BaseRecord, SakeSpecs {
   sakeName: string;
   storeName: string;
   price: number;
@@ -40,7 +42,7 @@ export interface PurchaseRecordType extends BaseRecord {
 }
 
 // DrinkingRecord モデル型
-export interface DrinkingRecordType extends BaseRecord {
+export interface DrinkingRecordType extends BaseRecord, SakeSpecs {
   sakeName: string;
   placeName: string;
   price: number | null;

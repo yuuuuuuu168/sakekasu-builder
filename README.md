@@ -17,13 +17,14 @@
 | 飲みきりステータス管理 | 未開封 / 飲み中 / 飲みきり。まとめ買いは1本ずつ飲みきれる |
 | 開封後経過日数の表示 | 飲み中のカードに「開封から◯日」を出す |
 | 購入記録からの飲酒登録連携 | 「これを飲む」で在庫と飲酒記録が紐づく |
+| 詳細スペックの記録 | 蔵元・産地・度数・容量・精米歩合・日本酒度・酸度・アミノ酸度・酒米・酵母・特定名称・紹介文。全項目任意で、フォームでは折りたたみ（[#87](https://github.com/yuuuuuu168/sakekasu-builder/issues/87)） |
 
 ### 見つける・振り返る
 
 | 機能 | 補足 |
 |------|------|
 | 購入・飲酒記録の一覧表示 | |
-| 検索・フィルタ | キーワード横断検索・評価フィルタ・条件の保持・表記ゆれ吸収。価格帯と日付範囲は未対応（[#47](https://github.com/yuuuuuu168/sakekasu-builder/issues/47)） |
+| 検索・フィルタ | キーワード横断検索（蔵元・産地・酒米・酵母も対象）・評価フィルタ・条件の保持・表記ゆれ吸収。価格帯と日付範囲は未対応（[#47](https://github.com/yuuuuuu168/sakekasu-builder/issues/47)） |
 | 在庫本数サマリー | 一覧上部にウイスキー・日本酒の在庫本数を表示 |
 | 統計ダッシュボード | 月別飲酒量・カテゴリ別支出・お気に入り TOP。記録数が少なく実データでの表示確認は未実施 |
 | カレンダー表示 | 飲んだ日・買った日をドットで可視化（[#46](https://github.com/yuuuuuu168/sakekasu-builder/issues/46)） |
@@ -33,7 +34,7 @@
 
 | 機能 | 補足 |
 |------|------|
-| ラベル画像の OCR | 銘柄名・カテゴリ・産地・アルコール度数を抽出。項目ごとの確信度つき |
+| ラベル画像の OCR | 銘柄名・カテゴリに加え、裏ラベルの詳細スペック12項目を抽出。項目ごとの確信度つきで、低確信の項目は入力欄に「要確認」を出す（[#88](https://github.com/yuuuuuu168/sakekasu-builder/issues/88)） |
 | テイスティングノートの自動記載 | 購入登録の時点で備考に書き足す。ウイスキーは飲み方も。知らない銘柄は Tavily で調べてから書く。既存の記録は一覧から一括で追記できる |
 | 写真1枚で購入登録 | 画像を選ぶと自動で OCR が走る。価格・店名は手入力（[#49](https://github.com/yuuuuuu168/sakekasu-builder/issues/49)） |
 | ソムリエ相談 | 在庫相談・ペアリング・銘柄レコメンド・酒知識 Q&A（[#51](https://github.com/yuuuuuu168/sakekasu-builder/issues/51)） |
@@ -71,7 +72,6 @@
 
 | やりたいこと | メモ | Issue |
 |------------|------|-------|
-| 詳細スペック項目の記録 | 精米歩合・日本酒度・酒米・蔵元など。OCR が抽出済みの産地・度数にも保存先がない | [#87](https://github.com/yuuuuuu168/sakekasu-builder/issues/87) |
 | 価格履歴グラフ | 同銘柄の価格推移。既存データだけで実装できる見込み | [#45](https://github.com/yuuuuuu168/sakekasu-builder/issues/45) |
 | 検索・フィルタの残り | 価格帯・日付範囲。`RecordFilters` に条件を足す形 | [#47](https://github.com/yuuuuuu168/sakekasu-builder/issues/47) |
 | ウィッシュリスト | 新しい DynamoDB テーブルが要るぶん重い | [#50](https://github.com/yuuuuuu168/sakekasu-builder/issues/50) |
@@ -82,7 +82,6 @@
 
 | やりたいこと | メモ | Issue |
 |------------|------|-------|
-| ラベル OCR で詳細スペックも抽出 | #87 が前提 | [#88](https://github.com/yuuuuuu168/sakekasu-builder/issues/88) |
 | テイスティングノートの AI 改善提案 | 雑なメモを膨らませる。メモの質が上がるとソムリエの提案精度も上がる | [#89](https://github.com/yuuuuuu168/sakekasu-builder/issues/89) |
 | さけのわデータ API 連携 | 銘柄マスタとフレーバーチャート。無料・商用可・認証不要だが日本酒のみ | [#90](https://github.com/yuuuuuu168/sakekasu-builder/issues/90) |
 | ソムリエ Phase 2 | 外部情報連携（新発売情報・Web レビュー要約） | [#52](https://github.com/yuuuuuu168/sakekasu-builder/issues/52) |

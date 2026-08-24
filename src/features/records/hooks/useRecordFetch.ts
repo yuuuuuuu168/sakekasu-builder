@@ -8,6 +8,7 @@ import type {
   DrinkingRecordConnection,
 } from '@/types/schema';
 import { fetchAllPages, PAGE_LIMIT } from '@/lib/pagination';
+import { pickSakeSpecs } from '@/features/specs/lib/sakeSpecs';
 import type { UnifiedRecord } from '../types';
 
 const client = generateClient();
@@ -37,6 +38,7 @@ export function toPurchaseUnifiedRecord(
     date: record.purchaseDate,
     category: record.category,
     memo: record.memo ?? undefined,
+    specs: pickSakeSpecs(record),
     storeName: record.storeName,
     quantity: record.quantity ?? 1,
     // 残本数を持たない記録は quantity 側で補完する（bottleCount.ts が面倒をみる）
@@ -61,6 +63,7 @@ export function toDrinkingUnifiedRecord(
     date: record.drinkingDate,
     category: record.category,
     memo: record.memo ?? undefined,
+    specs: pickSakeSpecs(record),
     placeName: record.placeName,
     drinkingMethod: record.drinkingMethod,
     rating: record.rating,

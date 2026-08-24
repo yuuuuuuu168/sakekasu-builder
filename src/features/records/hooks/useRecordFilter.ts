@@ -34,7 +34,8 @@ export function filterRecords(
 }
 
 /**
- * キーワード検索の判定。酒名・店名・場所・飲み方・メモを横断して探す。
+ * キーワード検索の判定。酒名・店名・場所・飲み方・メモに加え、
+ * 詳細スペックの文字列項目（蔵元・産地・特定名称・酒米・酵母）も横断して探す。
  *
  * 酒名だけは曖昧検索にする（うろ覚えや部分入力から辿れるようにするため）。
  * 店名やメモまで曖昧検索にすると、離れた位置の文字が拾われて
@@ -65,7 +66,21 @@ function matchesOtherFields(
   query: string,
   transform: (text: string) => string,
 ): boolean {
-  const fields = [record.storeName, record.placeName, record.drinkingMethod, record.memo];
+  const specs = record.specs;
+  const fields = [
+    record.storeName,
+    record.placeName,
+    record.drinkingMethod,
+    record.memo,
+    // 詳細スペックのうち、探し方として意味のある文字列項目（Issue #87）。
+    // 紹介文はラベルの文章がそのまま入るため、検索対象にすると
+    // ありふれた語（「香り」など）で無関係な記録が並ぶので外す
+    specs?.brewery,
+    specs?.region,
+    specs?.specificName,
+    specs?.riceVariety,
+    specs?.yeast,
+  ];
   return fields.some((value) => value != null && transform(value).includes(query));
 }
 

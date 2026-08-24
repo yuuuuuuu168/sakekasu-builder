@@ -24,6 +24,8 @@ import { StarRating } from './StarRating';
 import { ImageUploadArea } from '@/features/image/components/ImageUploadArea';
 import { useOcrTrigger } from '@/features/image/hooks/useOcrTrigger';
 import { useImageUrls } from '@/features/image/hooks/useImageUrls';
+import { SakeSpecFields } from '@/features/specs/components/SakeSpecFields';
+import type { SakeSpecFormData } from '@/features/specs/types';
 import { getDrinkingMethodsByCategory, categoryRequiresDrinkingMethod } from '../types';
 import type { DrinkingFormData, StockDrinkDraft } from '../types';
 import type { SakeCategory } from '@/features/purchase/types';
@@ -39,6 +41,8 @@ interface DrinkingFormProps {
   recordId?: string;
   /** 編集モードでのフォーム初期値 */
   initialData?: DrinkingFormData;
+  /** 編集モードでの詳細スペック初期値 */
+  initialSpecs?: SakeSpecFormData;
   /** 在庫（購入記録）から登録する場合の紐づけ情報 */
   stockDraft?: StockDrinkDraft | null;
   /** 在庫からの登録完了・紐づけ解除の通知 */
@@ -53,6 +57,7 @@ export function DrinkingForm({
   onSubmitSuccess,
   recordId,
   initialData,
+  initialSpecs,
   stockDraft,
   onStockDraftClear,
   existingImageKey,
@@ -69,9 +74,11 @@ export function DrinkingForm({
     successMessage,
     errorMessage,
     imageUpload,
+    specs,
   } = useDrinkingForm({
     recordId,
     initialData,
+    initialSpecs,
     stockDraft,
     onStockDrinkSaved: onStockDraftClear,
     existingImageKey,
@@ -95,6 +102,9 @@ export function DrinkingForm({
       if (info.category && (!isAuto || !categoryTouchedRef.current)) {
         handleChange('category', info.category);
       }
+      // 産地・度数を含む詳細スペックはそれぞれの入力欄へ入れる（Issue #87・#88）。
+      // 自動実行では入力済みの項目を残す
+      specs.applyOcrResult(info.specs, info.lowConfidenceSpecFields, { overwrite: !isAuto });
     },
   );
 
@@ -304,6 +314,17 @@ export function DrinkingForm({
             rows={3}
           />
         </FormField>
+
+        {/* 詳細スペック（任意）。既定は折りたたみ、入力済みや読み取り結果があれば開く */}
+        <SakeSpecFields
+          specs={specs.specs}
+          errors={specs.specErrors}
+          category={formData.category}
+          onChange={specs.handleSpecChange}
+          onBlur={specs.handleSpecBlur}
+          disabled={isSubmitting}
+          lowConfidenceFields={specs.lowConfidenceSpecFields}
+        />
 
         {/* 登録ボタン */}
         <MotionButton

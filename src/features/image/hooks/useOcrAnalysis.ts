@@ -2,22 +2,28 @@ import { useState, useCallback } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { analyzeSakeLabel } from '@/graphql/mutations';
 import type { SakeCategory } from '@/features/purchase/types';
+import type { SakeSpecs, SpecFieldName } from '@/features/specs/types';
 
 const client = generateClient();
 
-/** 項目ごとの確信度（0.0〜1.0）。低確信の項目は「要確認」表示に使う */
-export interface OcrFieldConfidence {
+/**
+ * 項目ごとの確信度（0.0〜1.0）。低確信の項目は「要確認」表示に使う。
+ * 詳細スペック（Issue #88）の項目もここに並ぶ
+ */
+export type OcrFieldConfidence = {
   sakeName: number;
   category: number;
-  region: number;
-  alcoholPercentage: number;
-}
+} & Record<SpecFieldName, number>;
 
-export interface OcrResult {
+/**
+ * OCR の解析結果。
+ *
+ * 詳細スペックの項目名は記録側（SakeSpecs / Issue #87）と同じなので、
+ * そのまま保存先のフィールドへ渡せる
+ */
+export interface OcrResult extends SakeSpecs {
   sakeName: string | null;
   category: SakeCategory | null;
-  region: string | null;
-  alcoholPercentage: number | null;
   confidence: number;
   fieldConfidence: OcrFieldConfidence;
 }

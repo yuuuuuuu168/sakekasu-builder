@@ -1,6 +1,8 @@
 import type { UnifiedRecord } from '../types';
 import type { PurchaseFormData } from '@/features/purchase/types';
 import type { DrinkingFormData } from '@/features/drinking/types';
+import type { SakeSpecFormData } from '@/features/specs/types';
+import { specsToFormData } from '@/features/specs/lib/sakeSpecs';
 
 /** 統合記録（購入）を購入フォームの入力値に変換する */
 export function unifiedToPurchaseFormData(record: UnifiedRecord): PurchaseFormData {
@@ -27,4 +29,9 @@ export function unifiedToDrinkingFormData(record: UnifiedRecord): DrinkingFormDa
     rating: record.rating ?? 0,
     memo: record.memo ?? '',
   };
+}
+
+/** 統合記録の詳細スペックをフォームの入力値に変換する（Issue #87） */
+export function unifiedToSpecFormData(record: UnifiedRecord): SakeSpecFormData {
+  return specsToFormData(record.specs);
 }
