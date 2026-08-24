@@ -1,7 +1,16 @@
 // Feature: ocr-tool-use-confidence（Issue #60）: tool use 構造化出力 + 項目ごとの確信度
 
 import { describe, it, expect } from 'vitest';
-import { extractLabelInfo } from '../extractLabelInfo.js';
+import { extractLabelInfo, SPEC_FIELD_NAMES } from '../extractLabelInfo.js';
+
+/** 詳細スペック（Issue #88）を含めた、全項目 0 の確信度 */
+const zeroConfidence = () => ({
+  sakeName: 0,
+  category: 0,
+  region: 0,
+  alcoholPercentage: 0,
+  ...Object.fromEntries(SPEC_FIELD_NAMES.map((field) => [field, 0])),
+});
 
 /** 全項目が揃った正常系の tool input */
 const validInput = {
@@ -25,6 +34,7 @@ describe('extractLabelInfo: tool input からの抽出', () => {
     expect(result.region).toBe('山口県');
     expect(result.alcoholPercentage).toBe(16);
     expect(result.fieldConfidence).toEqual({
+      ...zeroConfidence(),
       sakeName: 0.95,
       category: 0.9,
       region: 0.8,
@@ -130,12 +140,7 @@ describe('extractLabelInfo: tool input からの抽出', () => {
     expect(result.region).toBeNull();
     expect(result.alcoholPercentage).toBeNull();
     expect(result.confidence).toBe(0.0);
-    expect(result.fieldConfidence).toEqual({
-      sakeName: 0,
-      category: 0,
-      region: 0,
-      alcoholPercentage: 0,
-    });
+    expect(result.fieldConfidence).toEqual(zeroConfidence());
   });
 
   it('sakeName が空白のみの場合も未検出扱いになる', () => {
@@ -258,5 +263,134 @@ describe('extractLabelInfo: tool input からの抽出', () => {
     expect(result.category).toBe('NIHONSHU');
     expect(result.alcoholPercentage).toBe(16);
     expect(result.rawTexts[0]).not.toContain('INJECTED');
+  });
+});
+
+// Feature: 詳細スペックの自動抽出（Issue #88）
+describe('extractLabelInfo: 詳細スペックの抽出', () => {
+  /** 裏ラベルの詳細スペックまで揃った tool input */
+  const specInput = {
+    ...validInput,
+    brewery: '旭酒造株式会社',
+    breweryConfidence: 0.9,
+    volumeMl: 720,
+    volumeMlConfidence: 0.95,
+    specificName: '純米大吟醸',
+    specificNameConfidence: 0.9,
+    ricePolishingRatio: 23,
+    ricePolishingRatioConfidence: 0.88,
+    sakeMeterValue: -1.5,
+    sakeMeterValueConfidence: 0.7,
+    acidity: 1.4,
+    acidityConfidence: 0.75,
+    aminoAcidity: 1.2,
+    aminoAcidityConfidence: 0.6,
+    riceVariety: '山田錦',
+    riceVarietyConfidence: 0.92,
+    yeast: '協会9号',
+    yeastConfidence: 0.5,
+    labelDescription: '洗練された香りと透明感のある味わい。',
+    labelDescriptionConfidence: 0.8,
+  };
+
+  it('全項目が揃った input から詳細スペックと確信度を抽出できる', () => {
+    const result = extractLabelInfo(specInput);
+
+    expect(result.brewery).toBe('旭酒造株式会社');
+    expect(result.volumeMl).toBe(720);
+    expect(result.specificName).toBe('純米大吟醸');
+    expect(result.ricePolishingRatio).toBe(23);
+    expect(result.sakeMeterValue).toBe(-1.5);
+    expect(result.acidity).toBe(1.4);
+    expect(result.aminoAcidity).toBe(1.2);
+    expect(result.riceVariety).toBe('山田錦');
+    expect(result.yeast).toBe('協会9号');
+    expect(result.labelDescription).toBe('洗練された香りと透明感のある味わい。');
+    expect(result.fieldConfidence.brewery).toBe(0.9);
+    expect(result.fieldConfidence.ricePolishingRatio).toBe(0.88);
+    expect(result.fieldConfidence.yeast).toBe(0.5);
+  });
+
+  it('詳細スペックが未対応の input（項目が無い）でも従来どおり動く', () => {
+    const result = extractLabelInfo(validInput);
+
+    expect(result.sakeName).toBe('獺祭');
+    for (const field of SPEC_FIELD_NAMES) {
+      expect(result[field]).toBeNull();
+      expect(result.fieldConfidence[field]).toBe(0);
+    }
+  });
+
+  it('値が読み取れなかった項目の確信度は 0 に強制される', () => {
+    const result = extractLabelInfo({ ...specInput, riceVariety: null });
+
+    expect(result.riceVariety).toBeNull();
+    expect(result.fieldConfidence.riceVariety).toBe(0);
+  });
+
+  it('範囲外の数値は採用しない', () => {
+    expect(extractLabelInfo({ ...specInput, ricePolishingRatio: 0 }).ricePolishingRatio).toBeNull();
+    expect(extractLabelInfo({ ...specInput, ricePolishingRatio: 120 }).ricePolishingRatio).toBeNull();
+    expect(extractLabelInfo({ ...specInput, volumeMl: 0 }).volumeMl).toBeNull();
+    expect(extractLabelInfo({ ...specInput, volumeMl: 99999 }).volumeMl).toBeNull();
+    // 0 は「読み取れなかった」のモデル表現なので酸度としては採らない
+    expect(extractLabelInfo({ ...specInput, acidity: 0 }).acidity).toBeNull();
+    expect(extractLabelInfo({ ...specInput, aminoAcidity: 0 }).aminoAcidity).toBeNull();
+  });
+
+  it('日本酒度は 0 と負の値を正当な値として受け付ける', () => {
+    expect(extractLabelInfo({ ...specInput, sakeMeterValue: 0 }).sakeMeterValue).toBe(0);
+    expect(extractLabelInfo({ ...specInput, sakeMeterValue: -8 }).sakeMeterValue).toBe(-8);
+  });
+
+  it('容量・精米歩合は整数に丸める', () => {
+    expect(extractLabelInfo({ ...specInput, volumeMl: 719.6 }).volumeMl).toBe(720);
+    expect(extractLabelInfo({ ...specInput, ricePolishingRatio: 49.8 }).ricePolishingRatio).toBe(50);
+  });
+
+  it('文字列で返された数値も数値に変換される', () => {
+    expect(extractLabelInfo({ ...specInput, ricePolishingRatio: '50' }).ricePolishingRatio).toBe(50);
+    expect(extractLabelInfo({ ...specInput, sakeMeterValue: '+3' }).sakeMeterValue).toBe(3);
+  });
+
+  it('数値として読めない文字列は null になる', () => {
+    expect(extractLabelInfo({ ...specInput, acidity: '不明' }).acidity).toBeNull();
+    expect(extractLabelInfo({ ...specInput, volumeMl: {} }).volumeMl).toBeNull();
+  });
+
+  it('紹介文からも危険文字が除去される（ラベルの文章がそのまま渡る唯一の項目）', () => {
+    const result = extractLabelInfo({
+      ...specInput,
+      labelDescription: '<script>alert(1)</script>爽やかな飲み口',
+    });
+
+    expect(result.labelDescription).not.toMatch(/[<>]/);
+    expect(result.labelDescription).toContain('爽やかな飲み口');
+    expect(result.rawTexts[0]).not.toContain('<script');
+  });
+
+  it('紹介文は 300 文字で切り詰められる', () => {
+    const result = extractLabelInfo({ ...specInput, labelDescription: 'あ'.repeat(500) });
+
+    expect(result.labelDescription).toHaveLength(300);
+  });
+
+  it('sakeName が読み取れないときは詳細スペックも採用しない', () => {
+    const result = extractLabelInfo({ ...specInput, sakeName: null });
+
+    for (const field of SPEC_FIELD_NAMES) {
+      expect(result[field]).toBeNull();
+    }
+    expect(result.rawTexts).toEqual([]);
+  });
+
+  it('rawTexts には詳細スペックの報告値も含まれる（想定外フィールドは含まれない）', () => {
+    const result = extractLabelInfo({ ...specInput, unexpectedField: 'LEAK' });
+    const raw = JSON.parse(result.rawTexts[0]);
+
+    expect(raw.brewery).toBe('旭酒造株式会社');
+    expect(raw.breweryConfidence).toBe(0.9);
+    expect(raw).not.toHaveProperty('unexpectedField');
+    expect(raw).not.toHaveProperty('labelTexts');
   });
 });

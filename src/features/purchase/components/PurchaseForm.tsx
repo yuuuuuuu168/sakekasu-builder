@@ -20,7 +20,8 @@ import type { BottleStock } from '@/features/records/lib/bottleCount';
 import { ImageUploadArea } from '@/features/image/components/ImageUploadArea';
 import { useOcrTrigger } from '@/features/image/hooks/useOcrTrigger';
 import { useImageUrls } from '@/features/image/hooks/useImageUrls';
-import { appendLabelInfoToMemo } from '@/features/image/lib/ocrLabelInfo';
+import { SakeSpecFields } from '@/features/specs/components/SakeSpecFields';
+import type { SakeSpecFormData } from '@/features/specs/types';
 
 const MotionButton = motion.create(Button);
 
@@ -33,6 +34,8 @@ interface PurchaseFormProps {
   recordId?: string;
   /** 編集モードでのフォーム初期値 */
   initialData?: PurchaseFormData;
+  /** 編集モードでの詳細スペック初期値 */
+  initialSpecs?: SakeSpecFormData;
   /** 編集対象が既に持っている代表画像キー */
   existingImageKey?: string | null;
   /** 編集対象が既に持っている画像キー一覧 */
@@ -45,6 +48,7 @@ export function PurchaseForm({
   onSubmitSuccess,
   recordId,
   initialData,
+  initialSpecs,
   existingImageKey,
   existingImageKeys,
   existingBottles,
@@ -60,7 +64,15 @@ export function PurchaseForm({
     handleBlur,
     handleSubmit,
     imageUpload,
-  } = usePurchaseForm({ recordId, initialData, existingImageKey, existingImageKeys, existingBottles });
+    specs,
+  } = usePurchaseForm({
+    recordId,
+    initialData,
+    initialSpecs,
+    existingImageKey,
+    existingImageKeys,
+    existingBottles,
+  });
 
   // 編集時は「今ある写真の続きに足す」と分かるよう、登録済みの画像も並べる
   const { imageUrls: existingImageUrls } = useImageUrls(existingImageKeys ?? EMPTY_KEYS);
@@ -79,8 +91,9 @@ export function PurchaseForm({
       if (info.category && (!isAuto || !categoryTouchedRef.current)) {
         handleChange('category', info.category);
       }
-      // メモは既存の入力を消さずに産地・度数の行を追記する（重複追記は appendLabelInfoToMemo 側で防止）
-      handleChange('memo', appendLabelInfoToMemo(formData.memo, info));
+      // 産地・度数を含む詳細スペックはそれぞれの入力欄へ入れる（Issue #87・#88）。
+      // 自動実行では入力済みの項目を残す
+      specs.applyOcrResult(info.specs, info.lowConfidenceSpecFields, { overwrite: !isAuto });
     },
   );
 
@@ -256,6 +269,17 @@ export function PurchaseForm({
           rows={3}
         />
       </FormField>
+
+      {/* 詳細スペック（任意）。既定は折りたたみ、入力済みや読み取り結果があれば開く */}
+      <SakeSpecFields
+        specs={specs.specs}
+        errors={specs.specErrors}
+        category={formData.category}
+        onChange={specs.handleSpecChange}
+        onBlur={specs.handleSpecBlur}
+        disabled={isSubmitting}
+        lowConfidenceFields={specs.lowConfidenceSpecFields}
+      />
 
       {/* 登録ボタン */}
       <MotionButton

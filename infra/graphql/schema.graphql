@@ -33,6 +33,32 @@ type PurchaseRecord {
   imageKeys: [String]
   drinkingStatus: DrinkingStatus
   openedAt: AWSDateTime
+
+  # --- 詳細スペック（Issue #87）。すべて任意。銘柄名だけの記録もこれまで通り作れる ---
+  # 蔵元（酒造名）。住所や所在地は含めない
+  brewery: String
+  # 産地の都道府県名または国名
+  region: String
+  # アルコール度数（%）
+  alcoholPercentage: Float
+  # 容量（ml）
+  volumeMl: Int
+  # 特定名称（純米大吟醸など）。銘柄名にも含まれるが、絞り込みに使えるよう単独でも持つ
+  specificName: String
+  # 精米歩合（%）
+  ricePolishingRatio: Int
+  # 日本酒度。甘口側は負の値になる
+  sakeMeterValue: Float
+  # 酸度
+  acidity: Float
+  # アミノ酸度
+  aminoAcidity: Float
+  # 酒米（品種名）
+  riceVariety: String
+  # 酵母
+  yeast: String
+  # ラベルに書かれた紹介文
+  labelDescription: String
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
 }
@@ -53,6 +79,32 @@ type DrinkingRecord {
   imageKeys: [String]
   # 在庫（購入記録）から登録した場合の紐づけ先。手入力の記録では null
   purchaseRecordId: ID
+
+  # --- 詳細スペック（Issue #87）。すべて任意。銘柄名だけの記録もこれまで通り作れる ---
+  # 蔵元（酒造名）。住所や所在地は含めない
+  brewery: String
+  # 産地の都道府県名または国名
+  region: String
+  # アルコール度数（%）
+  alcoholPercentage: Float
+  # 容量（ml）
+  volumeMl: Int
+  # 特定名称（純米大吟醸など）。銘柄名にも含まれるが、絞り込みに使えるよう単独でも持つ
+  specificName: String
+  # 精米歩合（%）
+  ricePolishingRatio: Int
+  # 日本酒度。甘口側は負の値になる
+  sakeMeterValue: Float
+  # 酸度
+  acidity: Float
+  # アミノ酸度
+  aminoAcidity: Float
+  # 酒米（品種名）
+  riceVariety: String
+  # 酵母
+  yeast: String
+  # ラベルに書かれた紹介文
+  labelDescription: String
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
 }
@@ -87,20 +139,43 @@ type PresignedUrlResponse {
     )
 }
 
-# OCR 項目ごとの確信度（0.0〜1.0）。低確信の項目はフォーム側で「要確認」表示に使う
+# OCR 項目ごとの確信度（0.0〜1.0）。低確信の項目はフォーム側で「要確認」表示に使う。
+# 項目が読み取れなかった（null の）ときは必ず 0.0 が入る
 type OcrFieldConfidence {
   sakeName: Float!
   category: Float!
   region: Float!
   alcoholPercentage: Float!
+  # 以下は詳細スペックの自動抽出ぶん（Issue #88）
+  brewery: Float!
+  volumeMl: Float!
+  specificName: Float!
+  ricePolishingRatio: Float!
+  sakeMeterValue: Float!
+  acidity: Float!
+  aminoAcidity: Float!
+  riceVariety: Float!
+  yeast: Float!
+  labelDescription: Float!
 }
 
-# OCR 解析結果型
+# OCR 解析結果型。詳細スペックの項目名は PurchaseRecord / DrinkingRecord と揃えてある
 type OcrResult {
   sakeName: String
   category: SakeCategory
   region: String
   alcoholPercentage: Float
+  # --- 詳細スペック（Issue #88）。裏ラベルから読み取れたものだけ値が入る ---
+  brewery: String
+  volumeMl: Int
+  specificName: String
+  ricePolishingRatio: Int
+  sakeMeterValue: Float
+  acidity: Float
+  aminoAcidity: Float
+  riceVariety: String
+  yeast: String
+  labelDescription: String
   # 後方互換の総合確信度（= fieldConfidence.sakeName）
   confidence: Float!
   fieldConfidence: OcrFieldConfidence!
@@ -186,6 +261,32 @@ input CreatePurchaseRecordInput {
   # リゾルバーの検証が null を触って実行時エラーになる
   imageKeys: [String!]
   drinkingStatus: DrinkingStatus
+
+  # --- 詳細スペック（Issue #87）。すべて任意。銘柄名だけの記録もこれまで通り作れる ---
+  # 蔵元（酒造名）。住所や所在地は含めない
+  brewery: String
+  # 産地の都道府県名または国名
+  region: String
+  # アルコール度数（%）
+  alcoholPercentage: Float
+  # 容量（ml）
+  volumeMl: Int
+  # 特定名称（純米大吟醸など）。銘柄名にも含まれるが、絞り込みに使えるよう単独でも持つ
+  specificName: String
+  # 精米歩合（%）
+  ricePolishingRatio: Int
+  # 日本酒度。甘口側は負の値になる
+  sakeMeterValue: Float
+  # 酸度
+  acidity: Float
+  # アミノ酸度
+  aminoAcidity: Float
+  # 酒米（品種名）
+  riceVariety: String
+  # 酵母
+  yeast: String
+  # ラベルに書かれた紹介文
+  labelDescription: String
 }
 
 # 購入記録更新用 Input（id は必須、他はオプション）
@@ -206,6 +307,32 @@ input UpdatePurchaseRecordInput {
   # 要素は非 null（[String] だと [null] を受け付け、検証が実行時エラーになる）
   imageKey: String
   imageKeys: [String!]
+
+  # --- 詳細スペック（Issue #87）。すべて任意。銘柄名だけの記録もこれまで通り作れる ---
+  # 蔵元（酒造名）。住所や所在地は含めない
+  brewery: String
+  # 産地の都道府県名または国名
+  region: String
+  # アルコール度数（%）
+  alcoholPercentage: Float
+  # 容量（ml）
+  volumeMl: Int
+  # 特定名称（純米大吟醸など）。銘柄名にも含まれるが、絞り込みに使えるよう単独でも持つ
+  specificName: String
+  # 精米歩合（%）
+  ricePolishingRatio: Int
+  # 日本酒度。甘口側は負の値になる
+  sakeMeterValue: Float
+  # 酸度
+  acidity: Float
+  # アミノ酸度
+  aminoAcidity: Float
+  # 酒米（品種名）
+  riceVariety: String
+  # 酵母
+  yeast: String
+  # ラベルに書かれた紹介文
+  labelDescription: String
 }
 
 # 飲酒記録作成用 Input（id, owner, createdAt, updatedAt は自動生成）
@@ -222,6 +349,32 @@ input CreateDrinkingRecordInput {
   # 要素は非 null（CreatePurchaseRecordInput と同じ理由）
   imageKeys: [String!]
   purchaseRecordId: ID
+
+  # --- 詳細スペック（Issue #87）。すべて任意。銘柄名だけの記録もこれまで通り作れる ---
+  # 蔵元（酒造名）。住所や所在地は含めない
+  brewery: String
+  # 産地の都道府県名または国名
+  region: String
+  # アルコール度数（%）
+  alcoholPercentage: Float
+  # 容量（ml）
+  volumeMl: Int
+  # 特定名称（純米大吟醸など）。銘柄名にも含まれるが、絞り込みに使えるよう単独でも持つ
+  specificName: String
+  # 精米歩合（%）
+  ricePolishingRatio: Int
+  # 日本酒度。甘口側は負の値になる
+  sakeMeterValue: Float
+  # 酸度
+  acidity: Float
+  # アミノ酸度
+  aminoAcidity: Float
+  # 酒米（品種名）
+  riceVariety: String
+  # 酵母
+  yeast: String
+  # ラベルに書かれた紹介文
+  labelDescription: String
 }
 
 # 飲酒記録更新用 Input（id は必須、他はオプション）
@@ -240,4 +393,30 @@ input UpdateDrinkingRecordInput {
   # 要素は非 null（[String] だと [null] を受け付け、検証が実行時エラーになる）
   imageKey: String
   imageKeys: [String!]
+
+  # --- 詳細スペック（Issue #87）。すべて任意。銘柄名だけの記録もこれまで通り作れる ---
+  # 蔵元（酒造名）。住所や所在地は含めない
+  brewery: String
+  # 産地の都道府県名または国名
+  region: String
+  # アルコール度数（%）
+  alcoholPercentage: Float
+  # 容量（ml）
+  volumeMl: Int
+  # 特定名称（純米大吟醸など）。銘柄名にも含まれるが、絞り込みに使えるよう単独でも持つ
+  specificName: String
+  # 精米歩合（%）
+  ricePolishingRatio: Int
+  # 日本酒度。甘口側は負の値になる
+  sakeMeterValue: Float
+  # 酸度
+  acidity: Float
+  # アミノ酸度
+  aminoAcidity: Float
+  # 酒米（品種名）
+  riceVariety: String
+  # 酵母
+  yeast: String
+  # ラベルに書かれた紹介文
+  labelDescription: String
 }

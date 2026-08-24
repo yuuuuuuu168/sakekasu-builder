@@ -96,7 +96,9 @@ describe('usePurchaseForm の編集モードでの画像追加', () => {
 
     expect(mockUploadImages).not.toHaveBeenCalled();
     // 既存のキーを維持するため、画像の項目自体を送らない
-    expect(updateOptions()).toBeUndefined();
+    // （詳細スペックは毎回送るので、options そのものは undefined にならない）
+    expect(updateOptions()).not.toHaveProperty('imageKey');
+    expect(updateOptions()).not.toHaveProperty('imageKeys');
   });
 
   it('追加した画像を既存キーの後ろに足す', async () => {

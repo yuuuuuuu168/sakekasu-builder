@@ -7,6 +7,9 @@ import { useTastingNote } from '@/features/tasting/hooks/useTastingNote';
 import type { UseFormValidationReturn } from '@/features/purchase/hooks/useFormValidation';
 import type { UsePurchaseStorageReturn } from '@/features/purchase/hooks/usePurchaseStorage';
 import type { UseImageUploadReturn } from '@/features/image/hooks/useImageUpload';
+import { useSakeSpecs } from '@/features/specs/hooks/useSakeSpecs';
+import type { UseSakeSpecsReturn } from '@/features/specs/hooks/useSakeSpecs';
+import type { SakeSpecFormData } from '@/features/specs/types';
 import { getTodayString } from '@/lib/dateUtils';
 import { remainingAfterQuantityChange, toBottleCount } from '@/features/records/lib/bottleCount';
 import type { BottleStock } from '@/features/records/lib/bottleCount';
@@ -16,6 +19,8 @@ export interface UsePurchaseFormOptions {
   recordId?: string;
   /** フォームの初期値（編集モードでのプリフィル用） */
   initialData?: PurchaseFormData;
+  /** 詳細スペックの初期値（編集モードでのプリフィル用。Issue #87） */
+  initialSpecs?: SakeSpecFormData;
   /** 編集対象が既に持っている代表画像キー */
   existingImageKey?: string | null;
   /** 編集対象が既に持っている画像キー一覧。追加分はこの後ろに足す */
@@ -39,6 +44,8 @@ export interface UsePurchaseFormReturn {
   handleSubmit: () => Promise<void>;
   /** 画像アップロード関連 */
   imageUpload: UseImageUploadReturn;
+  /** 詳細スペック（任意項目）の入力状態 */
+  specs: UseSakeSpecsReturn;
 }
 
 export function getInitialFormData(): PurchaseFormData {
@@ -57,6 +64,7 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
   const {
     recordId,
     initialData,
+    initialSpecs,
     existingImageKey = null,
     existingImageKeys,
     existingBottles,
@@ -75,6 +83,7 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
   const { savePurchase, updatePurchase, isSaving } = usePurchaseStorage();
   const imageUpload = useImageUpload({ alreadyAttached });
   const { fillMemo, isGenerating: isGeneratingNote } = useTastingNote();
+  const specs = useSakeSpecs(initialSpecs);
 
   const handleChange = useCallback(
     (field: keyof PurchaseFormData, value: string) => {
@@ -93,7 +102,11 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
   const handleSubmit = useCallback(async () => {
     setSubmitResult(null);
 
-    if (!isValid(formData)) {
+    // 詳細スペックの検証も通してから保存する。
+    // isValid は必ず呼んでエラー表示を更新したいので、|| の短絡に頼らず両方評価する
+    const isBaseValid = isValid(formData);
+    const isSpecValid = specs.validateSpecs();
+    if (!isBaseValid || !isSpecValid) {
       return;
     }
 
@@ -122,7 +135,10 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
     if (isEditMode) {
       if (imageUpload.imageFiles.length === 0) {
         // 画像に触っていない更新では画像の項目自体を送らない（既存キーを維持する）
-        const result = await updatePurchase(recordId, dataToSave, remainingUpdate);
+        const result = await updatePurchase(recordId, dataToSave, {
+          ...remainingUpdate,
+          specs: specs.specs,
+        });
         setSubmitResult(result);
         return;
       }
@@ -141,6 +157,7 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
         imageKey: existingImageKey ?? uploaded[0] ?? null,
         imageKeys: merged,
         ...remainingUpdate,
+        specs: specs.specs,
       });
 
       if (result.success) {
@@ -164,11 +181,12 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
       imageKey = imageKeys[0] ?? null;
     }
 
-    const result = await savePurchase(dataToSave, { imageKey, imageKeys });
+    const result = await savePurchase(dataToSave, { imageKey, imageKeys, specs: specs.specs });
 
     if (result.success) {
       setFormData(getInitialFormData());
       clearErrors();
+      specs.resetSpecs();
       imageUpload.clearImage();
       setSubmitResult({ success: true });
     } else {
@@ -187,6 +205,7 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
     existingImageKeys,
     existingBottles,
     fillMemo,
+    specs,
   ]);
 
   return {
@@ -199,5 +218,6 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
     handleBlur,
     handleSubmit,
     imageUpload,
+    specs,
   };
 }
