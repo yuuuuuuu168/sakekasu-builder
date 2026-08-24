@@ -13,6 +13,8 @@ import { LoadingState } from './LoadingState';
 import { ErrorState } from './ErrorState';
 import { ImageModal } from '@/features/image/components/ImageModal';
 import { TastingNoteBackfill } from '@/features/tasting/components/TastingNoteBackfill';
+import { SpecBackfill } from '@/features/specs/components/SpecBackfill';
+import type { SakeSpecs } from '@/features/specs/types';
 import { buildLinkedDrinkingIndex } from '../lib/linkedDrinking';
 import type { UnifiedRecord } from '../types';
 
@@ -74,6 +76,14 @@ export function RecordListPage({ onDrinkFromStock }: RecordListPageProps = {}) {
     [patchRecord],
   );
 
+  // 一括で読み取った詳細スペックを、再取得を待たずに一覧へ反映する
+  const handleSpecsUpdated = useCallback(
+    (id: string, specs: SakeSpecs) => {
+      patchRecord(id, { specs });
+    },
+    [patchRecord],
+  );
+
   // 編集ダイアログの状態管理
   const [editingRecord, setEditingRecord] = useState<UnifiedRecord | null>(null);
 
@@ -126,6 +136,13 @@ export function RecordListPage({ onDrinkFromStock }: RecordListPageProps = {}) {
         {!isLoading && !error && (
           <div className="mb-4 empty:mb-0">
             <TastingNoteBackfill records={allRecords} onMemoUpdated={handleMemoUpdated} />
+          </div>
+        )}
+
+        {/* 詳細スペックを持つより前の記録へ、写真から読み取って書き込む案内 */}
+        {!isLoading && !error && (
+          <div className="mb-4 empty:mb-0">
+            <SpecBackfill records={allRecords} onSpecsUpdated={handleSpecsUpdated} />
           </div>
         )}
 
