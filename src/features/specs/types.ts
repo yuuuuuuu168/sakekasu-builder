@@ -188,5 +188,13 @@ export function specFieldsForCategory(category: SakeCategory): SpecFieldDef[] {
   return SPEC_FIELDS.filter((field) => !field.nihonshuOnly || category === 'NIHONSHU');
 }
 
+/**
+ * この値未満の確信度は「要確認」として扱う。
+ *
+ * 登録時の OCR では入力欄に印を付けるだけだが、一括読み取りでは人の目を経ずに
+ * 保存まで進むので、この線より下の項目は書き込まない
+ */
+export const LOW_CONFIDENCE_THRESHOLD = 0.7;
+
 /** 詳細スペックの入力エラー。キーは項目名 */
 export type SpecValidationErrors = Partial<Record<SpecFieldName, string>>;

@@ -268,9 +268,23 @@ describe('extractLabelInfo: tool input からの抽出', () => {
 
 // Feature: 詳細スペックの自動抽出（Issue #88）
 describe('extractLabelInfo: 詳細スペックの抽出', () => {
-  /** 裏ラベルの詳細スペックまで揃った tool input */
+  /**
+   * 裏ラベルの詳細スペックまで揃った tool input。
+   *
+   * 照合（GROUNDED_SPEC_FIELDS）を通すため、採る値はラベルの転記にも入れておく。
+   * 照合そのものは「転記テキストとの照合」の describe で見る
+   */
   const specInput = {
     ...validInput,
+    labelTexts: [
+      '獺祭 純米大吟醸',
+      '精米歩合 23%',
+      '日本酒度 -1.5',
+      '酸度 1.4',
+      'アミノ酸度 1.2',
+      '原料米 山田錦',
+      '酵母 協会9号',
+    ],
     brewery: '旭酒造株式会社',
     breweryConfidence: 0.9,
     volumeMl: 720,
@@ -339,18 +353,37 @@ describe('extractLabelInfo: 詳細スペックの抽出', () => {
   });
 
   it('日本酒度は 0 と負の値を正当な値として受け付ける', () => {
-    expect(extractLabelInfo({ ...specInput, sakeMeterValue: 0 }).sakeMeterValue).toBe(0);
-    expect(extractLabelInfo({ ...specInput, sakeMeterValue: -8 }).sakeMeterValue).toBe(-8);
+    const withValue = (value: number) => ({
+      ...specInput,
+      labelTexts: [`日本酒度 ${value}`],
+      sakeMeterValue: value,
+    });
+
+    expect(extractLabelInfo(withValue(0)).sakeMeterValue).toBe(0);
+    expect(extractLabelInfo(withValue(-8)).sakeMeterValue).toBe(-8);
   });
 
   it('容量・精米歩合は整数に丸める', () => {
     expect(extractLabelInfo({ ...specInput, volumeMl: 719.6 }).volumeMl).toBe(720);
-    expect(extractLabelInfo({ ...specInput, ricePolishingRatio: 49.8 }).ricePolishingRatio).toBe(50);
+    expect(
+      extractLabelInfo({
+        ...specInput,
+        labelTexts: ['精米歩合 49.8%'],
+        ricePolishingRatio: 49.8,
+      }).ricePolishingRatio,
+    ).toBe(50);
   });
 
   it('文字列で返された数値も数値に変換される', () => {
-    expect(extractLabelInfo({ ...specInput, ricePolishingRatio: '50' }).ricePolishingRatio).toBe(50);
-    expect(extractLabelInfo({ ...specInput, sakeMeterValue: '+3' }).sakeMeterValue).toBe(3);
+    const texts = ['精米歩合 50%', '日本酒度 +3'];
+
+    expect(
+      extractLabelInfo({ ...specInput, labelTexts: texts, ricePolishingRatio: '50' })
+        .ricePolishingRatio,
+    ).toBe(50);
+    expect(
+      extractLabelInfo({ ...specInput, labelTexts: texts, sakeMeterValue: '+3' }).sakeMeterValue,
+    ).toBe(3);
   });
 
   it('数値として読めない文字列は null になる', () => {
@@ -392,5 +425,133 @@ describe('extractLabelInfo: 詳細スペックの抽出', () => {
     expect(raw.breweryConfidence).toBe(0.9);
     expect(raw).not.toHaveProperty('unexpectedField');
     expect(raw).not.toHaveProperty('labelTexts');
+  });
+});
+
+// Feature: 捏造対策（ラベルの転記テキストとの照合）
+describe('extractLabelInfo: 転記テキストとの照合', () => {
+  /** 裏ラベルの数値が実際に印刷されている転記 */
+  const backLabelTexts = [
+    '獺祭 純米大吟醸',
+    '精米歩合 23%',
+    '日本酒度 +3',
+    '酸度 1.4',
+    'アミノ酸度 1.2',
+    '原料米 山田錦',
+    '酵母 協会9号',
+  ];
+
+  const specInput = {
+    ...validInput,
+    labelTexts: backLabelTexts,
+    specificName: '純米大吟醸',
+    specificNameConfidence: 0.9,
+    ricePolishingRatio: 23,
+    ricePolishingRatioConfidence: 0.95,
+    sakeMeterValue: 3,
+    sakeMeterValueConfidence: 0.95,
+    acidity: 1.4,
+    acidityConfidence: 0.95,
+    aminoAcidity: 1.2,
+    aminoAcidityConfidence: 0.95,
+    riceVariety: '山田錦',
+    riceVarietyConfidence: 0.95,
+    yeast: '協会9号',
+    yeastConfidence: 0.95,
+  };
+
+  it('ラベルに書かれている値はそのまま採る', () => {
+    const result = extractLabelInfo(specInput);
+
+    expect(result.ricePolishingRatio).toBe(23);
+    expect(result.sakeMeterValue).toBe(3);
+    expect(result.acidity).toBe(1.4);
+    expect(result.aminoAcidity).toBe(1.2);
+    expect(result.riceVariety).toBe('山田錦');
+    expect(result.yeast).toBe('協会9号');
+    expect(result.specificName).toBe('純米大吟醸');
+  });
+
+  it('転記に無い数値は捨てる（読めないときに一般的な値を埋めてくるため）', () => {
+    // ラベルには銘柄名しか写っていないのに、日本酒の標準値を高い確信度で返してきた場合
+    const result = extractLabelInfo({
+      ...specInput,
+      labelTexts: ['獺祭 純米大吟醸', '旭酒造株式会社'],
+      ricePolishingRatio: 60,
+      sakeMeterValue: 3,
+      acidity: 1.4,
+      aminoAcidity: 1.2,
+    });
+
+    expect(result.ricePolishingRatio).toBeNull();
+    expect(result.sakeMeterValue).toBeNull();
+    expect(result.acidity).toBeNull();
+    expect(result.aminoAcidity).toBeNull();
+  });
+
+  it('捨てた項目の確信度は 0 になる（高い確信度で申告されても残さない）', () => {
+    const result = extractLabelInfo({
+      ...specInput,
+      labelTexts: ['獺祭 純米大吟醸'],
+      ricePolishingRatio: 60,
+    });
+
+    expect(result.ricePolishingRatio).toBeNull();
+    expect(result.fieldConfidence.ricePolishingRatio).toBe(0);
+  });
+
+  it('転記に無い酒米・酵母・特定名称も捨てる', () => {
+    const result = extractLabelInfo({
+      ...specInput,
+      labelTexts: ['獺祭'],
+      riceVariety: '山田錦',
+      yeast: '協会9号',
+      specificName: '純米大吟醸',
+    });
+
+    expect(result.riceVariety).toBeNull();
+    expect(result.yeast).toBeNull();
+    expect(result.specificName).toBeNull();
+  });
+
+  it('全角で組まれたラベルの数値とも照合できる', () => {
+    const result = extractLabelInfo({
+      ...specInput,
+      labelTexts: ['獺祭', '精米歩合　２３％', '酸度　１．４'],
+      ricePolishingRatio: 23,
+      acidity: 1.4,
+    });
+
+    expect(result.ricePolishingRatio).toBe(23);
+    expect(result.acidity).toBe(1.4);
+  });
+
+  it('labelTexts が無いレスポンスでは照合対象の項目を採らない', () => {
+    const { labelTexts: _labelTexts, ...withoutTexts } = specInput;
+    const result = extractLabelInfo(withoutTexts);
+
+    expect(result.ricePolishingRatio).toBeNull();
+    expect(result.riceVariety).toBeNull();
+  });
+
+  it('照合しない項目（産地・蔵元・度数・容量・紹介文）は転記に無くても採る', () => {
+    const result = extractLabelInfo({
+      ...specInput,
+      labelTexts: ['獺祭'],
+      region: '山口県',
+      alcoholPercentage: 16,
+      brewery: '旭酒造株式会社',
+      breweryConfidence: 0.9,
+      volumeMl: 720,
+      volumeMlConfidence: 0.9,
+      labelDescription: '洗練された香り。',
+      labelDescriptionConfidence: 0.9,
+    });
+
+    expect(result.region).toBe('山口県');
+    expect(result.alcoholPercentage).toBe(16);
+    expect(result.brewery).toBe('旭酒造株式会社');
+    expect(result.volumeMl).toBe(720);
+    expect(result.labelDescription).toBe('洗練された香り。');
   });
 });

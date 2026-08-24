@@ -19,6 +19,16 @@ export function selectSpecBackfillTargets(records: UnifiedRecord[]): UnifiedReco
   );
 }
 
+/**
+ * 読み直し（丸ごと入れ替え）の対象を選ぶ。
+ *
+ * 写真があれば、すでにスペックが入っている記録も含める。読み取りの精度を
+ * 上げたあとに、以前に書き込まれた誤った値を正すための口
+ */
+export function selectSpecRereadTargets(records: UnifiedRecord[]): UnifiedRecord[] {
+  return records.filter((record) => record.imageKeys.length > 0);
+}
+
 /** 記録が詳細スペックを1つでも持っているか */
 export function hasAnyRecordSpec(record: UnifiedRecord): boolean {
   const specs = record.specs;
