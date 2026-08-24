@@ -163,6 +163,65 @@ function asAlcoholPercentage(value: unknown): number | null {
 }
 
 /**
+ * ラベルの転記テキスト（labelTexts）を照合用の1本の文字列にまとめる。
+ *
+ * 全角・半角や大文字小文字の違いを均し、空白を落とす。ラベルは「精米歩合 ６０％」の
+ * ように全角の数字で組まれていることがあり、そのままでは照合できない
+ */
+function toLabelHaystack(value: unknown): string {
+  if (!Array.isArray(value)) {
+    return '';
+  }
+  return value
+    .filter((line): line is string => typeof line === 'string')
+    .join('\n')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/g, '');
+}
+
+/**
+ * 読み取った値が、転記したラベルの文字の中に実際に現れているかを見る。
+ *
+ * これが要る理由。ラベルに数値が見当たらないとき、モデルは日本酒の一般的な値
+ * （精米歩合60・日本酒度+3・酸度1.4・アミノ酸度1.2）を埋めて、しかも確信度 0.95 と
+ * 申告してくる。実際に別々の酒で同じ組み合わせが書き込まれた。プロンプトで
+ * 「推測せず null」と伝えても守られず、自己申告の確信度も歯止めにならない。
+ *
+ * labelTexts はラベルの転記で、各項目の判定より先に生成される。そこに無い値は
+ * 読み取ったものではないので採らない。お願いではなく照合で止める
+ */
+function isGroundedInLabel(reported: unknown, haystack: string): boolean {
+  if (haystack === '') {
+    // 転記が空なら照合のしようがない。判定を諦めて素通しにはしない
+    return false;
+  }
+  if (typeof reported !== 'string' && typeof reported !== 'number') {
+    return false;
+  }
+  const needle = String(reported).normalize('NFKC').toLowerCase().replace(/\s+/g, '');
+  return needle !== '' && haystack.includes(needle);
+}
+
+/**
+ * 転記テキストとの照合を求める項目。
+ *
+ * 捏造が起きたのは裏ラベルの数値と、その周りの語（酒米・酵母・特定名称）。
+ * 産地は「製造者の住所から判断してもよい」ことにしているので外す。銘柄名も
+ * カナへの読み替え（ARRAN → アラン）で字面が変わるため外す。紹介文はラベルの
+ * 文章そのものを写す項目で、切り詰めや要約で一致しなくなるので外す
+ */
+const GROUNDED_SPEC_FIELDS: ReadonlySet<keyof SpecFields> = new Set([
+  'specificName',
+  'ricePolishingRatio',
+  'sakeMeterValue',
+  'acidity',
+  'aminoAcidity',
+  'riceVariety',
+  'yeast',
+]);
+
+/**
  * 詳細スペック項目ごとの検証。
  *
  * 数値項目の下限に 0 を含めないのは、読み取れなかったときにモデルが 0 を返すことが
@@ -235,8 +294,10 @@ const EMPTY_RESULT: Omit<ExtractResult, 'rawTexts'> = {
  *
  * 1. input がオブジェクトでない場合は失敗扱い（全項目 null / confidence 0.0 / rawTexts 空）
  * 2. 各フィールドを検証して取得（列挙値・数値範囲・空文字は null に落とし、長さは切り詰める）
- * 3. 項目ごとの確信度を検証（項目が null なら 0.0、範囲外はクランプ）
- * 4. sakeName が読み取れない場合は他の項目も採用せず、rawTexts も返さない
+ * 3. 裏ラベルの数値まわりは、転記テキストに実際に現れているかを照合して落とす
+ *    （GROUNDED_SPEC_FIELDS。読めないと一般的な値を埋めてくるため）
+ * 4. 項目ごとの確信度を検証（項目が null なら 0.0、範囲外はクランプ）
+ * 5. sakeName が読み取れない場合は他の項目も採用せず、rawTexts も返さない
  *
  * rawTexts にはデバッグ用に「既知フィールドのモデル報告値（検証前）」をホワイトリスト方式で
  * JSON にして入れる。labelTexts（ラベル転記テキスト）や想定外の追加フィールドは含めない。
@@ -278,9 +339,26 @@ export function extractLabelInfo(toolInput: unknown): ExtractResult {
   const region = asTrimmedString(input.region, REGION_MAX_LENGTH);
   const alcoholPercentage = asAlcoholPercentage(input.alcoholPercentage);
 
+  // ラベルに実際に書かれていた値だけを採る（捏造対策）
+  const haystack = toLabelHaystack(input.labelTexts);
+  const ungrounded: string[] = [];
   const specs = Object.fromEntries(
-    SPEC_FIELD_NAMES.map((field) => [field, SPEC_PARSERS[field](input[field])]),
+    SPEC_FIELD_NAMES.map((field) => {
+      const value = SPEC_PARSERS[field](input[field]);
+      // 照合はモデルが報告した生の値に対して行う。丸めたあとの値で見ると、
+      // ラベルに「49.8」と書いてあるのに「50」を探すことになって外れる
+      if (value !== null && GROUNDED_SPEC_FIELDS.has(field) && !isGroundedInLabel(input[field], haystack)) {
+        ungrounded.push(field);
+        return [field, null];
+      }
+      return [field, value];
+    }),
   ) as SpecFields;
+
+  if (ungrounded.length > 0) {
+    // 項目名だけ出す。落とした値はラベル由来の文字列なのでログに残さない
+    console.warn('[OCR] dropped ungrounded spec fields:', JSON.stringify(ungrounded));
+  }
 
   const fieldConfidence: FieldConfidence = {
     sakeName: asConfidence(input.sakeNameConfidence, sakeName),

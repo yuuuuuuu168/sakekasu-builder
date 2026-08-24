@@ -3,25 +3,47 @@ import { useCallback, useMemo, useState } from 'react';
 import type { UnifiedRecord } from '@/features/records/types';
 import { useAuth } from '@/features/auth/AuthContext';
 import { createSkipStorage } from '@/lib/skipStorage';
-import { selectSpecBackfillTargets, specSkipKey } from '../lib/backfillTargets';
+import {
+  selectSpecBackfillTargets,
+  selectSpecRereadTargets,
+  specSkipKey,
+} from '../lib/backfillTargets';
 import { requestLabelSpecs } from '../lib/requestLabelSpecs';
 import { updateRecordSpecs } from '../lib/updateRecordSpecs';
 import { pickSakeSpecs } from '../lib/sakeSpecs';
 import type { SakeSpecs } from '../types';
 
 /**
- * 控えの版。OCR の方式を変えたとき（モデルの差し替え、抽出項目やプロンプトの
- * 作り直しなど）に上げる。版が違う控えは読み捨てるので、以前は読めなかった
- * 記録が自動でもう一度対象に入る。
+ * 読み取りの方式の版。OCR を変えたとき（モデルの差し替え、抽出項目やプロンプトの
+ * 作り直しなど）に上げる。
+ *
+ * 版が違う控えは読み捨てるので、以前は読めなかった記録が自動でもう一度対象に入る。
+ * 「読み直す」の案内も版ごとに1度だけ出す。
  *
  * 1: 詳細スペック12項目の抽出（Issue #88）
+ * 2: ラベルの転記テキストとの照合を追加（読めないと一般的な値を埋めていたため）
  */
-const SKIP_VERSION = 1;
+const EXTRACTION_VERSION = 2;
 
 const skipStorage = createSkipStorage({
   namespace: 'spec-backfill-skipped',
-  version: SKIP_VERSION,
+  version: EXTRACTION_VERSION,
 });
+
+/**
+ * 「この版で読み直しを済ませたか」の控え。
+ *
+ * 読み直しは、読み取りの精度を上げたあとに以前の結果を正すためのもの。
+ * 一度やれば用は済むので、案内は版ごとに1度だけ出す。次に OCR を変えて
+ * 版を上げたら、また出る
+ */
+const rereadStorage = createSkipStorage({
+  namespace: 'spec-reread-done',
+  version: EXTRACTION_VERSION,
+});
+
+/** 控えの中身は問わない。この版で済ませたかどうかだけを見る */
+const REREAD_DONE = 'done';
 
 export interface SpecBackfillProgress {
   /** 処理し終えた件数（読めたかどうかによらず進む） */
@@ -37,10 +59,22 @@ export interface SpecBackfillProgress {
 export interface UseSpecBackfillReturn {
   /** 写真があってスペックが空の記録（前回読めなかったものを除く） */
   targets: UnifiedRecord[];
+  /**
+   * 写真がある記録すべて。読み直し（丸ごと入れ替え）の対象。
+   * 控えは見ない。読み取りの精度を上げたあとに、もう一度試すための口なので。
+   *
+   * この版で読み直しを済ませていれば空になる（案内を出し続けないため）
+   */
+  rereadTargets: UnifiedRecord[];
   /** 前回読めずに対象から外している件数 */
   skippedCount: number;
-  /** 一括読み取りを始める。終わったら結果を返す */
-  run: () => Promise<SpecBackfillProgress>;
+  /**
+   * 一括読み取りを始める。終わったら結果を返す。
+   *
+   * reread を渡すと、すでにスペックが入っている記録も対象にして丸ごと
+   * 入れ替える（読み取れなかった項目は空に戻る）
+   */
+  run: (options?: { reread?: boolean }) => Promise<SpecBackfillProgress>;
   isRunning: boolean;
   progress: SpecBackfillProgress;
 }
@@ -86,13 +120,27 @@ export function useSpecBackfill(
     [eligible, skippedKeys],
   );
   const skippedCount = eligible.length - targets.length;
+  // 済ませた版では案内を出さない。skippedRevision は実行後に読み直すための依存
+  const rereadTargets = useMemo(
+    () =>
+      rereadStorage.load(userId).includes(REREAD_DONE)
+        ? []
+        : selectSpecRereadTargets(records),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [records, userId, skippedRevision],
+  );
 
-  const run = useCallback(async (): Promise<SpecBackfillProgress> => {
+  const run = useCallback(
+    async ({ reread = false }: { reread?: boolean } = {}): Promise<SpecBackfillProgress> => {
     // 実行中に一覧が変わってもその回の対象は動かさない（同じ記録を二度処理しない）
     const skipped = new Set(skipStorage.load(userId));
-    const queue = selectSpecBackfillTargets(records).filter(
-      (record) => !skipped.has(specSkipKey(record)),
-    );
+    // 読み直しでは控えも無視する。精度を上げたあとに試し直すための口なので、
+    // 前回読めなかった記録こそもう一度当てたい
+    const queue = reread
+      ? selectSpecRereadTargets(records)
+      : selectSpecBackfillTargets(records).filter(
+          (record) => !skipped.has(specSkipKey(record)),
+        );
     // 今回読めなかった記録。次回の対象から外すために控える
     const failedKeys: string[] = [];
     const result: SpecBackfillProgress = {
@@ -117,7 +165,7 @@ export function useSpecBackfill(
           continue;
         }
 
-        if (Object.keys(specs).length === 0) {
+        if (Object.keys(specs).length === 0 && !reread) {
           // 写真から何も読めなかった記録。同じ写真なら次も同じ結果になるので控える
           result.skipped += 1;
           failedKeys.push(specSkipKey(record));
@@ -126,11 +174,19 @@ export function useSpecBackfill(
           continue;
         }
 
-        const saved = await updateRecordSpecs(record.id, record.type, specs);
+        // 読み直しでは、何も読めなくても空で入れ替える。
+        // 以前に書き込まれた誤った値を残さないため
+        const saved = await updateRecordSpecs(record.id, record.type, specs, {
+          replace: reread,
+        });
         if (saved) {
           result.written += 1;
-          // 一覧へ返すのは全項目そろった形。読み取れた項目だけを既存の値に重ねる
-          onSpecsUpdated(record.id, { ...pickSakeSpecs(record.specs ?? {}), ...specs });
+          // 一覧へ返すのは全項目そろった形。
+          // 読み直しでは入れ替えなので、既存の値には重ねない
+          onSpecsUpdated(
+            record.id,
+            reread ? pickSakeSpecs(specs) : { ...pickSakeSpecs(record.specs ?? {}), ...specs },
+          );
         } else {
           // 保存の失敗は一時的なものかもしれないので、対象から外さない
           result.skipped += 1;
@@ -142,13 +198,21 @@ export function useSpecBackfill(
     } finally {
       if (failedKeys.length > 0) {
         skipStorage.save(userId, failedKeys);
+      }
+      if (reread) {
+        // この版での読み直しは済んだ。次に版を上げるまで案内を出さない
+        rereadStorage.save(userId, [REREAD_DONE]);
+      }
+      if (failedKeys.length > 0 || reread) {
         setSkippedRevision((prev) => prev + 1);
       }
       setIsRunning(false);
     }
 
     return result;
-  }, [records, onSpecsUpdated, userId]);
+    },
+    [records, onSpecsUpdated, userId],
+  );
 
-  return { targets, skippedCount, run, isRunning, progress };
+  return { targets, rereadTargets, skippedCount, run, isRunning, progress };
 }

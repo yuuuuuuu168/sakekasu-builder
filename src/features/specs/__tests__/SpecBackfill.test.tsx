@@ -61,15 +61,61 @@ describe('SpecBackfill', () => {
     expect(screen.getByTestId('spec-backfill')).toHaveTextContent('1件あります');
   });
 
-  it('対象が無ければ何も出さない', () => {
-    const { container } = render(
+  it('スペックが入っている記録には、読み直しの案内だけを出す', () => {
+    render(
       <SpecBackfill
         records={[record({ specs: pickSakeSpecs({ brewery: '旭酒造株式会社' }) })]}
         onSpecsUpdated={vi.fn()}
       />,
     );
 
-    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByTestId('spec-backfill-button')).not.toBeInTheDocument();
+    expect(screen.getByTestId('spec-backfill-reread-button')).toBeInTheDocument();
+  });
+
+  it('読み直しを済ませた版では何も出さない（用が済んだら消える）', async () => {
+    mockGraphql.mockResolvedValueOnce({
+      data: {
+        analyzeSakeLabel: {
+          sakeName: '獺祭',
+          brewery: '旭酒造株式会社',
+          fieldConfidence: { brewery: 0.95 },
+        },
+      },
+    });
+    mockGraphql.mockResolvedValueOnce({ data: { updatePurchaseRecord: { id: 'p-1' } } });
+
+    const { container } = render(
+      <SpecBackfill
+        records={[record({ specs: pickSakeSpecs({ brewery: '誤った蔵元' }) })]}
+        onSpecsUpdated={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('spec-backfill-reread-button'));
+    fireEvent.click(await screen.findByTestId('spec-backfill-reread-confirm'));
+
+    await waitFor(() => {
+      expect(container).toBeEmptyDOMElement();
+    });
+  });
+
+  it('読み直しは確認を挟む（手で入れた値まで消えるため）', () => {
+    render(
+      <SpecBackfill
+        records={[record({ specs: pickSakeSpecs({ brewery: '旭酒造株式会社' }) })]}
+        onSpecsUpdated={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId('spec-backfill-confirm')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('spec-backfill-reread-button'));
+
+    expect(screen.getByTestId('spec-backfill-confirm')).toHaveTextContent(
+      '手で入力した値も消えます',
+    );
+    expect(mockGraphql).not.toHaveBeenCalled();
   });
 
   it('写真の無い記録だけなら何も出さない', () => {
@@ -82,7 +128,13 @@ describe('SpecBackfill', () => {
 
   it('押すと読み取って結果を知らせる', async () => {
     mockGraphql.mockResolvedValueOnce({
-      data: { analyzeSakeLabel: { sakeName: '獺祭', brewery: '旭酒造株式会社' } },
+      data: {
+        analyzeSakeLabel: {
+          sakeName: '獺祭',
+          brewery: '旭酒造株式会社',
+          fieldConfidence: { brewery: 0.95 },
+        },
+      },
     });
     mockGraphql.mockResolvedValueOnce({ data: { updatePurchaseRecord: { id: 'p-1' } } });
     const onSpecsUpdated = vi.fn();
@@ -98,7 +150,7 @@ describe('SpecBackfill', () => {
 
   it('1件も読めなければエラーとして知らせる', async () => {
     mockGraphql.mockResolvedValueOnce({
-      data: { analyzeSakeLabel: { sakeName: null, brewery: null } },
+      data: { analyzeSakeLabel: { sakeName: null, brewery: null, fieldConfidence: {} } },
     });
 
     render(<SpecBackfill records={[record()]} onSpecsUpdated={vi.fn()} />);
@@ -113,10 +165,16 @@ describe('SpecBackfill', () => {
 
   it('読めなかった記録があれば、除いている件数を添える', async () => {
     mockGraphql.mockResolvedValueOnce({
-      data: { analyzeSakeLabel: { sakeName: null, brewery: null } },
+      data: { analyzeSakeLabel: { sakeName: null, brewery: null, fieldConfidence: {} } },
     });
     mockGraphql.mockResolvedValueOnce({
-      data: { analyzeSakeLabel: { sakeName: '獺祭', brewery: '旭酒造株式会社' } },
+      data: {
+        analyzeSakeLabel: {
+          sakeName: '獺祭',
+          brewery: '旭酒造株式会社',
+          fieldConfidence: { brewery: 0.95 },
+        },
+      },
     });
     mockGraphql.mockResolvedValueOnce({ data: { updatePurchaseRecord: { id: 'p-2' } } });
 

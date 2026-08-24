@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOcrAnalysis, type OcrResult } from './useOcrAnalysis';
 import type { UseImageUploadReturn } from './useImageUpload';
 import type { SakeCategory } from '@/features/purchase/types';
-import { SPEC_FIELD_NAMES, type SpecFieldName } from '@/features/specs/types';
+import {
+  LOW_CONFIDENCE_THRESHOLD,
+  SPEC_FIELD_NAMES,
+  type SpecFieldName,
+} from '@/features/specs/types';
 import type { OcrSpecValues } from '@/features/specs/lib/sakeSpecs';
 import { CATEGORY_DISPLAY_NAMES } from '@/components/form/CategorySelect';
 
@@ -31,9 +35,6 @@ export interface OcrDetectedOptions {
 
 /** 複数枚を連続で追加したときに1回の解析にまとめるための待ち時間 */
 const AUTO_OCR_DEBOUNCE_MS = 1000;
-
-/** この値未満の確信度の項目は「要確認」表示にする */
-const LOW_CONFIDENCE_THRESHOLD = 0.7;
 
 /** 確信度が低い項目に「（要確認）」を付ける（fieldConfidence 未対応の旧レスポンスでは付けない） */
 function markIfLowConfidence(label: string, confidence: number | undefined): string {
