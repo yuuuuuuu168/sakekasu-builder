@@ -18,6 +18,8 @@ import {
   type SortOption,
   type DrinkingStatusFilter,
   type RatingFilter,
+  type PriceRangeFilter,
+  type DateRangeFilter,
 } from '../types';
 
 export interface UseRecordListReturn {
@@ -33,6 +35,10 @@ export interface UseRecordListReturn {
   searchQuery: string;
   drinkingStatusFilter: DrinkingStatusFilter;
   ratingFilter: RatingFilter;
+  priceRangeFilter: PriceRangeFilter;
+  dateRangeFilter: DateRangeFilter;
+  customDateFrom: string;
+  customDateTo: string;
   hasActiveFilter: boolean;
   setRecordType: (type: RecordTypeFilter) => void;
   setCategory: (category: CategoryFilter) => void;
@@ -40,6 +46,10 @@ export interface UseRecordListReturn {
   setSearchQuery: (query: string) => void;
   setDrinkingStatusFilter: (status: DrinkingStatusFilter) => void;
   setRatingFilter: (rating: RatingFilter) => void;
+  setPriceRangeFilter: (priceRange: PriceRangeFilter) => void;
+  setDateRangeFilter: (dateRange: DateRangeFilter) => void;
+  setCustomDateFrom: (date: string) => void;
+  setCustomDateTo: (date: string) => void;
   resetFilters: () => void;
   refetch: () => void;
   /** 楽観的更新: 記録を除去する */
@@ -131,6 +141,35 @@ export function useRecordList(): UseRecordListReturn {
     [patchFilterState],
   );
 
+  // 価格・日付はどちらの記録種別も持つ項目なので、評価や飲みきりのような
+  // 記録種別の自動切り替えはしない
+  const setPriceRangeFilter = useCallback(
+    (priceRange: PriceRangeFilter) => patchFilterState({ priceRange }),
+    [patchFilterState],
+  );
+
+  // カスタム範囲から他の期間へ移ったときに、入力してあった日付が
+  // 見えないまま残らないよう、選び直しで開始日・終了日を空に戻す
+  const setDateRangeFilter = useCallback(
+    (dateRange: DateRangeFilter) => {
+      patchFilterState({
+        dateRange,
+        ...(dateRange !== 'custom' && { customDateFrom: '', customDateTo: '' }),
+      });
+    },
+    [patchFilterState],
+  );
+
+  const setCustomDateFrom = useCallback(
+    (customDateFrom: string) => patchFilterState({ customDateFrom }),
+    [patchFilterState],
+  );
+
+  const setCustomDateTo = useCallback(
+    (customDateTo: string) => patchFilterState({ customDateTo }),
+    [patchFilterState],
+  );
+
   // PersistedFilterState は RecordFilters を含むのでそのまま渡せる（sortOption は無視される）
   const records = useMemo(() => {
     const filtered = filterRecords(allRecords, filterState);
@@ -143,6 +182,8 @@ export function useRecordList(): UseRecordListReturn {
     filterState.searchQuery !== DEFAULT_FILTERS.searchQuery ||
     filterState.drinkingStatus !== DEFAULT_FILTERS.drinkingStatus ||
     filterState.rating !== DEFAULT_FILTERS.rating ||
+    filterState.priceRange !== DEFAULT_FILTERS.priceRange ||
+    filterState.dateRange !== DEFAULT_FILTERS.dateRange ||
     filterState.sortOption !== DEFAULT_SORT_OPTION;
 
   const resetFilters = useCallback(() => {
@@ -172,6 +213,10 @@ export function useRecordList(): UseRecordListReturn {
     searchQuery: filterState.searchQuery,
     drinkingStatusFilter: filterState.drinkingStatus,
     ratingFilter: filterState.rating,
+    priceRangeFilter: filterState.priceRange,
+    dateRangeFilter: filterState.dateRange,
+    customDateFrom: filterState.customDateFrom,
+    customDateTo: filterState.customDateTo,
     hasActiveFilter,
     setRecordType,
     setCategory,
@@ -179,6 +224,10 @@ export function useRecordList(): UseRecordListReturn {
     setSearchQuery,
     setDrinkingStatusFilter,
     setRatingFilter,
+    setPriceRangeFilter,
+    setDateRangeFilter,
+    setCustomDateFrom,
+    setCustomDateTo,
     resetFilters,
     refetch,
     removeRecord,

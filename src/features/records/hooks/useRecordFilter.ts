@@ -1,15 +1,30 @@
-import type { UnifiedRecord, RecordFilters } from '../types';
+import type { UnifiedRecord, RecordFilters, PriceRangeFilter } from '../types';
+import { PRICE_RANGE_BOUNDS } from '../types';
 import { normalizeText, toPhoneticKey } from '../lib/searchNormalize';
+import { resolveDateBounds } from '../lib/dateRange';
 
 /**
  * レコードをフィルタリングする純粋関数。
- * 記録種別・カテゴリ・飲みきりステータス・評価・キーワード検索をAND条件で適用する。
+ * 記録種別・カテゴリ・飲みきりステータス・評価・価格帯・日付範囲・
+ * キーワード検索をAND条件で適用する。
+ *
+ * `now` は日付範囲（今月・直近3ヶ月・今年）の基準日。既定は現在時刻で、
+ * テストから固定日を渡せるように引数にしてある。
  */
 export function filterRecords(
   records: UnifiedRecord[],
-  filters: RecordFilters
+  filters: RecordFilters,
+  now: Date = new Date()
 ): UnifiedRecord[] {
   const query = filters.searchQuery.trim();
+
+  // 日付の境界は全レコードで共通なので、絞り込みに入る前に一度だけ求める
+  const dateBounds = resolveDateBounds(
+    filters.dateRange,
+    filters.customDateFrom,
+    filters.customDateTo,
+    now
+  );
 
   return records.filter((record) => {
     const matchesType =
@@ -23,14 +38,38 @@ export function filterRecords(
     const matchesRating =
       filters.rating === 'all' ||
       (record.type === 'drinking' && (record.rating ?? 0) >= filters.rating);
+    const matchesPrice = matchesPriceRange(record.price, filters.priceRange);
+    const matchesDate =
+      (dateBounds.from === undefined || record.date >= dateBounds.from) &&
+      (dateBounds.to === undefined || record.date <= dateBounds.to);
     return (
       matchesType &&
       matchesCategory &&
       matchesSearch &&
       matchesDrinkingStatus &&
-      matchesRating
+      matchesRating &&
+      matchesPrice &&
+      matchesDate
     );
   });
+}
+
+/**
+ * 価格帯の判定（Issue #47）。`min` 以上 `max` 未満で見る。
+ *
+ * 価格が未入力（null）の記録は、価格帯を選んだ時点で外す。
+ * 「3,000円以上」に金額の分からない記録が混ざると、絞り込んだ意味が無くなるため。
+ * 知らない選択肢が渡ってきたときは絞り込まない（保存値が壊れていても一覧を空にしない）。
+ */
+export function matchesPriceRange(
+  price: number | null | undefined,
+  priceRange: PriceRangeFilter
+): boolean {
+  if (priceRange === 'all') return true;
+  const bounds = PRICE_RANGE_BOUNDS[priceRange];
+  if (!bounds) return true;
+  if (price == null) return false;
+  return price >= bounds.min && price < bounds.max;
 }
 
 /**

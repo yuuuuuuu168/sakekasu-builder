@@ -14,11 +14,15 @@ import {
   SORT_OPTIONS,
   DRINKING_STATUS_OPTIONS,
   RATING_FILTER_OPTIONS,
+  PRICE_RANGE_OPTIONS,
+  DATE_RANGE_OPTIONS,
   type RecordTypeFilter,
   type CategoryFilter,
   type SortOption,
   type DrinkingStatusFilter,
   type RatingFilter,
+  type PriceRangeFilter,
+  type DateRangeFilter,
 } from '../types';
 
 interface FilterControlsProps {
@@ -28,6 +32,10 @@ interface FilterControlsProps {
   sortOption: SortOption;
   drinkingStatusFilter: DrinkingStatusFilter;
   ratingFilter: RatingFilter;
+  priceRangeFilter: PriceRangeFilter;
+  dateRangeFilter: DateRangeFilter;
+  customDateFrom: string;
+  customDateTo: string;
   hasActiveFilter: boolean;
   onRecordTypeChange: (type: RecordTypeFilter) => void;
   onCategoryChange: (category: CategoryFilter) => void;
@@ -35,6 +43,10 @@ interface FilterControlsProps {
   onSortChange: (option: SortOption) => void;
   onDrinkingStatusChange: (status: DrinkingStatusFilter) => void;
   onRatingChange: (rating: RatingFilter) => void;
+  onPriceRangeChange: (priceRange: PriceRangeFilter) => void;
+  onDateRangeChange: (dateRange: DateRangeFilter) => void;
+  onCustomDateFromChange: (date: string) => void;
+  onCustomDateToChange: (date: string) => void;
   onReset: () => void;
 }
 
@@ -69,6 +81,10 @@ export function FilterControls({
   sortOption,
   drinkingStatusFilter,
   ratingFilter,
+  priceRangeFilter,
+  dateRangeFilter,
+  customDateFrom,
+  customDateTo,
   hasActiveFilter,
   onRecordTypeChange,
   onCategoryChange,
@@ -76,6 +92,10 @@ export function FilterControls({
   onSortChange,
   onDrinkingStatusChange,
   onRatingChange,
+  onPriceRangeChange,
+  onDateRangeChange,
+  onCustomDateFromChange,
+  onCustomDateToChange,
   onReset,
 }: FilterControlsProps) {
   const recordTypeLabel = RECORD_TYPE_OPTIONS.find(
@@ -92,6 +112,12 @@ export function FilterControls({
   )?.label;
   const ratingLabel = RATING_FILTER_OPTIONS.find(
     (opt) => opt.value === ratingFilter
+  )?.label;
+  const priceRangeLabel = PRICE_RANGE_OPTIONS.find(
+    (opt) => opt.value === priceRangeFilter
+  )?.label;
+  const dateRangeLabel = DATE_RANGE_OPTIONS.find(
+    (opt) => opt.value === dateRangeFilter
   )?.label;
 
   return (
@@ -190,6 +216,52 @@ export function FilterControls({
           </Select>
         </div>
 
+        {/* 価格帯フィルタ */}
+        <div className="flex flex-col gap-1.5 min-w-[120px] flex-1">
+          <label className="text-xs text-muted-foreground">価格帯</label>
+          <Select
+            value={priceRangeFilter}
+            onValueChange={onlyWhenSelected<PriceRangeFilter>(onPriceRangeChange)}
+          >
+            <SelectTrigger
+              className="w-full min-h-[44px] text-sm"
+              data-testid="filter-price-range"
+            >
+              <SelectValue placeholder="すべて">{priceRangeLabel}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {PRICE_RANGE_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* 日付範囲フィルタ */}
+        <div className="flex flex-col gap-1.5 min-w-[120px] flex-1">
+          <label className="text-xs text-muted-foreground">日付</label>
+          <Select
+            value={dateRangeFilter}
+            onValueChange={onlyWhenSelected<DateRangeFilter>(onDateRangeChange)}
+          >
+            <SelectTrigger
+              className="w-full min-h-[44px] text-sm"
+              data-testid="filter-date-range"
+            >
+              <SelectValue placeholder="すべて">{dateRangeLabel}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {DATE_RANGE_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         {/* 並び替え */}
         <div className="flex flex-col gap-1.5 min-w-[120px] flex-1">
           <label className="text-xs text-muted-foreground">並び替え</label>
@@ -213,6 +285,43 @@ export function FilterControls({
           </Select>
         </div>
       </div>
+
+      {/* カスタム範囲の開始日・終了日。範囲を選んだときだけ出す。
+          片側だけの指定も許すので、どちらも必須にはしない。
+          開始日に max、終了日に min を渡して、逆転した範囲（1件も出ない）を
+          そもそも選べないようにしている */}
+      {dateRangeFilter === 'custom' && (
+        <div className="flex flex-wrap gap-3">
+          <div className="flex flex-col gap-1.5 min-w-[140px] flex-1">
+            <label className="text-xs text-muted-foreground" htmlFor="filter-date-from">
+              開始日
+            </label>
+            <Input
+              id="filter-date-from"
+              type="date"
+              value={customDateFrom}
+              max={customDateTo || undefined}
+              onChange={(e) => onCustomDateFromChange(e.target.value)}
+              className="min-h-[44px] text-sm"
+              data-testid="filter-date-from"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5 min-w-[140px] flex-1">
+            <label className="text-xs text-muted-foreground" htmlFor="filter-date-to">
+              終了日
+            </label>
+            <Input
+              id="filter-date-to"
+              type="date"
+              value={customDateTo}
+              min={customDateFrom || undefined}
+              onChange={(e) => onCustomDateToChange(e.target.value)}
+              className="min-h-[44px] text-sm"
+              data-testid="filter-date-to"
+            />
+          </div>
+        </div>
+      )}
 
       {/* キーワード検索 + リセット */}
       <div className="flex items-end gap-3">
