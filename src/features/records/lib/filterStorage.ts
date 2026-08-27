@@ -5,10 +5,13 @@ import {
   CATEGORY_FILTER_OPTIONS,
   DRINKING_STATUS_OPTIONS,
   RATING_FILTER_OPTIONS,
+  PRICE_RANGE_OPTIONS,
+  DATE_RANGE_OPTIONS,
   SORT_OPTIONS,
   type RecordFilters,
   type SortOption,
 } from '../types';
+import { isValidDateString } from './dateRange';
 
 /**
  * 検索語の上限。曖昧検索は記録数 × クエリ長で走るため、
@@ -65,6 +68,20 @@ export function loadFilterState(userId: string): PersistedFilterState {
         DEFAULT_FILTERS.drinkingStatus
       ),
       rating: pickValid(stored.rating, RATING_FILTER_OPTIONS, DEFAULT_FILTERS.rating),
+      priceRange: pickValid(
+        stored.priceRange,
+        PRICE_RANGE_OPTIONS,
+        DEFAULT_FILTERS.priceRange
+      ),
+      dateRange: pickValid(stored.dateRange, DATE_RANGE_OPTIONS, DEFAULT_FILTERS.dateRange),
+      // カスタム範囲の日付は選択肢が無いので、形（YYYY-MM-DD）と実在する日付かで見る。
+      // 壊れていれば「その側の指定なし」に落とし、日付範囲の選択自体は残す
+      customDateFrom: isValidDateString(stored.customDateFrom)
+        ? stored.customDateFrom
+        : DEFAULT_FILTERS.customDateFrom,
+      customDateTo: isValidDateString(stored.customDateTo)
+        ? stored.customDateTo
+        : DEFAULT_FILTERS.customDateTo,
       sortOption: pickValid(stored.sortOption, SORT_OPTIONS, DEFAULT_SORT_OPTION),
       searchQuery:
         typeof stored.searchQuery === 'string'

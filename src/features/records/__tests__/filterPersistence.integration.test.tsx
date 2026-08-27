@@ -41,6 +41,10 @@ const storedState: PersistedFilterState = {
   searchQuery: '山崎',
   drinkingStatus: 'all',
   rating: 4,
+  priceRange: 'all',
+  dateRange: 'all',
+  customDateFrom: '',
+  customDateTo: '',
   sortOption: 'rating-desc',
 };
 

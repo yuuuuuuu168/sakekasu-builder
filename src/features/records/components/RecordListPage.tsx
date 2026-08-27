@@ -35,6 +35,10 @@ export function RecordListPage({ onDrinkFromStock }: RecordListPageProps = {}) {
     searchQuery,
     drinkingStatusFilter,
     ratingFilter,
+    priceRangeFilter,
+    dateRangeFilter,
+    customDateFrom,
+    customDateTo,
     hasActiveFilter,
     setRecordType,
     setCategory,
@@ -42,6 +46,10 @@ export function RecordListPage({ onDrinkFromStock }: RecordListPageProps = {}) {
     setSearchQuery,
     setDrinkingStatusFilter,
     setRatingFilter,
+    setPriceRangeFilter,
+    setDateRangeFilter,
+    setCustomDateFrom,
+    setCustomDateTo,
     resetFilters,
     refetch,
     removeRecord,
@@ -155,6 +163,10 @@ export function RecordListPage({ onDrinkFromStock }: RecordListPageProps = {}) {
             sortOption={sortOption}
             drinkingStatusFilter={drinkingStatusFilter}
             ratingFilter={ratingFilter}
+            priceRangeFilter={priceRangeFilter}
+            dateRangeFilter={dateRangeFilter}
+            customDateFrom={customDateFrom}
+            customDateTo={customDateTo}
             hasActiveFilter={hasActiveFilter}
             onRecordTypeChange={setRecordType}
             onCategoryChange={setCategory}
@@ -162,6 +174,10 @@ export function RecordListPage({ onDrinkFromStock }: RecordListPageProps = {}) {
             onSortChange={setSortOption}
             onDrinkingStatusChange={setDrinkingStatusFilter}
             onRatingChange={setRatingFilter}
+            onPriceRangeChange={setPriceRangeFilter}
+            onDateRangeChange={setDateRangeFilter}
+            onCustomDateFromChange={setCustomDateFrom}
+            onCustomDateToChange={setCustomDateTo}
             onReset={resetFilters}
           />
         </div>

@@ -5,9 +5,11 @@ import type {
   RecordTypeFilter,
   CategoryFilter,
   RatingFilter,
+  PriceRangeFilter,
+  DateRangeFilter,
   RecordFilters,
 } from '../types';
-import { DEFAULT_FILTERS } from '../types';
+import { DEFAULT_FILTERS, PRICE_RANGE_OPTIONS, PRICE_RANGE_BOUNDS } from '../types';
 import { SAKE_CATEGORIES } from '../../purchase/types';
 import { filterRecords, fuzzyMatch, matchesSearchQuery } from '../hooks/useRecordFilter';
 
@@ -48,6 +50,11 @@ const arbRecordTypeFilter = fc.constantFrom<RecordTypeFilter>('all', 'purchase',
 const arbCategoryFilter = fc.constantFrom<CategoryFilter>('all', ...SAKE_CATEGORIES);
 const arbSearchQuery = fc.oneof(fc.constant(''), fc.string({ minLength: 1, maxLength: 10 }));
 const arbRatingFilter = fc.constantFrom<RatingFilter>('all', 1, 2, 3, 4, 5);
+const arbPriceRangeFilter = fc.constantFrom<PriceRangeFilter>(
+  ...PRICE_RANGE_OPTIONS.map((opt) => opt.value)
+);
+/** カスタム範囲の両端。順序は入れ替えないので、逆転した範囲も生成される */
+const arbCustomBound = fc.oneof(fc.constant(''), arbDate);
 
 // --- Property Tests ---
 
@@ -273,6 +280,107 @@ describe('Feature: sake-record-list, Property 9: 評価フィルタの正確性'
         }
       ),
       { numRuns: 50 }
+    );
+  });
+});
+
+
+describe('Feature: sake-record-list, Property 10: 価格帯フィルタの正確性', () => {
+  it('選んだ帯の範囲に入る記録だけが残る', () => {
+    fc.assert(
+      fc.property(
+        fc.array(arbUnifiedRecord),
+        arbPriceRangeFilter,
+        (records, priceRange) => {
+          const result = filterRecords(records, filters({ priceRange }));
+
+          if (priceRange === 'all') {
+            expect(result.length).toBe(records.length);
+            return;
+          }
+          const { min, max } = PRICE_RANGE_BOUNDS[priceRange];
+          // 価格が未入力の記録は帯の判定ができないので残らない
+          expect(result.every((r) => r.price !== null && r.price >= min && r.price < max)).toBe(
+            true
+          );
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('どの記録もちょうど1つの帯に入る（帯が重ならず、隙間もない）', () => {
+    const bands = PRICE_RANGE_OPTIONS.filter((opt) => opt.value !== 'all');
+
+    fc.assert(
+      fc.property(fc.array(arbUnifiedRecord), (records) => {
+        const withPrice = records.filter((r) => r.price !== null);
+        const hitCounts = bands.map(
+          (band) => filterRecords(records, filters({ priceRange: band.value })).length
+        );
+        expect(hitCounts.reduce((sum, n) => sum + n, 0)).toBe(withPrice.length);
+      }),
+      { numRuns: 100 }
+    );
+  });
+});
+
+describe('Feature: sake-record-list, Property 11: 日付範囲フィルタの正確性', () => {
+  it('カスタム範囲では、指定した両端の外にある記録が残らない', () => {
+    fc.assert(
+      fc.property(
+        fc.array(arbUnifiedRecord),
+        arbCustomBound,
+        arbCustomBound,
+        (records, customDateFrom, customDateTo) => {
+          const result = filterRecords(
+            records,
+            filters({ dateRange: 'custom', customDateFrom, customDateTo })
+          );
+
+          for (const record of result) {
+            if (customDateFrom !== '') expect(record.date >= customDateFrom).toBe(true);
+            if (customDateTo !== '') expect(record.date <= customDateTo).toBe(true);
+          }
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('既定の期間はどれも、絞り込んだ結果が全件の部分集合になる', () => {
+    const now = new Date(2026, 4, 15);
+
+    fc.assert(
+      fc.property(
+        fc.array(arbUnifiedRecord),
+        fc.constantFrom<DateRangeFilter>('this-month', 'last-3-months', 'this-year'),
+        (records, dateRange) => {
+          const result = filterRecords(records, filters({ dateRange }), now);
+
+          expect(result.length).toBeLessThanOrEqual(records.length);
+          for (const item of result) {
+            expect(records).toContainEqual(item);
+          }
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('今年 は直近3ヶ月を含む（基準日が同じなら広い方が漏らさない）', () => {
+    const now = new Date(2026, 4, 15);
+
+    fc.assert(
+      fc.property(fc.array(arbUnifiedRecord), (records) => {
+        const year = filterRecords(records, filters({ dateRange: 'this-year' }), now);
+        const quarter = filterRecords(records, filters({ dateRange: 'last-3-months' }), now);
+
+        for (const item of quarter) {
+          expect(year).toContainEqual(item);
+        }
+      }),
+      { numRuns: 100 }
     );
   });
 });

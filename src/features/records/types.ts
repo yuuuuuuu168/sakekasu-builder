@@ -44,6 +44,18 @@ export type DrinkingStatusFilter = 'all' | DrinkingStatus;
 /** 評価フィルタ。数値は「その星数以上」を意味する */
 export type RatingFilter = 'all' | 1 | 2 | 3 | 4 | 5;
 
+/** 価格帯フィルタ（Issue #47） */
+export type PriceRangeFilter =
+  | 'all'
+  | 'under-1000'
+  | '1000-3000'
+  | '3000-5000'
+  | '5000-10000'
+  | 'over-10000';
+
+/** 日付範囲フィルタ（Issue #47）。`custom` のときだけ開始日・終了日を併用する */
+export type DateRangeFilter = 'all' | 'this-month' | 'last-3-months' | 'this-year' | 'custom';
+
 /** 一覧に適用する絞り込み条件のまとまり */
 export interface RecordFilters {
   recordType: RecordTypeFilter;
@@ -51,6 +63,12 @@ export interface RecordFilters {
   searchQuery: string;
   drinkingStatus: DrinkingStatusFilter;
   rating: RatingFilter;
+  priceRange: PriceRangeFilter;
+  dateRange: DateRangeFilter;
+  /** カスタム範囲の開始日（YYYY-MM-DD）。空文字なら下限なし */
+  customDateFrom: string;
+  /** カスタム範囲の終了日（YYYY-MM-DD）。空文字なら上限なし */
+  customDateTo: string;
 }
 
 export const DEFAULT_FILTERS: RecordFilters = {
@@ -59,6 +77,10 @@ export const DEFAULT_FILTERS: RecordFilters = {
   searchQuery: '',
   drinkingStatus: 'all',
   rating: 'all',
+  priceRange: 'all',
+  dateRange: 'all',
+  customDateFrom: '',
+  customDateTo: '',
 };
 
 // ソートオプション
@@ -117,4 +139,41 @@ export const CATEGORY_FILTER_OPTIONS: { value: CategoryFilter; label: string }[]
   { value: 'WHISKY', label: 'ウイスキー' },
   { value: 'SHOCHU', label: '焼酎' },
   { value: 'OTHER', label: 'その他' },
+];
+
+/**
+ * 価格帯フィルタの境界（Issue #47）。`min` 以上 `max` 未満で判定する。
+ *
+ * 半開区間にしてあるのは、ちょうど境界の金額（3,000円など）が
+ * どちらの帯にも入る／どちらにも入らない状態を作らないため。
+ * 表示ラベルは整数の円を前提に「1,000円〜2,999円」と書き下している。
+ */
+export const PRICE_RANGE_BOUNDS: Record<
+  Exclude<PriceRangeFilter, 'all'>,
+  { min: number; max: number }
+> = {
+  'under-1000': { min: 0, max: 1000 },
+  '1000-3000': { min: 1000, max: 3000 },
+  '3000-5000': { min: 3000, max: 5000 },
+  '5000-10000': { min: 5000, max: 10000 },
+  'over-10000': { min: 10000, max: Number.POSITIVE_INFINITY },
+};
+
+// 価格帯フィルタのラベルマッピング（安い方から並べる）
+export const PRICE_RANGE_OPTIONS: { value: PriceRangeFilter; label: string }[] = [
+  { value: 'all', label: 'すべて' },
+  { value: 'under-1000', label: '1,000円未満' },
+  { value: '1000-3000', label: '1,000円〜2,999円' },
+  { value: '3000-5000', label: '3,000円〜4,999円' },
+  { value: '5000-10000', label: '5,000円〜9,999円' },
+  { value: 'over-10000', label: '10,000円以上' },
+];
+
+// 日付範囲フィルタのラベルマッピング（新しい方から並べる）
+export const DATE_RANGE_OPTIONS: { value: DateRangeFilter; label: string }[] = [
+  { value: 'all', label: 'すべて' },
+  { value: 'this-month', label: '今月' },
+  { value: 'last-3-months', label: '直近3ヶ月' },
+  { value: 'this-year', label: '今年' },
+  { value: 'custom', label: 'カスタム範囲' },
 ];
