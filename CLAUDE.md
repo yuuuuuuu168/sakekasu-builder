@@ -1,5 +1,15 @@
 # CLAUDE.md
 
+## AI-DLC（AI-Driven Development Life Cycle）
+
+[awslabs/aidlc-workflows](https://github.com/awslabs/aidlc-workflows/tree/v2) の v2 を入れてある。
+要件から実装・テストまでを、ステージごとに人間様の承認を挟みながら進める手順一式。
+`/aidlc <やりたいこと>` で起動し、仕事の重さに応じて `express` / `feature` / `bugfix` /
+`infra` / `security-patch` を選ぶ。設定の確認は `/aidlc --doctor`。
+
+導入したばかりで、まだ実際の機能開発を 1 本も通していない。当面は使うかどうかを
+その都度決める。使い方と、上流の既定から変えた点は [.claude/CLAUDE.md](.claude/CLAUDE.md) にある。
+
 ## Git / ブランチ運用
 
 - 機能開発は必ず feature ブランチを作成してから作業する
