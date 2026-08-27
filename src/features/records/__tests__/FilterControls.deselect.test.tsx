@@ -38,6 +38,8 @@ vi.mock('@/components/ui/select', () => ({
 
 const noop = vi.fn();
 
+// 詳細フィルタは畳まれていると描画されないので、条件を1つ入れて開いた状態にする。
+// 解除のガードは常時出る条件にも詳細側にも要るため、両方を一度に見る
 function renderControls() {
   handlers.length = 0;
   const onChange = {
@@ -57,7 +59,7 @@ function renderControls() {
       searchQuery=""
       sortOption="date-desc"
       drinkingStatusFilter="all"
-      ratingFilter="all"
+      ratingFilter={4}
       priceRangeFilter="all"
       dateRangeFilter="all"
       customDateFrom=""
