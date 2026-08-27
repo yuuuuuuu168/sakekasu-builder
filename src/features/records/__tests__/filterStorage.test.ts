@@ -17,6 +17,10 @@ const customState: PersistedFilterState = {
   searchQuery: '山崎',
   drinkingStatus: 'all',
   rating: 4,
+  priceRange: '3000-5000',
+  dateRange: 'custom',
+  customDateFrom: '2026-01-01',
+  customDateTo: '2026-03-31',
   sortOption: 'rating-desc',
 };
 
@@ -70,6 +74,10 @@ describe('絞り込み条件の保存と復元', () => {
         searchQuery: 42,
         drinkingStatus: 'NOT_STARTED',
         rating: 9,
+        priceRange: 'under-1000',
+        dateRange: '直近10年',
+        customDateFrom: '2026-02-31',
+        customDateTo: 42,
         sortOption: 'price-asc',
       }),
     );
@@ -80,8 +88,24 @@ describe('絞り込み条件の保存と復元', () => {
       searchQuery: '',
       drinkingStatus: 'NOT_STARTED',
       rating: 'all',
+      priceRange: 'under-1000',
+      dateRange: 'all',
+      customDateFrom: '',
+      customDateTo: '',
       sortOption: 'price-asc',
     });
+  });
+
+  it('カスタム範囲の片側だけが壊れていても、もう片側は残す', () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({ ...customState, customDateTo: '2026-13-01' }),
+    );
+
+    const restored = loadFilterState(USER);
+    expect(restored.dateRange).toBe('custom');
+    expect(restored.customDateFrom).toBe('2026-01-01');
+    expect(restored.customDateTo).toBe('');
   });
 
   it('異常に長い検索語は上限で切り詰めて復元する', () => {
