@@ -9,6 +9,10 @@ export default defineConfig([
   // ビルド成果物は検査しない。ルート直下だけでなく、infra や sommelier の
   // 配下にも dist があるため、どの階層でも除く
   globalIgnores(['**/dist', '**/cdk.out']),
+  // AI-DLC（awslabs/aidlc-workflows）の同梱物。上流が生成して配る成果物で、
+  // こちらで手を入れる対象ではない。除かないと `eslint .` がフックと CLI
+  // ツールの TypeScript まで検査して、既存ルールと衝突して CI が落ちる
+  globalIgnores(['.claude/**', 'aidlc/**']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
