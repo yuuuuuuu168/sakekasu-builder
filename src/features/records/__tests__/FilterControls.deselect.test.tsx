@@ -45,6 +45,8 @@ function renderControls() {
     onCategoryChange: vi.fn(),
     onDrinkingStatusChange: vi.fn(),
     onRatingChange: vi.fn(),
+    onPriceRangeChange: vi.fn(),
+    onDateRangeChange: vi.fn(),
     onSortChange: vi.fn(),
   };
 
@@ -54,9 +56,17 @@ function renderControls() {
       category="all"
       searchQuery=""
       sortOption="date-desc"
-      drinkingStatus="all"
+      drinkingStatusFilter="all"
       ratingFilter="all"
-      onSearchChange={noop}
+      priceRangeFilter="all"
+      dateRangeFilter="all"
+      customDateFrom=""
+      customDateTo=""
+      hasActiveFilter={false}
+      onSearchQueryChange={noop}
+      onCustomDateFromChange={noop}
+      onCustomDateToChange={noop}
+      onReset={noop}
       {...onChange}
     />,
   );
@@ -101,10 +111,21 @@ describe('絞り込みに null が入った場合', () => {
     searchQuery: '',
     drinkingStatus: 'all',
     rating: 'all',
+    priceRange: 'all',
+    dateRange: 'all',
+    customDateFrom: '',
+    customDateTo: '',
   } as unknown as RecordFilters;
 
   it('正常な絞り込みでは全件出る', () => {
     expect(filterRecords(records, base)).toHaveLength(2);
+  });
+
+  // 価格帯・日付範囲は、知らない値が来ても絞り込まない側に倒してある。
+  // 記録種別などと違い、壊れた保存値で一覧が空になることはない
+  it.each(['priceRange', 'dateRange'])('%s が null でも全件出る', (field) => {
+    const broken = { ...base, [field]: null } as unknown as RecordFilters;
+    expect(filterRecords(records, broken)).toHaveLength(2);
   });
 
   it.each(['recordType', 'category', 'drinkingStatus'])(
