@@ -785,6 +785,7 @@ docs/            # 設計ドキュメント
 | [docs/devops-agent.md](docs/devops-agent.md) | DevOps Agent のセットアップ手順・優先度の割り当て・カスタムスキル・費用 |
 | [docs/application-signals.md](docs/application-signals.md) | Application Signals の計装対象・デプロイ後の確認手順・SLO の決め方・費用 |
 | [docs/claude-code-web.md](docs/claude-code-web.md) | Claude Code on the web での開発環境（外出先から PR まで） |
+| [docs/amplify-exit.md](docs/amplify-exit.md) | Amplify Hosting をやめて CDK 側へ寄せるかの検討（速度・コスト・着手の順番） |
 
 ## セットアップ
 
