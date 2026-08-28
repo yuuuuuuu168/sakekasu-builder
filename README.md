@@ -4,7 +4,7 @@
 
 ## 機能
 
-ここに載っているものはすべて実装済み。まだ手を付けていないものは「[今後やりたいこと](#今後やりたいこと)」にまとめてある。
+ここに載っているものはすべて実装済み。これから作るものは [GitHub Issue](https://github.com/yuuuuuuu168/sakekasu-builder/issues) で管理している。
 
 ### 記録する
 
@@ -12,12 +12,12 @@
 |------|------|
 | 購入したお酒の登録 | 本数（`quantity`）入力に対応 |
 | 飲んだお酒の登録 | 評価（★1〜5）・飲み方・感想メモ |
-| 記録の編集・削除 | 編集できるのは画像を除くテキスト・メタ情報 |
+| 記録の編集・削除 | 編集では画像を足せる。差し替えと削除はできず、代表画像は既存のものを保つ |
 | 画像添付 | ラベル写真等。複数枚に対応 |
 | 飲みきりステータス管理 | 未開封 / 飲み中 / 飲みきり。まとめ買いは1本ずつ飲みきれる |
 | 開封後経過日数の表示 | 飲み中のカードに「開封から◯日」を出す |
 | 購入記録からの飲酒登録連携 | 「これを飲む」で在庫と飲酒記録が紐づく |
-| 詳細スペックの記録 | 蔵元・産地・度数・容量・精米歩合・日本酒度・酸度・アミノ酸度・酒米・酵母・特定名称・紹介文。全項目任意で、フォームでは折りたたみ（[#87](https://github.com/yuuuuuu168/sakekasu-builder/issues/87)） |
+| 詳細スペックの記録 | 蔵元・産地・度数・容量・精米歩合・日本酒度・酸度・アミノ酸度・酒米・酵母・特定名称・紹介文。全項目任意で、フォームでは折りたたみ（[#87](https://github.com/yuuuuuuu168/sakekasu-builder/issues/87)） |
 
 ### 見つける・振り返る
 
@@ -27,90 +27,43 @@
 | 検索・フィルタ | キーワード横断検索（蔵元・産地・酒米・酵母も対象）・評価フィルタ・価格帯フィルタ・日付範囲フィルタ・条件の保持・表記ゆれ吸収 |
 | 在庫本数サマリー | 一覧上部にウイスキー・日本酒の在庫本数を表示 |
 | 統計ダッシュボード | 月別飲酒量・カテゴリ別支出・お気に入り TOP。記録数が少なく実データでの表示確認は未実施 |
-| カレンダー表示 | 飲んだ日・買った日をドットで可視化（[#46](https://github.com/yuuuuuu168/sakekasu-builder/issues/46)） |
+| カレンダー表示 | 飲んだ日・買った日をドットで可視化（[#46](https://github.com/yuuuuuuu168/sakekasu-builder/issues/46)） |
 | リピート判定リマインド | 購入時に同じ銘柄の過去評価を出す |
 
 ### AI
 
 | 機能 | 補足 |
 |------|------|
-| ラベル画像の OCR | 銘柄名・カテゴリに加え、裏ラベルの詳細スペック12項目を抽出。項目ごとの確信度つきで、低確信の項目は入力欄に「要確認」を出す（[#88](https://github.com/yuuuuuu168/sakekasu-builder/issues/88)）。既存の記録は一覧から、付いている写真をまとめて読み取れる |
+| ラベル画像の OCR | 銘柄名・カテゴリに加え、裏ラベルの詳細スペック12項目を抽出。項目ごとの確信度つきで、低確信の項目は入力欄に「要確認」を出す（[#88](https://github.com/yuuuuuuu168/sakekasu-builder/issues/88)）。既存の記録は一覧から、付いている写真をまとめて読み取れる |
 | テイスティングノートの自動記載 | 購入登録の時点で備考に書き足す。ウイスキーは飲み方も。知らない銘柄は Tavily で調べてから書く。既存の記録は一覧から一括で追記できる |
-| 写真1枚で購入登録 | 画像を選ぶと自動で OCR が走る。価格・店名は手入力（[#49](https://github.com/yuuuuuu168/sakekasu-builder/issues/49)） |
-| ソムリエ相談 | 在庫相談・ペアリング・銘柄レコメンド・酒知識 Q&A（[#51](https://github.com/yuuuuuu168/sakekasu-builder/issues/51)） |
-| ソムリエへの写真添付 | 店の棚や品書きの写真から、好みに合う1〜3本を選んでもらう（[#44](https://github.com/yuuuuuu168/sakekasu-builder/issues/44)） |
+| 写真1枚で購入登録 | 画像を選ぶと自動で OCR が走る。価格・店名は手入力（[#49](https://github.com/yuuuuuuu168/sakekasu-builder/issues/49)） |
+| ソムリエ相談 | 在庫相談・ペアリング・銘柄レコメンド・酒知識 Q&A（[#51](https://github.com/yuuuuuuu168/sakekasu-builder/issues/51)） |
+| ソムリエへの写真添付 | 店の棚や品書きの写真から、好みに合う1〜3本を選んでもらう（[#44](https://github.com/yuuuuuuu168/sakekasu-builder/issues/44)） |
 | 好み学習 | AgentCore Memory。セッションをまたいで好みが育つ |
-| 会話の記憶 | AgentCore Memory。履歴はサーバー側に持ち、クライアントからは送らない（[#93](https://github.com/yuuuuuu168/sakekasu-builder/issues/93)） |
-| ソムリエの Web 検索 | 新酒の発売・蔵元・相場など記録の外の話は Tavily で調べて出典つきで答える（[#122](https://github.com/yuuuuuu168/sakekasu-builder/issues/122)） |
+| 会話の記憶 | AgentCore Memory。履歴はサーバー側に持ち、クライアントからは送らない（[#93](https://github.com/yuuuuuuu168/sakekasu-builder/issues/93)） |
+| ソムリエの Web 検索 | 新酒の発売・蔵元・相場など記録の外の話は Tavily で調べて出典つきで答える（[#122](https://github.com/yuuuuuuu168/sakekasu-builder/issues/122)） |
 
 ### アカウント・セキュリティ
 
 | 機能 | 補足 |
 |------|------|
 | Cognito 認証 | サインアップ・サインイン。アカウント列挙対策つき |
-| MFA（TOTP） | 認証アプリによる任意加入（[#70](https://github.com/yuuuuuu168/sakekasu-builder/issues/70)） |
-| パスワードリセット | 忘れた場合の自力復帰と、管理者リセット時の誘導（[#43](https://github.com/yuuuuuu168/sakekasu-builder/issues/43)） |
+| MFA（TOTP） | 認証アプリによる任意加入（[#70](https://github.com/yuuuuuuu168/sakekasu-builder/issues/70)） |
+| パスワードリセット | 忘れた場合の自力復帰と、管理者リセット時の誘導（[#43](https://github.com/yuuuuuuu168/sakekasu-builder/issues/43)） |
 | データ保護 | DynamoDB の PITR・削除保護、S3 バージョニング |
 
 ### 運用・基盤
 
 | 機能 | 補足 |
 |------|------|
-| 監視とアラート通知 | 23アラーム（AI・サービス正常性・外形監視・カナリア）と AWS Health を Slack へ。デプロイ前に手動登録あり |
-| 新規ユーザー登録の Slack 通知 | Cognito Post Confirmation → SNS（[#66](https://github.com/yuuuuuu168/sakekasu-builder/issues/66)） |
-| 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuu168/sakekasu-builder/issues/92)） |
-| DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。コンソール側の設定あり（[#67](https://github.com/yuuuuuu168/sakekasu-builder/issues/67)） |
-| Application Signals による APM | サービス検出・X-Ray トレースまで。ADOT の計装と SLO は未導入（[#86](https://github.com/yuuuuuu168/sakekasu-builder/issues/86)） |
-| CDK デプロイの自動化 | main へのマージで GitHub Actions が `cdk deploy`（OIDC 認証、[#94](https://github.com/yuuuuuu168/sakekasu-builder/issues/94)）。infra とソムリエで対象を分ける。cdkd への移行が進行中（[#150](https://github.com/yuuuuuu168/sakekasu-builder/issues/150)） |
+| 監視とアラート通知 | 25アラーム（AI・サービス正常性・外形監視・カナリア・SLO）と AWS Health を Slack へ。デプロイ前に手動登録あり |
+| 新規ユーザー登録の Slack 通知 | Cognito Post Confirmation → SNS（[#66](https://github.com/yuuuuuuu168/sakekasu-builder/issues/66)） |
+| 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuuu168/sakekasu-builder/issues/92)） |
+| DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。コンソール側の設定あり（[#67](https://github.com/yuuuuuuu168/sakekasu-builder/issues/67)） |
+| Application Signals による APM | OCR と画像アップロードの2関数を計装。OCR には SLO を2本置き、割ったらアラーム（[#86](https://github.com/yuuuuuuu168/sakekasu-builder/issues/86)） |
+| CDK デプロイの自動化 | main へのマージで GitHub Actions が `cdk deploy`（OIDC 認証、[#94](https://github.com/yuuuuuuu168/sakekasu-builder/issues/94)）。infra とソムリエで対象を分ける。cdkd への移行が進行中（[#150](https://github.com/yuuuuuuu168/sakekasu-builder/issues/150)） |
 | 一覧画面の画像表示高速化 | サムネイル生成・Presigned URL キャッシュ・遅延読み込み |
-
-## 今後やりたいこと
-
-やりたいことは GitHub Issue で管理している。ここはその索引。
-
-### 記録・UI
-
-| やりたいこと | メモ | Issue |
-|------------|------|-------|
-| 価格履歴グラフ | 同銘柄の価格推移。既存データだけで実装できる見込み | [#45](https://github.com/yuuuuuu168/sakekasu-builder/issues/45) |
-| ウィッシュリスト | 新しい DynamoDB テーブルが要るぶん重い | [#50](https://github.com/yuuuuuu168/sakekasu-builder/issues/50) |
-| ユーザー設定ページ | MFA 設定の移設＋パスワード変更 | [#72](https://github.com/yuuuuuu168/sakekasu-builder/issues/72) |
-| 退会機能 | 孤児データを作らない削除順序の設計から | [#73](https://github.com/yuuuuuu168/sakekasu-builder/issues/73) |
-
-### AI・ソムリエ
-
-| やりたいこと | メモ | Issue |
-|------------|------|-------|
-| テイスティングノートの AI 改善提案 | 雑なメモを膨らませる。メモの質が上がるとソムリエの提案精度も上がる | [#89](https://github.com/yuuuuuu168/sakekasu-builder/issues/89) |
-| さけのわデータ API 連携 | 銘柄マスタとフレーバーチャート。無料・商用可・認証不要だが日本酒のみ | [#90](https://github.com/yuuuuuu168/sakekasu-builder/issues/90) |
-| ソムリエ Phase 2 | 外部情報連携（新発売情報・Web レビュー要約） | [#52](https://github.com/yuuuuuu168/sakekasu-builder/issues/52) |
-| ソムリエ Phase 3 | 分析・定期実行（月次レポート・節酒プランナー・傾向分析） | [#53](https://github.com/yuuuuuu168/sakekasu-builder/issues/53) |
-
-### インフラ・運用
-
-| やりたいこと | メモ | Issue |
-|------------|------|-------|
-| SLO とエラーバジェット消費アラーム | 計装は済んでいる。しきい値を実測（p50/p90/p99）から決めるところが残り | [#86](https://github.com/yuuuuuu168/sakekasu-builder/issues/86) |
-| Security Agent の Agent Space 移行 | 管理アカウントから運用ツール専用アカウントへ | [#107](https://github.com/yuuuuuu168/sakekasu-builder/issues/107) |
-| 登録データの傾向分析を Quick Suite で外出し | アプリ本体には組み込まない方針 | [#74](https://github.com/yuuuuuu168/sakekasu-builder/issues/74) |
-| 画像表示のさらなる高速化 | Presigned URL のバッチ取得・CloudFront + OAC。体感で困っていなければ優先度は低い | [#54](https://github.com/yuuuuuu168/sakekasu-builder/issues/54) |
-
-### 品質・セキュリティ
-
-| やりたいこと | メモ | Issue |
-|------------|------|-------|
-| lint エラー26件の解消 | `react-hooks/set-state-in-effect` 系は React のパターン見直しが要るので独立タスク向き | [#55](https://github.com/yuuuuuu168/sakekasu-builder/issues/55) |
-| presigned-url Lambda の入力検証強化 | Security Agent の指摘。`recordType` アローリスト・`recordId` の UUID 検証・`fileName` のサニタイズ | [#81](https://github.com/yuuuuuu168/sakekasu-builder/issues/81) |
-| OCR のコスト保護 | Security Agent の指摘。レート制限・同時実行数・IAM のスコープ絞り込み | [#82](https://github.com/yuuuuuu168/sakekasu-builder/issues/82) |
-| パブリック公開前の機微情報監査の後始末 | 認証情報の実値は無し。消す／残すは着手時に判断 | [#106](https://github.com/yuuuuuu168/sakekasu-builder/issues/106) |
-
-### Issue にしていない小さな宿題
-
-拾い切れていない「後で試す」もの。手を付けるときに Issue を切る。
-
-- **OCR のモデル比較検証** — 環境変数 `BEDROCK_MODEL_ID` の切り替えで実測できる。Issue #60 の改善案6として挙げたまま未実施
-- **OCR 結果と過去記録の照合による表記ゆれ補正** — Issue #60 の改善案8。工数が大きく将来課題のまま
-- **AppSync の X-Ray トレーシング** — Application Signals（#86）は AppSync の JS リゾルバーを直接は見られないため、必要なら別途有効化する
+| PR ごとのテスト・lint・型検査 | GitHub Actions がフロント・infra・ソムリエの3系統を並べて走らせる |
 
 ## こだわりポイント
 
@@ -121,8 +74,8 @@
 - **キーワード横断検索**: 酒名だけでなく、店名・場所名・飲み方・メモも検索対象にした。酒名は従来どおり曖昧検索（各文字が順番に出現すればヒット）で、うろ覚えや部分入力から辿れる。それ以外の項目は部分一致にしている。メモまで曖昧検索にすると、離れた位置の文字が拾われて無関係な記録が大量に混ざるため
 - **表記ゆれの吸収**: 「アラン」「あらん」「ｱﾗﾝ」「Allan」「Arran」のどれで打っても同じ記録に辿り着く（詳細は下記）
 - **評価フィルタ**: 「★4以上」のように星数のしきい値で絞る。評価を持つのは飲酒記録だけなので、選ぶと記録種別も自動で飲酒記録に切り替わる（飲みきりステータスを選ぶと購入記録に切り替わるのと同じ挙動）
-- **価格帯フィルタ**: 「1,000円未満」「10,000円以上」など5つの帯で絞る（[#47](https://github.com/yuuuuuu168/sakekasu-builder/issues/47)）。帯どうしは重ならず隙間もない（`min` 以上 `max` 未満）ので、どの金額もちょうど1つの帯に入る。価格が未入力の記録は、価格帯を選んだ時点で外す。金額の分からない記録が「3,000円以上」に混ざると絞り込んだ意味が無くなるため
-- **日付範囲フィルタ**: 今月・直近3ヶ月・今年・カスタム範囲（[#47](https://github.com/yuuuuuu168/sakekasu-builder/issues/47)）。カスタム範囲は片側だけの指定も許して「この日以降すべて」を出せるようにし、開始日に `max`・終了日に `min` を渡して逆転した範囲を選べないようにしてある
+- **価格帯フィルタ**: 「1,000円未満」「10,000円以上」など5つの帯で絞る（[#47](https://github.com/yuuuuuuu168/sakekasu-builder/issues/47)）。帯どうしは重ならず隙間もない（`min` 以上 `max` 未満）ので、どの金額もちょうど1つの帯に入る。価格が未入力の記録は、価格帯を選んだ時点で外す。金額の分からない記録が「3,000円以上」に混ざると絞り込んだ意味が無くなるため
+- **日付範囲フィルタ**: 今月・直近3ヶ月・今年・カスタム範囲（[#47](https://github.com/yuuuuuuu168/sakekasu-builder/issues/47)）。カスタム範囲は片側だけの指定も許して「この日以降すべて」を出せるようにし、開始日に `max`・終了日に `min` を渡して逆転した範囲を選べないようにしてある
   - 「今月」「今年」は暦の区間なので月末・年末までを含み、「直近3ヶ月」は今日から遡る区間なので上限が今日になる。先の日付を入れた記録の見え方が変わるが、どちらもラベルの読みどおりなので揃えていない
   - 基準日（今日）は `filterRecords` の引数にしてあり、テストからは固定日を渡す。3ヶ月前に同じ日が無い場合（5/31 → 2/28）は月末に丸める。`new Date(2026, 1, 31)` は 3/3 へ繰り上がってしまうため
 - **価格帯・日付範囲では記録種別を切り替えない**: どちらも購入記録・飲酒記録の両方が持つ項目なので、評価や飲みきりステータスのような自動切り替えはしない
@@ -172,7 +125,7 @@
 
 #### まとめ買いを1本ずつ飲みきる
 
-本数2以上の購入記録は、1本飲んでも残りが在庫に残る（[#159](https://github.com/yuuuuuu168/sakekasu-builder/issues/159)）。
+本数2以上の購入記録は、1本飲んでも残りが在庫に残る（[#159](https://github.com/yuuuuuuu168/sakekasu-builder/issues/159)）。
 
 - 購入記録に**残本数**（`remainingQuantity`）を持たせ、飲みきり操作のたびに減らす。0本になったときにはじめて記録が「飲みきり」になる
 - ステータスは残っているうちの**先頭の1本**にかかる。本数3・残り3で飲み中なら「飲み中1本 / 未開封2本」
@@ -243,7 +196,7 @@ Bedrock では Anthropic のホスト型 Web 検索ツールが使えないた�
 - **Presigned URL のメモリキャッシュ**: 有効期限内は再利用し、同一キーへの同時リクエストを1本に束ねる
 - **既存画像のバックフィル**: `infra/scripts/backfill-thumbnails.py`（EXIF の向きを補正してから縮小する。忘れると写真が横倒しになる）
 
-ここから先（Presigned URL のバッチ取得、CloudFront + OAC でのエッジキャッシュ）は [Issue #54](https://github.com/yuuuuuu168/sakekasu-builder/issues/54) に置いてある。
+ここから先（Presigned URL のバッチ取得、CloudFront + OAC でのエッジキャッシュ）は [Issue #54](https://github.com/yuuuuuuu168/sakekasu-builder/issues/54) に置いてある。
 
 ## AgentCore ソムリエエージェント
 
@@ -252,8 +205,8 @@ Bedrock では Anthropic のホスト型 Web 検索ツールが使えないた�
 | Phase | 内容 | 状態 |
 |-------|------|------|
 | 1 | 対話 UI + 記録参照（在庫相談・ペアリング・銘柄レコメンド・Q&A・好み学習） | ✅ 完了 |
-| 2 | 外部情報収集（新発売情報・レビュー要約） | Web 検索は導入済み（[#122](https://github.com/yuuuuuu168/sakekasu-builder/issues/122)）。残りは [#52](https://github.com/yuuuuuu168/sakekasu-builder/issues/52) |
-| 3 | 定期実行系（月次レポート・節酒プランナー・傾向分析） | [#53](https://github.com/yuuuuuu168/sakekasu-builder/issues/53) |
+| 2 | 外部情報収集（新発売情報・レビュー要約） | Web 検索は導入済み（[#122](https://github.com/yuuuuuuu168/sakekasu-builder/issues/122)）。残りは [#52](https://github.com/yuuuuuuu168/sakekasu-builder/issues/52) |
+| 3 | 定期実行系（月次レポート・節酒プランナー・傾向分析） | [#53](https://github.com/yuuuuuuu168/sakekasu-builder/issues/53) |
 
 ### Phase 1 の構成
 
@@ -334,7 +287,7 @@ Tavily 検索 API（記録の外。API キーは Secrets Manager）
 
 #### Web 検索（Tavily）
 
-記録の中の話は DynamoDB のツールで足りるが、**新酒が出ているか・蔵元はどこか・いま買えるのか**といった記録の外の話は、モデルの学習知識に頼るとうろ覚えのまま断定してしまう。ここが一番ハルシネーションの害が大きいので、Tavily の検索 API をツール（`search_web`）として渡し、必要なときだけモデル自身に調べさせている（[#122](https://github.com/yuuuuuu168/sakekasu-builder/issues/122)）。
+記録の中の話は DynamoDB のツールで足りるが、**新酒が出ているか・蔵元はどこか・いま買えるのか**といった記録の外の話は、モデルの学習知識に頼るとうろ覚えのまま断定してしまう。ここが一番ハルシネーションの害が大きいので、Tavily の検索 API をツール（`search_web`）として渡し、必要なときだけモデル自身に調べさせている（[#122](https://github.com/yuuuuuuu168/sakekasu-builder/issues/122)）。
 
 | 決めごと | 内容 |
 |---------|------|
@@ -506,7 +459,7 @@ AWS Health ──────────┤
 
 アラームは**発報だけでなく復旧も通知する**ので、鳴りっぱなしなのか直ったのかが Slack だけで分かる。
 
-### 監視項目（23アラーム）
+### 監視項目（25アラーム）
 
 | 分類 | 監視対象 | 発報条件 |
 |------|---------|---------|
@@ -514,6 +467,7 @@ AWS Health ──────────┤
 | AI・ソムリエ | システムエラー / スロットル | 5分で1回以上 |
 | AI・OCR | Lambda エラー | 15分で3回以上 |
 | AI・OCR | スロットル | 15分で1回以上 |
+| AI・OCR | SLO の達成率（可用性・レイテンシー） | 30日 rolling の達成率が 90% を割ったら |
 | サービス | AppSync 5XX | 5分で5回以上 |
 | サービス | Lambda エラー（presigned-url / ocr-analyzer / tasting-note） | 15分で5回以上 |
 | サービス | DynamoDB スロットル（2テーブル） | 5分で1回以上 |
@@ -646,7 +600,7 @@ npx cdk deploy sakekasu-dev-monitoring -c env=dev \
 
 ### 費用の目安
 
-概算で**月5ドル前後**。内訳は CloudWatch アラーム23件（$0.10/件）とカスタムメトリクス8種（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。カナリアの Bedrock 呼び出しは月120回・短い応答のため数円程度。
+概算で**月5ドル前後**。内訳は CloudWatch アラーム25件（$0.10/件）とカスタムメトリクス8種（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。カナリアの Bedrock 呼び出しは月120回・短い応答のため数円程度。SLO とトレースの費用は Application Signals 側で別立てになる（月数十円から数百円の見込み。[docs/application-signals.md](docs/application-signals.md)）。
 
 ## 毎日の利用料金 Slack 通知（Issue #92）
 
@@ -724,15 +678,15 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev
 
 既存の監視は「異常が起きたこと」までは知らせてくれるが、そこから先の切り分けはログの突き合わせに頼っていた。リクエスト単位のトレースと、レイテンシー・エラー率・リクエスト数を自動で集めてそこを埋める。
 
-**ADOT による計装はまだ入っていない。** 一度入れたが、起動ラッパーのパスをランタイム違いで取り違えて関数が起動しなくなり、切り戻した。いま有効なのは X-Ray のアクティブトレースと、アカウント側の設定（サービス検出・Transaction Search。ソムリエの GenAI Observability を入れたときから有効で、アカウントに1つの設定なので CDK では管理していない）。
+計装が入っているのは OCR（`ocr-analyzer`、2026-08-10）と画像アップロードの入口（`presigned-url`、2026-08-16）の2つ。一度は起動ラッパーとレイヤーの組み合わせを取り違えて関数を止め、切り戻してから1つずつ入れ直した（PR [#110](https://github.com/yuuuuuuu168/sakekasu-builder/pull/110) → [#114](https://github.com/yuuuuuuu168/sakekasu-builder/pull/114)）。アカウント側の設定（サービス検出・Transaction Search）はソムリエの GenAI Observability を入れたときから有効で、アカウントに1つの設定なので CDK では管理していない。
 
-そのため見えるのは Lambda 標準メトリクス由来のエラー率と実行時間まで。下流ごとの内訳（Bedrock に何秒、S3 に何秒）はまだ見えない。それでもエラー率は追えるので、既存のバグを1件見つけている（[#115](https://github.com/yuuuuuu168/sakekasu-builder/issues/115)）。
+監視系の関数（health-check / slack-notifier / カナリア / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。この4つは従来どおり Lambda 標準メトリクス由来のエラー率と実行時間までしか見えない。計装が無かった頃でもエラー率は追えたので、それで既存のバグを1件見つけている（[#115](https://github.com/yuuuuuuu168/sakekasu-builder/issues/115)）。
 
-計装の対象は OCR（`ocr-analyzer`）と画像アップロードの入口（`presigned-url`）の2つだけにする。監視系の関数（health-check / slack-notifier / カナリア / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。
+SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 90% と「90% が15秒未満」。しきい値は日次の実測（p50/p90/p99）から決めた。割ったらアラームが鳴り、そのしきい値は SLO の目標と同じ定数から取っている。別々に書くと、片方だけ動かしたときに「SLO は未達なのにアラームは鳴らない」が黙って生まれる。
 
-SLO とエラーバジェット消費アラームも入れていない。しきい値は実測を見てから決めるもので、当てずっぽうで作ると鳴りっぱなしか鳴らないかのどちらかになる。
+`presigned-url` の SLO はまだ作っていない。計装が後から入ったぶん材料が足りず、SLO は Application Signals の課金対象なので数を絞っている。
 
-対象を絞った理由、デプロイ後の確認手順、SLO の決め方、費用は [docs/application-signals.md](docs/application-signals.md) にまとめてある。
+計装の対象を絞った理由、デプロイ後の確認手順、しきい値の根拠、費用は [docs/application-signals.md](docs/application-signals.md) にまとめてある。
 
 ## 技術スタック
 
@@ -748,7 +702,7 @@ SLO とエラーバジェット消費アラームも入れていない。しき�
 - Amazon Bedrock AgentCore Runtime + AgentCore Memory + Strands Agents（Python）※ソムリエ
 - Amazon Bedrock（Claude Haiku 4.5）※OCR・テイスティングノート・ソムリエ
 - react-day-picker（カレンダー）/ qrcode.react（MFA の QR コード）
-- Vitest + Testing Library + fast-check（フロント）、Jest（CDK）、pytest（ソムリエ）
+- Vitest + Testing Library + fast-check（フロントと infra の CDK）、Jest（ソムリエの CDK）、pytest（ソムリエ本体）
 
 ## プロジェクト構成
 
@@ -763,6 +717,7 @@ src/
     calendar/    # カレンダー表示
     image/       # 画像添付・OCR・サムネイル
     tasting/     # テイスティングノートの生成と備考への追記
+    specs/       # 詳細スペックの入力と、裏ラベルからの読み取り
     sommelier/   # ソムリエ相談チャット（Runtime 呼び出し）
   components/    # 共通コンポーネント（shadcn/ui, ThemeProvider 等）
 infra/
@@ -778,7 +733,10 @@ sommelier/       # AgentCore プロジェクト（ソムリエエージェント
   app/sommelier/ # Strands Agent 本体（Python）
   agentcore/     # AgentCore 設定と CDK
 docs/            # 設計ドキュメント
-.github/         # GitHub Actions（deploy / cdk-diff）
+scripts/         # クラウドセッション用の補助（AWS SSO ログイン、フック）
+.claude/         # Claude Code の設定と AI-DLC（使い方は CLAUDE.md）
+aidlc/           # AI-DLC のルールと成果物
+.github/         # GitHub Actions（test / deploy / deploy-sommelier / cdk-diff）
 ```
 
 ## ドキュメント
@@ -789,6 +747,10 @@ docs/            # 設計ドキュメント
 | [docs/devops-agent.md](docs/devops-agent.md) | DevOps Agent のセットアップ手順・優先度の割り当て・カスタムスキル・費用 |
 | [docs/application-signals.md](docs/application-signals.md) | Application Signals の計装対象・デプロイ後の確認手順・SLO の決め方・費用 |
 | [docs/claude-code-web.md](docs/claude-code-web.md) | Claude Code on the web での開発環境（外出先から PR まで） |
+| [docs/cdkd-migration.md](docs/cdkd-migration.md) | cdkd（CDK Direct）への移行手順と、残っている作業 |
+| [docs/log-group-import.md](docs/log-group-import.md) | 既存ロググループのスタック取り込み（`logRetention` からの移行） |
+| [docs/agent-verify-permission-set.md](docs/agent-verify-permission-set.md) | クラウドセッションから AWS を見るための読み取り専用 Permission Set |
+| [CLAUDE.md](CLAUDE.md) | 開発の進め方（ブランチ運用・AI-DLC・AWS 確認の認証フロー） |
 
 ## セットアップ
 
@@ -833,17 +795,18 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc -c github-oidc=
 
 ### cdkd（CDK Direct）への移行
 
-CloudFormation を経由しない [cdkd](https://github.com/go-to-k/cdkd) への移行を進めている（[#150](https://github.com/yuuuuuu168/sakekasu-builder/issues/150)）。いまはロールと依存を用意した段階で、ワークフローはまだ `cdk deploy` のまま。AWS 側の取り込み作業とワークフロー差し替えの手順は [docs/cdkd-migration.md](docs/cdkd-migration.md) にある。
+CloudFormation を経由しない [cdkd](https://github.com/go-to-k/cdkd) への移行を進めている（[#150](https://github.com/yuuuuuuu168/sakekasu-builder/issues/150)）。いまはロールと依存を用意した段階で、ワークフローはまだ `cdk deploy` のまま。AWS 側の取り込み作業とワークフロー差し替えの手順は [docs/cdkd-migration.md](docs/cdkd-migration.md) にある。
 
 ## テスト
 
 ```bash
-# フロントエンド（Vitest）
-npm run test -- --run
+# フロントエンド（Vitest）。src/ に絞るのは、root の vitest が
+# infra と sommelier のテストまで拾って import を解決できずに落ちるため
+npx vitest run src/
 
 # インフラ（CDK の synth テスト）
 cd infra
-npm run test -- --run
+npm test
 
 # ソムリエ本体（pytest。AWS へは出ない）
 cd sommelier/app/sommelier
@@ -853,6 +816,8 @@ uv run pytest
 cd sommelier/agentcore/cdk
 npm ci && npm test
 ```
+
+同じものを PR とマージのたびに GitHub Actions が走らせる（`.github/workflows/test.yml`）。フロントは lint と型検査も込みで、3系統を別のジョブに分けてある。片方が落ちても、もう片方の結果が残るようにするため。
 
 ## デザイン
 
