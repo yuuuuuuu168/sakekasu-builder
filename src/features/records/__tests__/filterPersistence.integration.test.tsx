@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 
 // --- Mocks ---
 
@@ -79,12 +79,14 @@ describe('絞り込み条件の永続化（認証込みの統合）', () => {
     renderInApp();
 
     // 認証解決までは一覧自体が描画されない
-    expect(screen.queryByTestId('filter-rating')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('filter-record-type')).not.toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByTestId('filter-rating')).toBeInTheDocument();
+      expect(screen.getByTestId('filter-record-type')).toBeInTheDocument();
     });
 
+    // 評価は詳細フィルタ側。条件が入っているので開いた状態で復元される
+    expect(screen.getByTestId('filter-advanced-count')).toHaveTextContent('1');
     expect(screen.getByTestId('filter-rating')).toHaveTextContent('★4以上');
     expect(screen.getByTestId('filter-record-type')).toHaveTextContent('飲酒記録');
     expect(screen.getByTestId('filter-category')).toHaveTextContent('ウイスキー');
@@ -98,7 +100,7 @@ describe('絞り込み条件の永続化（認証込みの統合）', () => {
     renderInApp();
 
     await waitFor(() => {
-      expect(screen.getByTestId('filter-rating')).toBeInTheDocument();
+      expect(screen.getByTestId('filter-record-type')).toBeInTheDocument();
     });
 
     // 認証解決に伴う再レンダーと保存 effect を最後まで流し切ってから確かめる。
@@ -114,7 +116,7 @@ describe('絞り込み条件の永続化（認証込みの統合）', () => {
     renderInApp();
 
     await waitFor(() => {
-      expect(screen.getByTestId('filter-rating')).toBeInTheDocument();
+      expect(screen.getByTestId('filter-record-type')).toBeInTheDocument();
     });
 
     expect(localStorage.getItem('sakekasu:record-filters:')).toBeNull();
@@ -124,10 +126,16 @@ describe('絞り込み条件の永続化（認証込みの統合）', () => {
     renderInApp();
 
     await waitFor(() => {
-      expect(screen.getByTestId('filter-rating')).toBeInTheDocument();
+      expect(screen.getByTestId('filter-record-type')).toBeInTheDocument();
     });
 
     expect(loadFilterState(USER_ID)).toEqual(DEFAULT_FILTER_STATE);
+
+    // 効いている詳細条件が無ければ畳まれたまま。開いて中身を確かめる
+    expect(screen.queryByTestId('filter-advanced-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('filter-advanced-count')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('filter-advanced-toggle'));
     expect(screen.getByTestId('filter-rating')).toHaveTextContent('すべて');
   });
 });
