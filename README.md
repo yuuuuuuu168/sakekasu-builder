@@ -59,7 +59,7 @@
 | 監視とアラート通知 | 25アラーム（AI・サービス正常性・外形監視・カナリア・SLO）と AWS Health を Slack へ。デプロイ前に手動登録あり |
 | 新規ユーザー登録の Slack 通知 | Cognito Post Confirmation → SNS（[#66](https://github.com/yuuuuuuu168/sakekasu-builder/issues/66)） |
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuuu168/sakekasu-builder/issues/92)） |
-| DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。コンソール側の設定あり（[#67](https://github.com/yuuuuuuu168/sakekasu-builder/issues/67)） |
+| DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。プライベートチャンネルではメンションで調査の開始や照会もできる。コンソール側の設定あり（[#67](https://github.com/yuuuuuuu168/sakekasu-builder/issues/67)） |
 | Application Signals による APM | OCR と画像アップロードの2関数を計装。OCR には SLO を2本置き、割ったらアラーム（[#86](https://github.com/yuuuuuuu168/sakekasu-builder/issues/86)） |
 | CDK デプロイの自動化 | main へのマージで GitHub Actions が `cdk deploy`（OIDC 認証、[#94](https://github.com/yuuuuuuu168/sakekasu-builder/issues/94)）。infra とソムリエで対象を分ける。cdkd への移行が進行中（[#150](https://github.com/yuuuuuuu168/sakekasu-builder/issues/150)） |
 | 一覧画面の画像表示高速化 | サムネイル生成・Presigned URL キャッシュ・遅延読み込み |
@@ -656,6 +656,8 @@ AWS_PROFILE=yuuuuuuuki7749 aws lambda invoke \
 ```
 SNS（dev-sakekasu-alerts）┬→ Slack 通知 Lambda → Slack（既存のアラートチャンネル）
                           └→ 転送 Lambda → DevOps Agent Webhook → 自動調査 → Slack（専用チャンネル）
+
+人 ⇄ Slack（双方向用プライベートチャンネル）⇄ DevOps Agent
 ```
 
 既存の Slack 通知は変えていない。転送 Lambda は同じトピックをもう1つの購読者として受け取るだけなので、エージェント側が止まってもアラート自体は届く。
@@ -663,6 +665,10 @@ SNS（dev-sakekasu-alerts）┬→ Slack 通知 Lambda → Slack（既存のア�
 Agent Space は運用ツール専用アカウント（`<運用アカウント ID>` / `ops-tooling`）に置き、調査対象はアプリ本体のアカウント（`<アプリのアカウント ID>`）。CDK が作るのはアプリ本体側の2つで、調査用のクロスアカウントロール（読み取り専用）と、アラームを Webhook へ転送する Lambda。Agent Space の作成・Slack 連携・GitHub 連携・Webhook の発行はコンソールでの手作業になる。
 
 エージェントは秒課金なので、投げるものを絞っている。アラームは `ALARM` に変わったときだけ（復旧では投げない）、AWS Health は実際の障害だけ（予定された変更では投げない）、転送 Lambda 自身の失敗アラームは捨てる。
+
+調査結果を読んだ先で追加の指示を出したくなるぶんは、双方向用のプライベートチャンネルで受ける。メンションで調査を始めたり、経過や根拠を聞いたりできて、返答は元メッセージのスレッドに積まれる。双方向はプライベートチャンネルでしか有効にできず、有効化には `AIDevOpsChannelAccessPolicy` を付けた IAM ロールが要る。CloudFormation 側にまだ双方向のフィールドが無いため、この設定はコンソールでの手作業になる。
+
+エージェントに渡してある権限は読み取り専用のクロスアカウントロールだけなので、Slack から何を頼んでもアプリ側のリソースは変わらない。
 
 `agentSpaceArn` がコンテキストに入っているときだけスタックが合成される。コンソール作業が済むまでは `cdk deploy --all` に混ざらない。
 
@@ -744,7 +750,7 @@ aidlc/           # AI-DLC のルールと成果物
 | ドキュメント | 内容 |
 |------------|------|
 | [docs/agentcore-phase1-design.md](docs/agentcore-phase1-design.md) | ソムリエ Phase 1 の設計（認証の二段構え・ツール設計・決定事項） |
-| [docs/devops-agent.md](docs/devops-agent.md) | DevOps Agent のセットアップ手順・優先度の割り当て・カスタムスキル・費用 |
+| [docs/devops-agent.md](docs/devops-agent.md) | DevOps Agent のセットアップ手順・Slack の双方向通信・優先度の割り当て・カスタムスキル・費用 |
 | [docs/application-signals.md](docs/application-signals.md) | Application Signals の計装対象・デプロイ後の確認手順・SLO の決め方・費用 |
 | [docs/claude-code-web.md](docs/claude-code-web.md) | Claude Code on the web での開発環境（外出先から PR まで） |
 | [docs/cdkd-migration.md](docs/cdkd-migration.md) | cdkd（CDK Direct）への移行手順と、残っている作業 |
