@@ -2,6 +2,8 @@
 
 アラームが鳴ってから人間が調べ始めるまでの時間をなくすための仕組み。CloudWatch アラームが発報したら、そのまま AWS DevOps Agent に調査を依頼する。エージェントはテレメトリ・ログ・デプロイ履歴を突き合わせて根本原因と緩和策をまとめ、専用の Slack チャンネルに投稿する。
 
+投稿を読んだ側から追加で頼みたくなったぶんは、双方向用のプライベートチャンネルで受ける。メンションで調査を始めたり、経過を聞いたりできる（[Slack の双方向通信](#slack-の双方向通信)）。
+
 ```
 CloudWatch アラーム ─┐
 外形監視・カナリア ──┼→ SNS（dev-sakekasu-alerts）┬→ Slack 通知 Lambda → Slack（既存のアラートチャンネル）
@@ -9,6 +11,9 @@ AWS Health ──────────┘                            │
                                                   └→ 転送 Lambda → DevOps Agent Webhook
                                                                         ↓
                                                      自動調査 → Slack（DevOps Agent 専用チャンネル）
+
+人 ⇄ Slack（双方向用プライベートチャンネル）⇄ DevOps Agent
+     メンションで調査の開始・経過の照会・追加の指示
 ```
 
 既存の Slack 通知はそのまま残る。転送 Lambda は同じトピックをもう1つの購読者として横から受け取るだけなので、エージェントが止まってもアラート自体は届く。
@@ -80,7 +85,9 @@ Security Agent の Agent Space（Issue #107 で同じ `ops-tooling` に移して
 
 認可のときに Enterprise Grid を選ばない。ワークスペース単位でインストールする。またインストールした Slack アプリはアンインストールしない。再インストールできなくなる可能性があると公式に注意書きがある。
 
-プライベートチャンネルに投げるなら `/invite @AWS DevOps Agent` で Bot を招待しておく。
+プライベートチャンネルに投げるなら、東京リージョンのアプリを `/invite @AWS DevOps Agent - Asia Pacific (Tokyo)` で招待しておく。アプリはリージョンごとに別物で、名前の後ろのリージョン表記まで一致していないと紐付かない。
+
+ここまでは一方向の通知。Slack からエージェントに話しかける側は [Slack の双方向通信](#slack-の双方向通信) にまとめてある。
 
 ### 3. GitHub を繋ぐ
 
@@ -154,6 +161,86 @@ DevOps Agent の Web アプリで `CloudWatch アラーム: TEST-devops-agent` �
 
 HTTP 200 が返るのに調査が始まらないときは、本文の形式か識別子の重複を疑う。同じ識別子で送ると重複として捨てられる。4xx が返るときは署名かヘッダーの問題。
 
+## Slack の双方向通信
+
+一方向の通知だけだと、調査結果を読んで「ではこのログをもう少し見たい」と思った時点で Web アプリに移ることになる。双方向にするとその往復が消える。メンションで調査を始め、経過を聞き、結果に追加の指示を出すところまで Slack の中で終わる。やり取りは元メッセージのスレッドに積まれるので、振り返りのときに誰が何を判断したかがそのまま残る。
+
+### チャンネルの持ち方
+
+双方向はプライベートチャンネルでしか有効にできない。パブリックチャンネルに紐付けた関連付けは一方向通知のままになる。
+
+| チャンネル | 用途 | 向き |
+|-----------|------|------|
+| 既存のアラートチャンネル | Slack 通知 Lambda が投げるアラーム本体 | 一方向 |
+| DevOps Agent 専用チャンネル | 自動調査の経過と結果 | 一方向 |
+| 双方向用のプライベートチャンネル（新設） | エージェントとの会話 | 双方向 |
+
+専用チャンネルを作り替えず新しく足すのは、会話を始めたい人だけをメンバーにしたいため。専用チャンネルは調査の投稿が細かく量も多いので、広く見せておく側に残す。
+
+1つの Agent Space に2つのチャンネルを紐付けたとき、自動調査の投稿が両方に出るかどうかは公式ドキュメントに書かれていない。紐付けた直後にテストアラームを1本鳴らして確かめる。両方に出るなら専用チャンネル側の関連付けを Remove し、双方向のチャンネルに寄せる。
+
+### 手順
+
+Slack ワークスペースのアカウントレベル登録は済んでいる前提（手順2）。追加で要るのは、DevOps Agent のコンソールから IAM ロールを作れる権限。
+
+1. Slack でプライベートチャンネルを作る。メンバーは運用に関わる人だけに絞る。作ったらチャンネル ID（`C` 始まり）を控える
+2. そのチャンネルに東京リージョンのアプリを招待する。`/invite @AWS DevOps Agent - Asia Pacific (Tokyo)`。リージョンごとにアプリが別なので、名前の後ろのリージョン表記まで一致していないと紐付かない
+3. コンソール（`ops-tooling`）で Agent Space → Capabilities → Communications → Add。登録済みのワークスペースを選び、チャンネル ID を入れる
+4. Bidirectional mode を ON にし、IAM ロールは「Auto-create a new DevOps Agent role」を選ぶ。コンソールが `AIDevOpsChannelAccessPolicy` を付けたロールを作る
+5. Add で関連付けを作り、Integrations の表で Bidirectional が Enabled、Bidirectional role にロール ARN が出ることを確認する
+6. Slack に戻り、そのチャンネルでトップレベルのメッセージとして `@AWS DevOps Agent - Asia Pacific (Tokyo) setup` を送る。確認の投稿が返れば紐付け完了
+
+`setup` は紐付けが壊れたときの直し方も兼ねている。反応しなくなったらもう一度送る。`/setup` というスラッシュコマンドは無い。
+
+### 作られるロールの中身
+
+コンソールが付ける `AIDevOpsChannelAccessPolicy` は1文だけの管理ポリシー。
+
+```json
+{
+  "Sid": "AllowChatActions",
+  "Effect": "Allow",
+  "Action": ["aidevops:CreateChat", "aidevops:SendMessage"],
+  "Resource": "arn:aws:aidevops:*:*:agentspace/${aws:PrincipalTag/AgentSpaceId}",
+  "Condition": { "StringEquals": { "aws:ResourceAccount": "${aws:PrincipalAccount}" } }
+}
+```
+
+許しているのはチャットの開始とメッセージ送信だけで、宛先はプリンシパルタグ `AgentSpaceId` で絞られる。ロールにこのタグが無い、あるいは値が違うと何も通らない。自分でロールを作るとここを落としやすいので、自動作成を選んでいる。
+
+調査そのものの権限はこのロールとは別で、アプリ本体アカウントの `dev-sakekasu-devops-agent-monitoring` が持っている。そちらは読み取り専用のままなので、Slack から何を頼んでもリソースは変わらない。Operator ロールを作っていないことが、そのまま双方向のガードレールになっている。
+
+### 使い方
+
+会話はトップレベルのメンションで始める。返答は元メッセージのスレッドに付く。
+
+```
+@AWS DevOps Agent - Asia Pacific (Tokyo) 直近の appsync-5xx の調査状況を教えて
+```
+
+スレッドの中で続けるときも毎回メンションが要る。落とすと無視される。別の話を始めたいときは、スレッドではなく新しいトップレベルのメッセージにする。
+
+頼めるのは Agent Space の設定と権限の範囲で、調査の開始・確認・誘導、リソースやメトリクス・ログ・トポロジーの照会、予防提案（Evaluations）への返答あたり。製品へのフィードバックもメンションで送れて、エージェントが内容を要約して確認したうえで AWS に投げる。
+
+### 費用の増え方
+
+チャットも調査・評価と同じ $0.0083/秒で課金される。これまで自動調査だけだった稼働時間に、人が始めた分が上乗せされる。1回の質問で数十秒から数分動く前提で見ておく。
+
+使うのをやめたくなったら、関連付けを Edit して Bidirectional mode を OFF にすればそのチャンネルは一方向通知に戻る。チャンネルごと外すなら Remove。どちらもワークスペースの登録は残る。
+
+### 反応しないときに見るところ
+
+- 東京リージョンのアプリがそのチャンネルのメンバーになっているか。リージョン違いのアプリを招待していないか
+- コンソールの Integrations で Bidirectional が Enabled か、表示されているロールが実在するか
+- 会話の最初のメッセージでアプリをメンションしているか。返答がすでにスレッドに付いていないか
+- 紐付けが生きているか。怪しければ `setup` をもう一度送る
+
+関連付けを作る画面でワークスペースが選択肢に出てこないときは、Agent Space と同じアカウント・同じリージョンで Slack を登録したかを疑う。
+
+### まだコードにできない
+
+CloudFormation の `AWS::DevOpsAgent::Association` には Slack 用の設定があるが、中身は `WorkspaceId` / `WorkspaceName` / `TransmissionTarget` の3つだけで、双方向のフィールドがまだ無い。API と SDK には `SlackBidirectionalConfiguration`（`enabled` と `roleArn`）があるので、CloudFormation が追いつけば関連付けごと CDK に寄せられる。それまではコンソールでの手作業として残る。
+
 ## カスタムスキルに入れておく運用ナレッジ
 
 エージェントは汎用の知識しか持たないので、このプロジェクト固有の勘所はカスタムスキルとして登録しておく。切り分けが速くなる。
@@ -169,6 +256,8 @@ HTTP 200 が返るのに調査が始まらないときは、本文の形式か�
 エージェントの稼働時間に対して $0.0083/秒（約 $30/時）。動いた時間だけかかり、待機している間は課金されない。Agent Space を作って置いておくだけでは費用は出ないので、アラームが1回も鳴らなかった月の請求はゼロになる。月10回・1回8分の調査なら $40 前後。
 
 課金されるのは調査（Investigation）・評価（Evaluation）・チャット（Chat request）の3つ。コンソールに4つ目として出る System Learning Hours は課金対象外。
+
+Slack の双方向通信で増えるのはチャットの分。人がメンションした回数だけ稼働時間が乗るので、自動調査だけの頃より読みにくくなる。
 
 このうち評価だけは平常時にも走る。既定で週1回の自動実行があり、インシデントが起きていなくても過去の調査を分析して改善提案を出す。オンデマンドだけにしたい場合はスケジュールを止められる。
 
@@ -186,6 +275,8 @@ HTTP 200 が返るのに調査が始まらないときは、本文の形式か�
 - セカンダリのロールは調査のため読み取り範囲が広い。信頼条件を Agent Space の ARN に絞ったうえで、変更系の操作は Permission Boundary や SCP で止める
 - 作業のたびに `aws sts get-caller-identity` でプロファイルの向き先を確認する。プライマリとセカンダリを取り違えやすい
 - 調査中にエージェントが発行する CloudWatch Logs Insights のクエリなどは、各サービス側で別途課金される
+- 双方向のチャンネルに入っている人は誰でもエージェントを動かせる。秒課金なので、メンバーは運用に関わる人だけに絞る
+- Slack アプリはリージョンごとに別。東京以外のアプリを招待しても反応しない
 
 ## 参考
 
@@ -193,4 +284,6 @@ HTTP 200 が返るのに調査が始まらないときは、本文の形式か�
 - [Connecting multiple AWS Accounts](https://docs.aws.amazon.com/devopsagent/latest/userguide/configuring-integrations-and-knowledge-connecting-multiple-aws-accounts.html)
 - [Invoking DevOps Agent through Webhook](https://docs.aws.amazon.com/devopsagent/latest/userguide/configuring-integrations-and-knowledge-invoking-devops-agent-through-webhook.html)
 - [Connecting Slack](https://docs.aws.amazon.com/devopsagent/latest/userguide/connecting-to-ticketing-and-chat-connecting-slack.html)
+- [AIDevOpsChannelAccessPolicy（双方向用の管理ポリシー）](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AIDevOpsChannelAccessPolicy.html)
+- [AWS::DevOpsAgent::Association](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-devopsagent-association.html)
 - [Pricing](https://aws.amazon.com/devops-agent/pricing)
