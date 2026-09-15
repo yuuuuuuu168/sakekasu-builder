@@ -411,6 +411,9 @@ export function resolveMediaType(contentType: string | undefined): ImageMediaTyp
  * 宣言と中身が食い違う場合も落とす。この状態は Bedrock 側でも弾かれるが、
  * 「OCR に失敗しました」しか残らず、拡張子だけ書き換えたファイルなのか
  * 別の理由なのかが切り分けられない
+ *
+ * `Invalid image content` の文言も一括読み取り側が見ている。理由は
+ * `assertImagesFitBedrockLimit()` の説明と同じ
  */
 export function assertImagesAreRealImages(
   images: { bytes: Uint8Array; mediaType: ImageMediaType }[],
@@ -440,6 +443,13 @@ export function assertImagesAreRealImages(
  *
  * 超えていれば Bedrock を呼ばずに落とす。呼んでも ValidationException が
  * 返るだけで、失敗の理由がログから読み取りにくくなる
+ *
+ * **`Image too large for OCR` という文言は一括読み取り側が見ている。**
+ * 画像を差し替えない限り必ず同じ失敗になる種類のエラーなので、フロントは
+ * この文言で「二度と投げない」判断をする（`requestLabelSpecs.ts` の
+ * `PERMANENT_FAILURE_MESSAGES`）。変えるときは向こうも直す。
+ * 直し忘れても壊れはせず、一括読み取りが同じ画像を毎回投げ直す状態に戻る
+ * （2026-08-24 に 150 回中 78 回を投げ直して OCR の30日 SLO が 54% まで落ちた）
  */
 export function assertImagesFitBedrockLimit(
   images: { base64: string }[],
