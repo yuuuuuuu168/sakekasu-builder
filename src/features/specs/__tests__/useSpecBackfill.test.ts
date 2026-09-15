@@ -176,6 +176,100 @@ describe('useSpecBackfill', () => {
     expect(result.current.targets).toHaveLength(1);
   });
 
+  it('大きすぎる画像の記録は二度と投げない（同じ失敗を繰り返さない）', async () => {
+    // Lambda の assertImagesFitBedrockLimit() が投げる文言。画像を差し替えない
+    // 限り必ず同じ失敗になるので、やり直しの対象から外す
+    mockGraphql.mockRejectedValueOnce({
+      errors: [{ message: 'Image too large for OCR' }],
+    });
+
+    const { result, rerender } = renderHook(() => useSpecBackfill([record()], vi.fn()));
+
+    await act(async () => {
+      const progress = await result.current.run();
+      expect(progress.written).toBe(0);
+      expect(progress.skipped).toBe(1);
+    });
+
+    // 解析の1回だけ。更新は投げない
+    expect(mockGraphql).toHaveBeenCalledTimes(1);
+
+    rerender();
+    expect(result.current.targets).toHaveLength(0);
+    expect(result.current.skippedCount).toBe(1);
+
+    // 2回目を押しても投げ直さない
+    await act(async () => {
+      const progress = await result.current.run();
+      expect(progress.total).toBe(0);
+    });
+    expect(mockGraphql).toHaveBeenCalledTimes(1);
+  });
+
+  it('画像でないファイルの記録も二度と投げない', async () => {
+    mockGraphql.mockRejectedValueOnce({
+      errors: [{ message: 'Invalid image content' }],
+    });
+
+    const { result, rerender } = renderHook(() => useSpecBackfill([record()], vi.fn()));
+
+    await act(async () => {
+      await result.current.run();
+    });
+
+    rerender();
+    expect(result.current.targets).toHaveLength(0);
+  });
+
+  it('応答に載った恒久的な失敗も控える（例外とは別の経路）', async () => {
+    // Amplify は GraphQL のエラーを応答に載せることも例外で投げることもある
+    mockGraphql.mockResolvedValueOnce({
+      errors: [{ message: 'Image too large for OCR' }],
+    });
+
+    const { result, rerender } = renderHook(() => useSpecBackfill([record()], vi.fn()));
+
+    await act(async () => {
+      await result.current.run();
+    });
+
+    rerender();
+    expect(result.current.targets).toHaveLength(0);
+  });
+
+  it('見覚えのない失敗は控えない（読めるはずの記録を締め出さないため）', async () => {
+    mockGraphql.mockRejectedValueOnce({
+      errors: [{ message: 'Failed to retrieve image from storage' }],
+    });
+
+    const { result, rerender } = renderHook(() => useSpecBackfill([record()], vi.fn()));
+
+    await act(async () => {
+      await result.current.run();
+    });
+
+    rerender();
+    expect(result.current.targets).toHaveLength(1);
+  });
+
+  it('大きすぎる画像で止まらず、残りの記録を続ける', async () => {
+    mockGraphql.mockRejectedValueOnce({
+      errors: [{ message: 'Image too large for OCR' }],
+    });
+    queueAnalyzed({ brewery: '旭酒造株式会社' });
+    mockGraphql.mockResolvedValueOnce({ data: { updatePurchaseRecord: { id: 'p-2' } } });
+
+    const { result } = renderHook(() =>
+      useSpecBackfill([record(), record({ id: 'p-2' })], vi.fn()),
+    );
+
+    await act(async () => {
+      const progress = await result.current.run();
+      expect(progress.written).toBe(1);
+      expect(progress.skipped).toBe(1);
+    });
+  });
+
   it('保存に失敗した記録も控えない', async () => {
     queueAnalyzed({ brewery: '旭酒造株式会社' });
     mockGraphql.mockResolvedValueOnce({ errors: [{ message: 'boom' }] });
@@ -353,6 +447,33 @@ describe('useSpecBackfill の読み直し', () => {
 
     rerender();
     expect(result.current.rereadTargets).toHaveLength(0);
+  });
+
+  it('大きすぎる画像は読み直しの対象からも外す（精度を上げても大きさは変わらない）', async () => {
+    mockGraphql.mockRejectedValueOnce({
+      errors: [{ message: 'Image too large for OCR' }],
+    });
+
+    const { result, rerender } = renderHook(() =>
+      useSpecBackfill([record({ specs: pickSakeSpecs({ brewery: '誤った蔵元' }) })], vi.fn()),
+    );
+
+    expect(result.current.rereadTargets).toHaveLength(1);
+
+    await act(async () => {
+      await result.current.run({ reread: true });
+    });
+
+    rerender();
+    expect(result.current.rereadTargets).toHaveLength(0);
+
+    // 版を上げても戻らないことは specStorage 側の版を持たない控えで担保している。
+    // ここでは読み直しを走らせ直しても投げ直さないことを見る
+    await act(async () => {
+      const progress = await result.current.run({ reread: true });
+      expect(progress.total).toBe(0);
+    });
+    expect(mockGraphql).toHaveBeenCalledTimes(1);
   });
 
   it('読み直しでは、前回読めなかった控えも無視して対象にする', async () => {
