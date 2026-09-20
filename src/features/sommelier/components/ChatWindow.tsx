@@ -207,7 +207,9 @@ export function ChatWindow({
             maxLength={MAX_PROMPT_LENGTH}
             placeholder="今夜は何を飲もう？ 料理に合うお酒は？"
             aria-label="相談内容"
-            className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 outline-none focus:border-sake-gold focus:ring-1 focus:ring-sake-gold/40 dark:border-white/15 dark:bg-white/5 dark:text-gray-100"
+            // スマホでは 16px（text-base）にする。16px を下回ると iOS Safari が
+            // 入力欄を触った拍子に画面を拡大し、そのまま戻らずに横へはみ出る
+            className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-base text-gray-900 outline-none focus:border-sake-gold focus:ring-1 focus:ring-sake-gold/40 sm:text-sm dark:border-white/15 dark:bg-white/5 dark:text-gray-100"
             data-testid="chat-input"
           />
           {isResponding ? (
