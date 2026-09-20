@@ -223,7 +223,10 @@ export function FilterControls({
             placeholder="銘柄・店・場所・メモから検索..."
             value={searchQuery}
             onChange={(e) => onSearchQueryChange(e.target.value)}
-            className="min-h-[44px] text-sm"
+            // 文字サイズは Input の既定（スマホ 16px / md 以上 14px）に任せる。
+            // 16px を下回ると iOS Safari が入力欄を触った拍子に画面を拡大し、
+            // そのまま戻らないので、横にはみ出た表示になる
+            className="min-h-[44px]"
             data-testid="filter-search"
           />
         </div>
@@ -383,7 +386,7 @@ export function FilterControls({
                   value={customDateFrom}
                   max={customDateTo || undefined}
                   onChange={(e) => onCustomDateFromChange(e.target.value)}
-                  className="min-h-[44px] text-sm"
+                  className="min-h-[44px]"
                   data-testid="filter-date-from"
                 />
               </div>
@@ -397,7 +400,7 @@ export function FilterControls({
                   value={customDateTo}
                   min={customDateFrom || undefined}
                   onChange={(e) => onCustomDateToChange(e.target.value)}
-                  className="min-h-[44px] text-sm"
+                  className="min-h-[44px]"
                   data-testid="filter-date-to"
                 />
               </div>
