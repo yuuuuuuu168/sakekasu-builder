@@ -60,26 +60,31 @@ function NavigationBar({
 
       <MfaSettingsDialog open={isMfaDialogOpen} onClose={() => setIsMfaDialogOpen(false)} />
 
-      {/* ページ切り替えタブ（5タブは狭い画面で収まらないため横スクロール可能にする） */}
+      {/* ページ切り替えタブ。5タブを1行に並べると iPhone の幅（390〜402px）では
+          最後の「統計」が画面からはみ出るので、狭い画面では絵文字を上・ラベルを下に
+          積んで5つとも収める。文字を拡大している端末向けに横スクロールは残す */}
       <div className="mx-auto flex max-w-md overflow-x-auto">
         {(
           [
-            { page: 'purchase', label: '🛒 購入登録' },
-            { page: 'drinking', label: '🍶 飲酒登録' },
-            { page: 'records', label: '📋 記録一覧' },
-            { page: 'calendar', label: '📅 カレンダー' },
-            { page: 'stats', label: '📊 統計' },
+            { page: 'purchase', icon: '🛒', label: '購入登録' },
+            { page: 'drinking', icon: '🍶', label: '飲酒登録' },
+            { page: 'records', icon: '📋', label: '記録一覧' },
+            { page: 'calendar', icon: '📅', label: 'カレンダー' },
+            { page: 'stats', icon: '📊', label: '統計' },
           ] as const
-        ).map(({ page, label }) => (
+        ).map(({ page, icon, label }) => (
           <button
             key={page}
             onClick={() => onPageChange(page)}
-            className={`flex-1 whitespace-nowrap px-1 py-3 text-sm font-medium transition-colors ${
+            className={`flex flex-1 flex-col items-center gap-0.5 whitespace-nowrap px-0.5 py-2 text-[11px] leading-tight font-medium transition-colors sm:flex-row sm:justify-center sm:gap-1 sm:px-1 sm:py-3 sm:text-sm ${
               currentPage === page
                 ? 'border-b-2 border-sake-gold text-sake-gold'
                 : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
             }`}
           >
+            <span className="text-base leading-none sm:text-sm" aria-hidden="true">
+              {icon}
+            </span>
             {label}
           </button>
         ))}
