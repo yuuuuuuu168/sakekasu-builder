@@ -48,6 +48,20 @@
         "kms:Decrypt"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "DenyDirectoryAndContactReads",
+      "Effect": "Deny",
+      "Action": [
+        "identitystore:*User*",
+        "identitystore:*GroupMembership*",
+        "identitystore:IsMemberInGroups",
+        "sso-directory:*",
+        "account:GetContactInformation",
+        "account:GetAlternateContact",
+        "account:GetPrimaryEmail"
+      ],
+      "Resource": "*"
     }
   ]
 }
