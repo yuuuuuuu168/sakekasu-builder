@@ -30,6 +30,12 @@ PR を作成したら、ユーザーの指示を待たずにそのまま `subscr
 PR 作成の直後には [scripts/pr-watch-reminder.mjs](scripts/pr-watch-reminder.mjs)（`PostToolUse`
 フック）が PR 番号つきで watch を促す。長いセッションでこの節が押し流されても効く。
 
+## 応答の言語
+
+応答は日本語で書く。[scripts/japanese-guard/](scripts/japanese-guard/)（`Stop` フック）が
+ターンの最終回答を検査し、英語主体なら日本語で書き直させる。コードブロック・インラインコード・
+URL は数えないので、英語のコマンドや英文の下書きはコードブロックに入れて見せる。
+
 ## AWS確認作業の認証フロー
 
 AWS環境の確認が必要になったら、ユーザーの指示を待たずに次を実行する。
