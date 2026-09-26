@@ -6,7 +6,7 @@
 // 「直接実行されたときだけ判定する」ガードを置くと、実行パスにシンボリックリンクが
 // 挟まったときに判定ごと素通りするため、ガードを設けずに済む形にしてある。
 //
-// PR #164 のセキュリティレビューで指摘されたバイパスの各形を、ここに固定する。
+// sakekasu-builder の PR #164 のセキュリティレビューで指摘されたバイパスの各形を、ここに固定する。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
