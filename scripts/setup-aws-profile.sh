@@ -13,6 +13,41 @@ if [ "$remote" != "true" ] && [ "$remote" != "1" ]; then
   exit 0
 fi
 
+# SSO の値は scripts/aws-verify.conf から読む。同名の環境変数があればそちらを優先する
+# （クラウド環境の Environment variables で上書きできるように）。AWS CLI を落とす前に
+# 確かめるのは、未設定のまま 70MB を落としてから失敗させないため
+conf="$(cd "$(dirname "$0")" && pwd)/aws-verify.conf"
+for key in SSO_START_URL SSO_REGION SSO_ACCOUNT_ID SSO_ROLE_NAME AWS_VERIFY_REGION; do
+  if [ -z "${!key:-}" ] && [ -f "$conf" ]; then
+    value=$(sed -n "s/^${key}=//p" "$conf" | tail -1)
+    printf -v "$key" '%s' "$value"
+  fi
+done
+missing=""
+for key in SSO_START_URL SSO_REGION SSO_ACCOUNT_ID SSO_ROLE_NAME AWS_VERIFY_REGION; do
+  [ -n "${!key:-}" ] || missing="$missing $key"
+done
+if [ -n "$missing" ]; then
+  echo "scripts/aws-verify.conf に未設定の値がある:$missing" >&2
+  echo "アプリの AWS アカウントに合わせて埋めてから再実行する。" >&2
+  exit 1
+fi
+
+# verify 以外のプロファイル（任意）。「名前:アカウントID」をカンマで並べる
+if [ -z "${SSO_EXTRA_PROFILES+set}" ] && [ -f "$conf" ]; then
+  SSO_EXTRA_PROFILES=$(sed -n "s/^SSO_EXTRA_PROFILES=//p" "$conf" | tail -1)
+fi
+extra_profiles=()
+if [ -n "${SSO_EXTRA_PROFILES:-}" ]; then
+  IFS=',' read -r -a extra_profiles <<< "$SSO_EXTRA_PROFILES"
+  for entry in "${extra_profiles[@]}"; do
+    if ! [[ "$entry" =~ ^verify-[a-z0-9-]+:[0-9]{12}$ ]]; then
+      echo "SSO_EXTRA_PROFILES の形式が不正: '$entry'（verify-名前:12桁のアカウントID）" >&2
+      exit 1
+    fi
+  done
+fi
+
 # AWS CLI Team の署名鍵の指紋。AWS の公式インストール手順に載っているもので、
 # 公開鍵そのものは scripts/aws-cli-public-key.asc に置いてある（鍵の期限は 2027-07-01）。
 #
@@ -127,14 +162,33 @@ if [ -f ~/.aws/config ]; then
   echo "Backed up existing config to $backup"
 fi
 
-cat > ~/.aws/config << 'EOF'
-[profile verify]
-sso_start_url = https://d-xxxxxxxxxx.awsapps.com/start
-sso_region = ap-northeast-1
-sso_account_id = <アプリのアカウント ID>
-sso_role_name = AgentVerifyAccess
-region = ap-northeast-1
-output = json
-EOF
+# 全プロファイルが同じ sso-session を共有する。デバイスコードの承認は1回で済み、
+# そのトークンでどのアカウントのロールにも入れる。
+# 先頭の verify-config 行は aws-sso-login.sh が「設定が変わったか」を見る目印
+write_profile() {
+  echo
+  echo "[profile $1]"
+  echo "sso_session = verify"
+  echo "sso_account_id = $2"
+  echo "sso_role_name = $SSO_ROLE_NAME"
+  echo "region = $AWS_VERIFY_REGION"
+  echo "output = json"
+}
 
-echo "AWS profile 'verify' configured."
+{
+  echo "# verify-config: $SSO_START_URL $SSO_REGION $SSO_ACCOUNT_ID $SSO_ROLE_NAME $AWS_VERIFY_REGION ${SSO_EXTRA_PROFILES:-}"
+  echo "[sso-session verify]"
+  echo "sso_start_url = $SSO_START_URL"
+  echo "sso_region = $SSO_REGION"
+  echo "sso_registration_scopes = sso:account:access"
+  write_profile verify "$SSO_ACCOUNT_ID"
+  for entry in "${extra_profiles[@]}"; do
+    write_profile "${entry%%:*}" "${entry#*:}"
+  done
+} > ~/.aws/config
+
+names="verify"
+for entry in "${extra_profiles[@]}"; do
+  names="$names, ${entry%%:*}"
+done
+echo "AWS profiles configured: $names"
