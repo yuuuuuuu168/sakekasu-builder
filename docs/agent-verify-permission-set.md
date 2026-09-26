@@ -35,6 +35,40 @@ CloudWatch Logs・メトリクス・Application Signals・X-Ray は**意図的�
 - `ssm:DescribeParameters`（パラメータ名。値は `GetParameter*` 側で Deny 済み）
 - `cognito-idp:DescribeUserPool` / `DescribeUserPoolClient` / `ListGroups`（プールの設定。利用者そのものは `ListUsers` / `AdminGetUser` 側で Deny 済み）
 
+## 管理アカウントで追加した Deny
+
+`AgentVerifyAccess` は管理アカウント（<管理アカウント ID>）と運用ツール用アカウント（<運用アカウント ID>）にも割り当てている（`verify-org` / `verify-ops`）。Permission Set は 1 つなので、インラインポリシーも 3 アカウント共通になる。
+
+管理アカウントでは、土台の `ReadOnlyAccess` のままだと Identity Center の利用者の個人情報が読める。IAM のポリシーシミュレーター（`iam simulate-principal-policy`）で確かめた結果、次がすべて `allowed` だった。
+
+- `identitystore:ListUsers` / `DescribeUser` など：ユーザー名・氏名・メールアドレス
+- `identitystore:ListGroupMemberships` など：誰がどのグループに入っているか
+- `sso-directory:SearchUsers` など：同じ情報の旧 API
+- `account:GetContactInformation` / `GetAlternateContact` / `GetPrimaryEmail`：アカウントの連絡先（住所・電話・メール）
+
+これを `DenyDirectoryAndContactReads` で塞ぐ。アクション名は `identitystore:*User*` のようにワイルドカードで書き、同じ系統の API が増えても漏れないようにしている。
+
+調査に使うので、次は Deny していない。
+
+| 残すもの | 理由 |
+|---|---|
+| `identitystore:ListGroups` / `DescribeGroup`、`sso-directory:SearchGroups` | グループ名だけで、所属者は出ない |
+| `sso:ListAccountAssignments` / `ListPermissionSets` / `DescribePermissionSet` など | 割り当ての確認に要る。出るのはプリンシパル ID で、名前やメールは出ない |
+| `organizations:ListAccounts` / `DescribeAccount` | 組織の構成の確認に要る。各アカウントのルートのメールアドレスは出る |
+| Cost Explorer・CloudTrail・CloudWatch Logs | 請求と障害調査に要る |
+
+適用は、管理アカウントの管理者権限で `put-inline-policy-to-permission-set` を流し、下の「設定が正しいかを確かめる」にある再プロビジョニングまで行う（`ALL_PROVISIONED_ACCOUNTS` なので 3 アカウントのロールがまとめて更新される）。クラウドセッションからは `deny-aws-writes.sh` が止めるので、人が手で流す。
+
+追加後の判定は、適用前に同じシミュレーターへポリシーを渡して確かめた（`--policy-input-list`）。上の 4 系統は `explicitDeny`、残すものは `allowed` になる。適用後は同じコマンドから `--policy-input-list` を外して、実体のロールで同じ結果になることを確かめる。
+
+```sh
+ROLE=arn:aws:iam::<管理アカウント ID>:role/aws-reserved/sso.amazonaws.com/ap-northeast-1/AWSReservedSSO_AgentVerifyAccess_<接尾辞>
+aws iam simulate-principal-policy --profile verify-org --policy-source-arn $ROLE \
+  --action-names identitystore:ListUsers identitystore:ListGroupMemberships sso-directory:SearchUsers \
+    account:GetContactInformation identitystore:ListGroups sso:ListAccountAssignments organizations:ListAccounts \
+  --query 'EvaluationResults[].[EvalActionName,EvalDecision]' --output text
+```
+
 ## この Deny が届かないところ
 
 明示 Deny は IAM の認可を通る呼び出しにしか効かない。**SSO Portal API（`aws sso ...`）と Cognito の利用者向け操作は SigV4 で署名されず**、access token だけで通るため、ここに何を書いても止まらない。CLI 同梱のモデルで確かめると `sso get-role-credentials` は `authtype: none` になっている。
