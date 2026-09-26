@@ -58,7 +58,8 @@ cat << 'POLICY'
 [session policy]
 - AWS の確認が要るときは、指示を待たずに `bash scripts/aws-sso-login.sh` を実行し、
   出力された URL とコードをそのままユーザーに提示して承認を待つ。以降の AWS CLI には
-  必ず `--profile verify` を付ける（読み取り専用）。
+  必ず `--profile verify`（アプリ）/ `verify-org`（管理）/ `verify-ops`（運用ツール）の
+  どれかを付ける（どれも読み取り専用）。
 - PR を作ったら、指示を待たずに subscribe_pr_activity でその PR を watch する。
 POLICY
 

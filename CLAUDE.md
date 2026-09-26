@@ -44,10 +44,20 @@ AWS環境の確認が必要になったら、ユーザーの指示を待たず�
 bash scripts/aws-sso-login.sh
 ```
 
-AWS CLI v2 の導入、`verify` プロファイルの配置、SSO ログインの開始までをこれ一つで行う。
-認証済みなら何もせず終わる。出力された確認URLとコードはそのままユーザーに提示し、
-`bash scripts/aws-sso-login.sh --wait` で承認の完了を確かめてから続行する。
-以降のAWS CLI操作には必ず `--profile verify` を付ける。
+AWS CLI v2 の導入、読み取り専用プロファイルの配置、SSO ログインの開始までをこれ一つで行う。
+認証済みなら何もせず終わる。出力された確認URLとコードは、次のツールを呼ぶ前にそのまま
+ユーザーへの返答として提示してターンを終え、承認したと言われてから
+`bash scripts/aws-sso-login.sh --wait` で完了を確かめる。ツール呼び出しの合間に書いた文は
+ユーザーの画面に出ないことがあり、URL を渡せないまま待ち時間だけが過ぎる。
+以降のAWS CLI操作には必ず次のどれかのプロファイルを付ける。1回の承認で全部に入れる。
+
+| プロファイル | アカウント | 使いどころ |
+| --- | --- | --- |
+| `verify` | Web アプリのデプロイ先 | アプリのログ・メトリクス・リソースの確認 |
+| `verify-org` | Organization の管理アカウント | 組織・請求・Identity Center の確認 |
+| `verify-ops` | 運用ツール用 | Security Agent / DevOps Agent の確認 |
+
+接続先のアカウントは [scripts/aws-verify.conf](scripts/aws-verify.conf) にある。
 
 デバイスコードフローの `aws sso login` は承認されるまで前面で待ち続けるため、
 Bash ツールから直に実行するとURLとコードを渡せないまま固まる。スクリプトは
