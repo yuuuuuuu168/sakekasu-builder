@@ -92,7 +92,11 @@ aws iam simulate-principal-policy --profile verify-org --policy-source-arn $ROLE
 
 作り直す場合の手順は次のとおり。管理アカウント（<管理アカウント ID>）の認証が必要で、メンバーアカウントからは `sso:ListPermissionSets` すら通らない。
 
+**`sso-admin` のコマンドは、管理アカウントのプロファイル（ローカルの `yuuuuuuuki7749`）とリージョン `ap-northeast-1` で流す。** アプリのアカウント（232791540685）の `AdministratorAccess` で流すと、`the resource does not exist in this Region` を含む `AccessDeniedException` になる（2026-09-26 に実際に踏んだ）。ローカルの SSO が期限切れなら、先に `aws sso login --profile yuuuuuuuki7749` を流す。最初の `get-caller-identity` で `<管理アカウント ID>` が返ることを確かめてから先へ進む。zsh の対話モードでは `#` で始まる行がコメントにならない（`command not found: #` になる）ので、コードブロック中のコメント行は貼らずに飛ばす。
+
 ```sh
+export AWS_PROFILE=yuuuuuuuki7749 AWS_REGION=ap-northeast-1
+aws sts get-caller-identity --query Account --output text
 INST=arn:aws:sso:::instance/<インスタンス ID>
 
 aws sso-admin create-permission-set --instance-arn $INST \
@@ -118,9 +122,11 @@ aws sso-admin create-account-assignment --instance-arn $INST \
 
 ## 設定が正しいかを確かめる
 
-インラインポリシーの投入（3番目のコマンド）を飛ばすと、土台の `ReadOnlyAccess` がむき出しになり、利用者データが読める状態で気づけない。作成・変更のたびに、実際に入っている内容がリポジトリの定義と一致するか確認する。
+インラインポリシーの投入（3番目のコマンド）を飛ばすと、土台の `ReadOnlyAccess` がむき出しになり、利用者データが読める状態で気づけない。作成・変更のたびに、実際に入っている内容がリポジトリの定義と一致するか確認する。上と同じく管理アカウントのプロファイルで流す。
 
 ```sh
+export AWS_PROFILE=yuuuuuuuki7749 AWS_REGION=ap-northeast-1
+aws sts get-caller-identity --query Account --output text
 INST=arn:aws:sso:::instance/<インスタンス ID>
 PS=arn:aws:sso:::permissionSet/<インスタンス ID>/<Permission Set ID>
 
@@ -161,6 +167,16 @@ aws iam get-role-policy --role-name AWSReservedSSO_AgentVerifyAccess_13e5a14e9d6
 | `ssm get-parameter` / `secretsmanager get-secret-value` | AccessDenied |
 | `cognito-idp list-users` | AccessDenied |
 | `s3api put-object` / `lambda invoke` | AccessDenied |
+
+管理アカウント（`verify-org`）では、`DenyDirectoryAndContactReads` の反映後（2026-09-26）に、実体のロールで `iam simulate-principal-policy` を流して次を確かめた。3 アカウントのロールすべてに `DenyDirectoryAndContactReads` が入っていることも `iam get-role-policy` で確かめた。
+
+| アクション | 結果 |
+|---|---|
+| `identitystore:ListUsers` / `DescribeUser` / `ListGroupMemberships` | explicitDeny |
+| `sso-directory:SearchUsers` / `DescribeDirectory` | explicitDeny |
+| `account:GetContactInformation` / `GetPrimaryEmail` | explicitDeny |
+| `identitystore:ListGroups`、`sso:ListAccountAssignments`、`organizations:ListAccounts` | allowed |
+| `ce:GetCostAndUsage`、`logs:FilterLogEvents` | allowed |
 
 `s3api get-object` を試すときは**実在するオブジェクトのキー**を使うこと。存在しないキーだと、`s3:ListBucket` を持っているぶん S3 が `NoSuchKey`（404）を返し、GetObject の認可結果が観測できない。
 
