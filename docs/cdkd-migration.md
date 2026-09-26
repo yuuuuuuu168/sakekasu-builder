@@ -11,11 +11,12 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | 手順 | 内容 | 状態 |
 | --- | --- | --- |
 | 1 | infra に `@go-to-k/cdkd` を追加 | 済 |
+| 1.5 | cdkd を 0.291.31 に上げる | 済 |
 | 2 | cdkd 用のデプロイロールと Permissions Boundary を `GithubOidcStack` に追加 | 済（コード） |
 | 3 | OIDC スタックを手動デプロイしてロールと境界を作る | 要・再実行 |
 | 3.5 | `cdk deploy --all` でアプリの全ロールに境界を付ける | これから |
 | 4 | `cdkd bootstrap` | 済 |
-| 5 | `cdkd diff --all` で未対応リソースを洗い出す | 済・クリーン |
+| 5 | `cdkd diff --all` で未対応リソースを洗い出す | 要・再実行 |
 | 6 | 影響の小さいスタックで CFn への戻しを確認 | これから |
 | 7 | `cdkd import` で既存スタックを取り込む | これから |
 | 8 | `cdkd drift` で state と実物の一致を確認 | これから |
@@ -30,6 +31,26 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 **手順7を始めたら、手順9のマージまで `infra/**` を main に入れない。** `cdkd import --migrate-from-cloudformation` は CloudFormation のスタックを削除する（リソースは Retain で残る）。その状態でいまの `deploy.yml`（`cdk deploy --all`）が走ると、スタックが消えている以上ゼロから作り直そうとして、既存リソースと名前がぶつかる。取り込みから差し替えまでの窓は短いほどよい。手順9の PR を先に用意しておき、取り込みが終わったらすぐマージする。
 
 **手順9を先にマージしない。** 取り込みが済んでいない状態で cdkd が走ると、state が空なので既存リソースの存在を知らないまま全部を新規作成しにいく。
+
+## cdkd の版と、先行リポジトリで判明している不具合
+
+同じアカウントで動かしている他の2本が先に cdkd へ移行した。踏んだ不具合と回避がそちらに残っているので、こちらは書き写せばよい。
+
+| リポジトリ | cdkd | 移行の回し方 |
+| --- | --- | --- |
+| [sakekasu-kakeibo](https://github.com/yuuuuuuu168/sakekasu-kakeibo) | 0.291.16 | deploy ワークフローが毎回 `migrate-to-cdkd.sh` を呼ぶ。人が打つものは無い |
+| [sakekasu-learning](https://github.com/yuuuuuuu168/sakekasu-learning) | 0.291.16 | 手元で `cdkd-stacks.sh migrate` を打つ |
+| sakekasu-builder | 0.291.31 | これから決める |
+
+**版を 0.291.16 に揃えなかった。** 他2本が踏んだ不具合のうち1件は 0.291.23 で直っている（[#3701](https://github.com/go-to-k/cdkd/issues/3701) `complete a bare CloudFormation id to the Cloud Control composite identifier`）。16 に固定すると、上流で直っているものに対して回避コードを新しく書くことになる。揃える先は「他2本がたまたま使っていた版」ではなく最新とし、他2本は後から追随して回避を1つ落とせばよい。
+
+判明している不具合は2件。どちらもこのリポジトリに当たる。
+
+**リージョンの取り違え（未修正。回避が要る）。** `cdkd import` は CloudFormation を読むクライアントを実行時の `AWS_REGION` で作り、スタックのリージョンを見ない。us-east-1 のスタックを ap-northeast-1 から探して、全リソースが「not found」になる。0.291.31 の `cdkd import --help` を見ても `--stack-region` に当たるオプションは無いので、スタックごとに `AWS_REGION` を合わせて打つしかない。
+
+このリポジトリで当たるのは `sakekasu-dev-health-global`（us-east-1）。手順6 はそのスタックで往復を確認する手順なので、回避を入れないまま打つと最初の一手が分かりにくい形で落ちる。
+
+**Cognito UserPoolClient の物理 ID（0.291.23 で修正済み）。** Cloud Control は `<UserPoolId>|<ClientId>` の組を識別子に求めるが、CloudFormation から引ける物理 ID は ClientId だけ。他2本は `--resource <論理ID>=<pool>|<client>`（と、残りを自動解決させる `--auto`）で明示して避けている。0.291.31 では要らないはずだが、手順5 と手順6 で実際に通ることを確かめるまでは直ったものとして扱わない。このリポジトリの UserPoolClient は2つ。
 
 ## 先に片付けること
 
@@ -164,7 +185,9 @@ AWS_PROFILE=sakekasu-builder npx cdkd diff --all
 
 エラーが出た場合、`--allow-unsupported-properties` という逃げ道はあるが、そのプロパティは AWS に書かれないまま無視される。安易に付けない。
 
-実行済み（2026-08-16）。4スタックすべてが処理され、未対応の型もプロパティも出なかった。件数は auth 12 / api 49 / monitoring 46 / health-global 3 で、合成したリソース数から `AWS::CDK::Metadata` を引いた数と一致する。Cloud Control にフォールバックする3種類も一覧に出たうえで何も言われていない。移行の前提は満たされている。
+2026-08-16 に一度実行し、4スタックすべてが処理され、未対応の型もプロパティも出なかった。件数は auth 12 / api 49 / monitoring 46 / health-global 3 で、合成したリソース数から `AWS::CDK::Metadata` を引いた数と一致していた。Cloud Control にフォールバックする3種類も一覧に出たうえで何も言われていない。
+
+ただしこれは cdkd 0.283.25 で取った結果で、手順1.5 で 0.291.31 に上げたため取り直しになる。8 マイナー分の差があり、対応リソースの一覧も Cloud Control への振り分けも動いている可能性がある。取り直すまで「前提は満たされている」とは言えない。
 
 ### 6. CloudFormation へ戻せることを先に確認する
 
