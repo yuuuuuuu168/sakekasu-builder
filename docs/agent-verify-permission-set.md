@@ -43,16 +43,16 @@ CloudWatch Logs・メトリクス・Application Signals・X-Ray は**意図的�
 
 - `identitystore:ListUsers` / `DescribeUser` など：ユーザー名・氏名・メールアドレス
 - `identitystore:ListGroupMemberships` など：誰がどのグループに入っているか
-- `sso-directory:SearchUsers` など：同じ情報の旧 API
+- `sso-directory:SearchUsers` など：同じ情報の旧 API（コンソール用）
 - `account:GetContactInformation` / `GetAlternateContact` / `GetPrimaryEmail`：アカウントの連絡先（住所・電話・メール）
 
-これを `DenyDirectoryAndContactReads` で塞ぐ。アクション名は `identitystore:*User*` のようにワイルドカードで書き、同じ系統の API が増えても漏れないようにしている。
+これを `DenyDirectoryAndContactReads` で塞ぐ。`identitystore` はアクション名を `identitystore:*User*` のようにワイルドカードで書き、同じ系統の API が増えても漏れないようにしている。旧 API の `sso-directory` は名前の形で絞ると `DescribeDirectory` のような読み取りが漏れる（AWS Security Agent の指摘）うえ、グループは `identitystore` 側で見られるので、`sso-directory:*` で丸ごと塞ぐ。
 
 調査に使うので、次は Deny していない。
 
 | 残すもの | 理由 |
 |---|---|
-| `identitystore:ListGroups` / `DescribeGroup`、`sso-directory:SearchGroups` | グループ名だけで、所属者は出ない |
+| `identitystore:ListGroups` / `DescribeGroup` | グループ名だけで、所属者は出ない |
 | `sso:ListAccountAssignments` / `ListPermissionSets` / `DescribePermissionSet` など | 割り当ての確認に要る。出るのはプリンシパル ID で、名前やメールは出ない |
 | `organizations:ListAccounts` / `DescribeAccount` | 組織の構成の確認に要る。各アカウントのルートのメールアドレスは出る |
 | Cost Explorer・CloudTrail・CloudWatch Logs | 請求と障害調査に要る |

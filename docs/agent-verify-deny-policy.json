@@ -56,8 +56,7 @@
         "identitystore:*User*",
         "identitystore:*GroupMembership*",
         "identitystore:IsMemberInGroups",
-        "sso-directory:*User*",
-        "sso-directory:*Member*",
+        "sso-directory:*",
         "account:GetContactInformation",
         "account:GetAlternateContact",
         "account:GetPrimaryEmail"
