@@ -45,14 +45,25 @@ is_authenticated() {
 }
 
 # setup-aws-profile.sh は呼ぶたびに ~/.aws/config を書き直して控えを増やすので、
-# AWS CLI v2 と verify プロファイルが揃っていないときだけ呼ぶ
+# AWS CLI v2 が無いときと、aws-verify.conf の中身が書き出し済みの設定と違うときだけ呼ぶ。
+# 後者は setup-aws-profile.sh が先頭に残す verify-config 行で見分ける
 needs_setup() {
   command -v aws > /dev/null 2>&1 || return 0
   case "$(aws --version 2>&1)" in
     aws-cli/2.*) ;;
     *) return 0 ;;
   esac
-  grep -q '^\[profile verify\]' ~/.aws/config 2> /dev/null || return 0
+  grep -q '^\[sso-session verify\]' ~/.aws/config 2> /dev/null || return 0
+  local conf="$script_dir/aws-verify.conf" key value expected="# verify-config:"
+  for key in SSO_START_URL SSO_REGION SSO_ACCOUNT_ID SSO_ROLE_NAME AWS_VERIFY_REGION SSO_EXTRA_PROFILES; do
+    if [ "$key" = SSO_EXTRA_PROFILES ]; then
+      value=${!key-$(sed -n "s/^${key}=//p" "$conf" 2> /dev/null | tail -1)}
+    else
+      value=${!key:-$(sed -n "s/^${key}=//p" "$conf" 2> /dev/null | tail -1)}
+    fi
+    expected="$expected $value"
+  done
+  [ "$(head -1 ~/.aws/config)" = "$expected" ] || return 0
   return 1
 }
 
@@ -162,5 +173,6 @@ AWS SSO ログインを開始した。次のURLを開いてコードを入力し
   CODE: $code
 
 承認が済んだら 'bash scripts/aws-sso-login.sh --wait' で完了を確かめてから、
-以降の AWS CLI には必ず --profile verify を付ける。
+以降の AWS CLI には必ず --profile verify（または verify-org / verify-ops など
+aws-verify.conf で足したプロファイル）を付ける。1回の承認で全プロファイルに入れる。
 EOF

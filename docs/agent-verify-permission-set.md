@@ -54,7 +54,7 @@ CloudWatch Logs・メトリクス・Application Signals・X-Ray は**意図的�
 | インスタンス | `arn:aws:sso:::instance/<インスタンス ID>`（管理アカウント <管理アカウント ID> 所有） |
 | Permission Set | `arn:aws:sso:::permissionSet/<インスタンス ID>/<Permission Set ID>` |
 | セッション時間 | `PT12H`（既存の `AdministratorAccess` / `ReadOnlyAccess` に揃えた） |
-| 割り当て先 | アカウント 232791540685 / グループ `sakekasu`（既存もグループ割り当てのため揃えた） |
+| 割り当て先 | グループ `sakekasu`（既存もグループ割り当てのため揃えた）。アカウント 232791540685（アプリ、2026-08-17）、<管理アカウント ID>（管理）と <運用アカウント ID>（運用ツール）（2026-09-26 に追加） |
 
 作り直す場合の手順は次のとおり。管理アカウント（<管理アカウント ID>）の認証が必要で、メンバーアカウントからは `sso:ListPermissionSets` すら通らない。
 
