@@ -11,6 +11,9 @@ fi
 
 cd "$(dirname "$0")/.."
 
+# npm ci を走らせるディレクトリ。package-lock.json が無いものは飛ばす
+NPM_DIRS=(. infra)
+
 hash_file() {
   # クラウドVM（Linux）は sha256sum、macOS は shasum
   if command -v sha256sum >/dev/null 2>&1; then
@@ -26,6 +29,7 @@ hash_file() {
 # ハッシュを控えておき、一致するときだけ省く
 install_if_needed() {
   local dir=$1
+  [ -f "$dir/package-lock.json" ] || return 0
   local marker="$dir/node_modules/.package-lock.sha256"
   local current
   current=$(hash_file "$dir/package-lock.json")
@@ -35,8 +39,9 @@ install_if_needed() {
   fi
 }
 
-install_if_needed .
-install_if_needed infra
+for dir in "${NPM_DIRS[@]}"; do
+  install_if_needed "$dir"
+done
 
 # AI-DLC（.claude/ 配下）の CLI ツールとフックは全部 bun で動く。クラウドVMの
 # イメージには既に入っているが、入っていない世代を引いたときに全フックが
@@ -61,6 +66,7 @@ cat << 'POLICY'
   必ず `--profile verify`（アプリ）/ `verify-org`（管理）/ `verify-ops`（運用ツール）の
   どれかを付ける（どれも読み取り専用）。
 - PR を作ったら、指示を待たずに subscribe_pr_activity でその PR を watch する。
+- 応答は日本語で書く。
 POLICY
 
 # 環境変数 SAKEKASU_AWS_LOGIN=1 を設定した環境では、AWS の確認を待たずに
