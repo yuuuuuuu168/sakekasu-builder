@@ -1,6 +1,6 @@
 // deny-aws-writes.mjs の判定のテスト。依存を増やしたくないので node:test で書く。
 // 実行は `node --test scripts/deny-aws-writes.test.mjs`。
-// このリポジトリの CI は infra/ のテストしか回していないため、まだ自動では走らない。
+// CI では .github/workflows/claude-hooks.yml が走らせる。
 //
 // 関数を import せず、フックと同じように子プロセスへ JSON を流し込んでいる。
 // 「直接実行されたときだけ判定する」ガードを置くと、実行パスにシンボリックリンクが
