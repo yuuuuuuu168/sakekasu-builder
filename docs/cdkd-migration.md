@@ -17,6 +17,7 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | 3.5 | `cdk deploy --all` でアプリの全ロールに境界を付ける | これから |
 | 4 | `cdkd bootstrap` | 済 |
 | 5 | `cdkd diff --all` で未対応リソースを洗い出す | 要・再実行 |
+| 5.5 | 取り込みを回す `migrate-to-cdkd.sh` を書く | 済 |
 | 6 | 影響の小さいスタックで CFn への戻しを確認 | これから |
 | 7 | `cdkd import` で既存スタックを取り込む | これから |
 | 8 | `cdkd drift` で state と実物の一致を確認 | これから |
@@ -193,38 +194,74 @@ AWS_PROFILE=sakekasu-builder npx cdkd diff --all
 
 戻せない状態で本移行に入らない。いちばん小さい `sakekasu-dev-health-global`（4リソース、カスタムリソースなし）で往復を確認する。
 
+**このスタックは us-east-1 にあるので `AWS_REGION` を合わせて打つ。** 合わせないと `cdkd import` が ap-northeast-1 で CloudFormation を探し、全リソースが「not found」になる（上の「cdkd の版と、先行リポジトリで判明している不具合」を参照）。ここが移行の最初の一手なので、知らないと不具合を仕様と取り違えやすい。
+
 ```bash
+cd infra
+export AWS_PROFILE=sakekasu-builder
+export CDKD_ROLE_ARN=arn:aws:iam::<アプリのアカウント ID>:role/sakekasu-cdkd-deploy
+
 # 取り込む
-AWS_PROFILE=sakekasu-builder npx cdkd import sakekasu-dev-health-global \
+AWS_REGION=us-east-1 npx cdkd import sakekasu-dev-health-global \
   --migrate-from-cloudformation --dry-run
-AWS_PROFILE=sakekasu-builder npx cdkd import sakekasu-dev-health-global \
+AWS_REGION=us-east-1 npx cdkd import sakekasu-dev-health-global \
   --migrate-from-cloudformation --yes
 
 # CloudFormation へ戻す
-AWS_PROFILE=sakekasu-builder npx cdkd export sakekasu-dev-health-global --dry-run
-AWS_PROFILE=sakekasu-builder npx cdkd export sakekasu-dev-health-global
+AWS_REGION=us-east-1 npx cdkd export sakekasu-dev-health-global --dry-run
+AWS_REGION=us-east-1 npx cdkd export sakekasu-dev-health-global
 ```
 
 `export` は CFn の IMPORT チェンジセットを使うので、AWS のリソースは作り直されない。成功すると cdkd 側の state は消える。
 
+`health-global` を選ぶのは、小さいことに加えて Export も ImportValue も持たないため。取り込んでも他のスタックの参照を壊さず、単独で往復できる。
+
 ### 7. 既存スタックの取り込み
 
-依存の末端から順に。api は auth に、monitoring は api に、health-global は monitoring に依存している。
+`infra/scripts/migrate-to-cdkd.sh` を打つ。手作業で `cdkd import` を並べない。
 
 ```bash
-for stack in sakekasu-dev-auth sakekasu-dev-api sakekasu-dev-monitoring sakekasu-dev-health-global; do
-  AWS_PROFILE=sakekasu-builder npx cdkd import "$stack" \
-    --migrate-from-cloudformation \
-    --record-resource-mapping "mapping-$stack.json" \
-    --dry-run
-done
+cd infra
+AWS_PROFILE=sakekasu-builder CDKD_ROLE_ARN=arn:aws:iam::<アプリのアカウント ID>:role/sakekasu-cdkd-deploy \
+  bash scripts/migrate-to-cdkd.sh
 ```
 
-`--dry-run` で解決結果を確認してから、`--dry-run` を外して `--yes` を付けて1つずつ流す。`--record-resource-mapping` で書き出した論理 ID と物理 ID の対応表は、後から「何を取り込んだか」を追うときに要る。
+スクリプトは全スタックを `--dry-run` で調べ、全リソースが取り込めると分かったときだけ移す。1つでも引っかかれば、どのスタックにも手を付けずに `engine=cfn` を返して抜ける。移し終えた後に打っても何もしない。
+
+`--record-resource-mapping` が書き出す論理 ID と物理 ID の対応表は `mapping-<スタック名>.json` に残る。後から「何を取り込んだか」を追うときに要る。
+
+**移す順は monitoring → api → auth。** CloudFormation は、他のスタックが `Fn::ImportValue` で読んでいる Export を持つスタックを消せない。合成結果で確かめた向きは次のとおり。
+
+| スタック | Export | ImportValue |
+| --- | --- | --- |
+| `auth` | 2 | 0 |
+| `api` | 7 | 1（auth から） |
+| `monitoring` | 0 | 9（api から7、auth から2） |
+| `health-global` | 0 | 0 |
+
+auth を先に消そうとすると `Export ... cannot be deleted as it is in use by ...` で DeleteStack が落ちる。しかも落ちる位置が「state は書けたが CloudFormation のスタックは残っている」という中途半端なところで、復旧が手作業になる。`health-global` は誰とも Export をやり取りしないので順番に関係なく、いちばん小さいぶん先頭に置いてある。
+
+この順番はスクリプトに直書きなので、CDK 側でスタック間の参照を足したり向きを変えたりすると黙って壊れる。`infra/__tests__/migrate-to-cdkd.test.ts` が合成結果と突き合わせて検査している。
 
 リソースは再作成されない。`--migrate-from-cloudformation` は、CFn の全リソースに `DeletionPolicy: Retain` と `UpdateReplacePolicy: Retain` を注入する UpdateStack を打ってから DeleteStack する。スタックの記録だけが消えて、実体は残る。
 
 移行途中は cdkd 管理と CFn 管理が混在するが、`Fn::ImportValue` は cdkd の state に無ければ CloudFormation の Exports にフォールバックするため、参照は解決される。
+
+### 移行が途中で止まったとき
+
+スクリプトが「cdkd の状態と CloudFormation のスタックの両方を持っています」で落ちたら、`cdkd import --migrate-from-cloudformation` が state を書いた後、CloudFormation のスタックを消すところで止まっている。リソースは cdkd の state に載っているので、残っているのは CloudFormation のスタックの記録だけ。
+
+まず落ちた理由を確かめる。Export が使用中なら、そのスタックを読んでいる側がまだ CloudFormation に残っている。読む側を先に移してから、もう一度スクリプトを打つ。
+
+それでも進まないときは、対象のスタックだけを手で流す。
+
+```bash
+cd infra
+AWS_REGION=<スタックのリージョン> AWS_PROFILE=sakekasu-builder \
+  npx cdkd import <スタック名> --migrate-from-cloudformation --force --yes -c env=dev
+```
+
+`AWS_REGION` をスタックのリージョンに合わせるのを忘れない（理由はスクリプトのコメント）。
 
 ### 8. drift の確認
 

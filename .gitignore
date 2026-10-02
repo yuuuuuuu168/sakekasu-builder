@@ -90,3 +90,6 @@ aidlc/diagnostics/
 # which was proven to corrupt the multi-line audit blocks) ·
 # aidlc/spaces/*/intents/*/<phase>/<stage>/*.md (artifacts + diary).
 .claude/settings.local.json
+
+# cdkd の取り込みが書き出す論理ID/物理ID の対応表
+infra/mapping-*.json
