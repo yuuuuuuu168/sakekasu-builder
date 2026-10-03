@@ -289,6 +289,33 @@ for entry in "${pending[@]}"; do
 done
 
 if [ "$ok" != true ]; then
+  # CloudFormation へ戻すのは、どのスタックもまだ移っていないときだけ。
+  #
+  # pending は「CloudFormation のスタックが残っているもの」しか集めない。
+  # 移行済みのスタック（cdkd の状態があり CloudFormation のスタックは無い）は
+  # そこに入らないので、このまま engine=cfn を返すと deploy が
+  # `cdk deploy --all` を打ち、移行済みのぶんまで対象にする。
+  # CloudFormation から見ればスタックが存在しないので、ゼロから作りに行く。
+  # 冒頭に書いた事故（同じ名前の DynamoDB テーブルや S3 バケットで落ちるか、
+  # Cognito の UserPool のように名前が重複できるものは2つ目を黙って作る）が
+  # そのまま起きる。
+  #
+  # 混在したまま進むくらいなら止まる。移行済みが1つでもあれば、
+  # 残りを人の手で移すか、戻すかを決めるのは人間の仕事
+  migrated=()
+  for entry in "${stacks[@]}"; do
+    read -r name region <<<"$entry"
+    if cdkd_state_exists "$name" "$region"; then
+      migrated+=("$name")
+    fi
+  done
+
+  if [ "${#migrated[@]}" -ne 0 ]; then
+    echo "::error::cdkd へ移行済みのスタックがあるため CloudFormation へは戻しません: ${migrated[*]}"
+    echo "::error::cdk deploy --all は移行済みのスタックをゼロから作りにいきます。docs/cdkd-migration.md の「移行が途中で止まったとき」を見てください"
+    exit 1
+  fi
+
   echo "::warning::cdkd への移行を見送ります。スタックには手を付けていません"
   echo 'engine=cfn' >>"$GITHUB_OUTPUT"
   exit 0
