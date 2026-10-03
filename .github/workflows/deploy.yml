@@ -48,6 +48,12 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: infra/package-lock.json
+      # 依存の取得元がレジストリだけかを、取得より前に確かめる。
+      # main への push で動くワークフローなので lockfile は一度マージを
+      # 通っているが、cdkd のデプロイロールは強いので同じ検査を置いておく
+      # （cdk-diff.yml と対称。理由はスクリプトのコメント）
+      - name: 依存の取得元を確かめる
+        run: node scripts/check-lockfile-registry.mjs
       # 依存の取得とテストは AWS の認証情報を入れる前に済ませる。
       #
       # npm のライフサイクルスクリプトはインストール時に任意のコードを実行できる。
