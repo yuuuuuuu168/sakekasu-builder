@@ -39,6 +39,15 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: infra/package-lock.json
+      # 依存の取得元がレジストリだけかを、取得より前に確かめる。
+      #
+      # lockfile は PR が書き換えられる。resolved を自前のターゲットへ向けて
+      # 整合性ハッシュをそれに合わせると、認証後に動く cdkd 自体が PR のコードに
+      # なる（aws-security-agent の指摘）。版を上げる PR は resolved が
+      # レジストリのまま変わるだけなので、この検査では止まらない。
+      # 塞げない範囲はスクリプトのコメントと Issue #131 にある
+      - name: 依存の取得元を確かめる
+        run: node scripts/check-lockfile-registry.mjs
       # 依存の取得は AWS の認証情報を入れる前に済ませる（deploy.yml と同じ理由）。
       # このワークフローは PR のブランチをそのまま checkout するので、lock を
       # 差し替えた PR を出せばインストール時スクリプトを走らせられる。認証後だと

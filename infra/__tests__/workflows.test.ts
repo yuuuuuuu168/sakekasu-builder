@@ -61,6 +61,18 @@ describe.each(['deploy.yml', 'cdk-diff.yml'])('%s', (file) => {
     expect(synth, '合成が認証より後にある').toBeLessThan(credentials);
   });
 
+  it('lockfile の取得元の検査が、依存の取得と認証情報より前にある', () => {
+    // lockfile は PR が書き換えられる。resolved を自前のターゲットへ向けると
+    // 認証後に動く cdkd が PR のコードになる（aws-security-agent の指摘）。
+    // 取得させる前に止めたいので npm ci より前、当然ながら認証より前
+    const check = lineIndexOf(lines, 'check-lockfile-registry.mjs', '取得元の検査');
+    const install = lineIndexOf(lines, 'npm ci --ignore-scripts', '依存の取得');
+    const credentials = lineIndexOf(lines, CREDENTIALS_ACTION, '認証情報のステップ');
+
+    expect(check, '取得元の検査が npm ci より後にある').toBeLessThan(install);
+    expect(check, '取得元の検査が認証より後にある').toBeLessThan(credentials);
+  });
+
   it('CDKD_APP に合成済みのディレクトリを渡している', () => {
     // 渡さないと cdkd が cdk.json の app を読んで合成し直し、
     // 認証前に合成した意味が無くなる
