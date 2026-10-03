@@ -503,6 +503,46 @@ npx cdkd import sakekasu-dev-monitoring -c env=dev --dry-run \
 
 **教訓として、窓の約束は約束のままだった。** ブランチ保護にも CI にも、取り込み中に `infra/**` を main に入れさせない仕掛けは無い。次に同じことをするなら、取り込みの直前に `infra/**` を触る PR を止める手立てを先に用意する。
 
+### 最初の `cdkd deploy` で何が起きるか
+
+取り込み後の `cdkd diff` は `0 to create, 17 to update, 0 to delete`（monitoring）。削除も差し替えも無い。
+
+| 内訳 | 中身 |
+| --- | --- |
+| LogGroup 3件の `DeletionPolicy` / `UpdateReplacePolicy` | metadata only, no AWS API call |
+| Lambda 3件の `Code.S3Bucket` | `cdk-hnb659fds-assets-*` → `cdkd-assets-*` |
+| アラーム8件の `Dimensions`、HealthCheck と Canary の環境変数、Canary のポリシー | 直値 → `Fn::ImportValue`。解決後の値は同じ |
+| `OcrAvailabilitySloBreach` / `OcrLatencySloBreach` の説明文 | #231 の実変更 |
+
+**デプロイ後に `Fn::ImportValue` の解決を確かめる。** CloudFormation のスタックはもう無いので、cdkd は自分の state から解決する。失敗すると `Dimensions` に `{"Fn::ImportValue": ...}` がそのまま入り、**何も監視していないアラームが静かにできあがる**。アラームは壊れても鳴らないだけで、壊れたことに気づく手立てが無い。
+
+```bash
+aws cloudwatch describe-alarms --region ap-northeast-1 \
+  --alarm-names dev-sakekasu-ocr-errors dev-sakekasu-appsync-5xx \
+  --query 'MetricAlarms[].[AlarmName,Dimensions]' --output json
+```
+
+`dev-sakekasu-ocr-analyzer` や `6mtw5cju3naydf7mxnaoulowta` のような実際の値が入っていればよい。`Fn::ImportValue` の文字列が見えたら解決に失敗している。
+
+同じ経路で入れ替わるものが他に3つある。あわせて見る。
+
+- `HealthCheckFunction` の `HEALTH_CHECK_TARGETS`（appsync の URL）
+- `SommelierCanaryFunction` の `USER_POOL_ID` / `USER_POOL_CLIENT_ID`
+- `SommelierCanaryFunctionServiceRoleDefaultPolicy` の `cognito-idp:AdminInitiateAuth` のリソース
+
+前者2つは外形監視とカナリアが失敗すれば `WatcherFailure*` アラームで気づけるが、アラーム自身の `Dimensions` には見張り役がいない。
+
+### state バケットのスキーマ版
+
+`cdkd diff` を打つたびに、先行リポジトリの state を読めないという行が大量に流れる。
+
+```
+Failed to read state for stack sakekasu-kakeibo-dev-api: Unsupported state schema version 10 ...
+  This cdkd binary supports versions 1, 2, 3, 4, 5, 6, 7, 8.
+```
+
+state バケット `cdkd-state-<アプリのアカウント ID>` は3リポジトリの共用で、先行の2本（と ReinventPlanner）はより新しい cdkd で書いている。こちらの 0.291.31 は 1〜8 までしか読めない。自分のスタックの処理には影響しないが、出力の大半がこれで埋まる。**窓を閉じたあとに cdkd を上げる。**
+
 ### 型スキーマの読み取り権限
 
 PR #230 の `cdkd diff` が毎回これを出していた。
