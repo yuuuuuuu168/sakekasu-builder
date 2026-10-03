@@ -1,126 +1,87 @@
-import { useState, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState } from 'react';
+import { motion } from 'framer-motion';
+import { Loader2 } from 'lucide-react';
 
-import { SignInForm } from './SignInForm';
-import { SignUpForm } from './SignUpForm';
-import { ConfirmSignUpForm } from './ConfirmSignUpForm';
-import { TotpChallengeForm } from './TotpChallengeForm';
-import { ResetPasswordForm } from './ResetPasswordForm';
+import { Button } from '@/components/ui/button';
+import { useAuth } from '../AuthContext';
 
-/** 認証画面の表示状態 */
-type AuthView = 'signIn' | 'signUp' | 'confirmSignUp' | 'totpChallenge' | 'resetPassword';
+const MotionButton = motion.create(Button);
 
 /**
- * 認証ページコンテナ
- * SignInForm / SignUpForm / ConfirmSignUpForm を状態に応じて切り替える
+ * 未サインインのときの画面。
+ *
+ * サインイン・MFA・パスワードの扱いは、共通ログイン（4 アプリ共有）の
+ * マネージドログイン画面が受け持つ。ここはそこへ送るボタンだけを置く。
+ * 自動でリダイレクトしないのは、戻りで失敗したときに行ったり来たりを
+ * 繰り返さず、失敗の文言をここで読めるようにするため。
+ * アカウントは管理者が共通ログイン側で作る（セルフサインアップは無い）。
  */
 export function AuthPage() {
-  const [view, setView] = useState<AuthView>('signIn');
-  const [confirmEmail, setConfirmEmail] = useState('');
-  const [resetEmail, setResetEmail] = useState('');
-  const [resetRequired, setResetRequired] = useState(false);
+  const { signIn, error } = useAuth();
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
-  /** サインアップ画面へ切り替え */
-  const handleSwitchToSignUp = useCallback(() => {
-    setView('signUp');
-  }, []);
+  const handleSignIn = async () => {
+    setIsRedirecting(true);
+    setStartError(null);
+    try {
+      // 成功するとページごとマネージドログインへ移るので、ここへは戻らない
+      await signIn();
+    } catch (err) {
+      console.error('マネージドログインへ移れませんでした', err);
+      setStartError('サインイン画面を開けませんでした。もう一度お試しください');
+    } finally {
+      setIsRedirecting(false);
+    }
+  };
 
-  /** サインイン画面へ切り替え */
-  const handleSwitchToSignIn = useCallback(() => {
-    setView('signIn');
-  }, []);
-
-  /** メール確認画面へ遷移（サインアップ後 or 未確認ユーザーのサインイン時） */
-  const handleNeedConfirmation = useCallback((email: string) => {
-    setConfirmEmail(email);
-    setView('confirmSignUp');
-  }, []);
-
-  /** メール確認完了 → サインイン画面へ戻す */
-  const handleConfirmed = useCallback(() => {
-    setConfirmEmail('');
-    setView('signIn');
-  }, []);
-
-  /** MFA 有効な利用者のサインイン時に TOTP コード入力画面へ遷移 */
-  const handleNeedTotp = useCallback(() => {
-    setView('totpChallenge');
-  }, []);
-
-  /** パスワード再設定画面へ遷移（忘れた場合 or 管理者リセットで誘導された場合） */
-  const handleNeedPasswordReset = useCallback((email: string, required: boolean) => {
-    setResetEmail(email);
-    setResetRequired(required);
-    setView('resetPassword');
-  }, []);
-
-  /** パスワード再設定フローからサインイン画面へ戻す */
-  const handleBackFromReset = useCallback(() => {
-    setResetEmail('');
-    setResetRequired(false);
-    setView('signIn');
-  }, []);
-
-  /** 現在のビューに応じたタイトル */
-  const title = {
-    signIn: 'サインイン',
-    signUp: 'アカウント作成',
-    confirmSignUp: 'メール確認',
-    totpChallenge: '二段階認証',
-    resetPassword: 'パスワード再設定',
-  }[view];
+  const message = startError ?? error;
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4" data-testid="auth-page">
-      <div className="w-full max-w-sm space-y-6">
-        {/* ヘッダー */}
-        <div className="text-center space-y-2">
+    <div
+      className="min-h-screen flex items-center justify-center bg-background px-4"
+      data-testid="auth-page"
+    >
+      <motion.div
+        className="w-full max-w-sm space-y-6 text-center"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+      >
+        <div className="space-y-2">
           <h1 className="text-2xl font-bold text-foreground">🍶 酒カス</h1>
-          <p className="text-sm text-muted-foreground">{title}</p>
+          <p className="text-sm text-muted-foreground">サインイン</p>
         </div>
 
-        {/* フォーム切り替え */}
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={view}
-            initial={{ opacity: 0, x: view === 'signUp' ? 20 : -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: view === 'signUp' ? -20 : 20 }}
-            transition={{ duration: 0.25, ease: 'easeInOut' }}
-          >
-            {view === 'signIn' && (
-              <SignInForm
-                onSwitchToSignUp={handleSwitchToSignUp}
-                onNeedConfirmation={handleNeedConfirmation}
-                onNeedTotp={handleNeedTotp}
-                onNeedPasswordReset={handleNeedPasswordReset}
-              />
-            )}
-            {view === 'resetPassword' && (
-              <ResetPasswordForm
-                initialEmail={resetEmail}
-                resetRequired={resetRequired}
-                onBackToSignIn={handleBackFromReset}
-              />
-            )}
-            {view === 'totpChallenge' && (
-              <TotpChallengeForm onBackToSignIn={handleSwitchToSignIn} />
-            )}
-            {view === 'signUp' && (
-              <SignUpForm
-                onSwitchToSignIn={handleSwitchToSignIn}
-                onNeedConfirmation={handleNeedConfirmation}
-              />
-            )}
-            {view === 'confirmSignUp' && (
-              <ConfirmSignUpForm
-                email={confirmEmail}
-                onConfirmed={handleConfirmed}
-              />
-            )}
-          </motion.div>
-        </AnimatePresence>
-      </div>
+        {message && (
+          <p data-testid="signin-error" className="text-sm text-destructive" role="alert">
+            {message}
+          </p>
+        )}
+
+        <MotionButton
+          type="button"
+          data-testid="signin-submit"
+          disabled={isRedirecting}
+          onClick={() => void handleSignIn()}
+          className="w-full h-10 text-base font-semibold bg-gold-wa text-white hover:bg-gold-wa/80"
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+        >
+          {isRedirecting ? (
+            <>
+              <Loader2 className="size-4 animate-spin" />
+              サインイン画面へ移動中...
+            </>
+          ) : (
+            '🍶 サインイン'
+          )}
+        </MotionButton>
+
+        <p className="text-xs text-muted-foreground">
+          共通ログインの画面へ移動します。二段階認証のコードもそちらで入力します
+        </p>
+      </motion.div>
     </div>
   );
 }

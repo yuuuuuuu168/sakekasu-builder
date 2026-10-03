@@ -4,8 +4,8 @@ import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib';
-import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
+import { TEST_SHARED_AUTH } from './shared-auth-fixture.js';
 
 /**
  * 合成したテンプレートの1リソース。
@@ -49,12 +49,9 @@ describe('Property 4: 利用者データの保護', () => {
     fc.assert(
       fc.property(envNameArb, (envName) => {
         const app = new cdk.App();
-        const authStack = new AuthStack(app, `TestAuth-${envName}`, {
-          envName,
-        });
         const apiStack = new ApiStack(app, `TestApi-${envName}`, {
           envName,
-          userPool: authStack.userPool,
+          sharedAuth: TEST_SHARED_AUTH,
         });
         const template = Template.fromStack(apiStack);
         const resources = template.toJSON().Resources;
@@ -98,10 +95,9 @@ describe('Property 4: 利用者データの保護', () => {
 
   it('画像バケットが保持設定とバージョニングを持つ', () => {
     const app = new cdk.App();
-    const authStack = new AuthStack(app, 'TestAuthBucket', { envName: 'dev' });
     const apiStack = new ApiStack(app, 'TestApiBucket', {
       envName: 'dev',
-      userPool: authStack.userPool,
+      sharedAuth: TEST_SHARED_AUTH,
     });
     const resources = Template.fromStack(apiStack).toJSON().Resources;
 

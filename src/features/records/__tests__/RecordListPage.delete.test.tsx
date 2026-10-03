@@ -27,7 +27,7 @@ vi.mock('@/components/ThemeToggle', () => ({
 
 // 絞り込み条件の保存先を決めるためにサインイン中のユーザーを参照する
 vi.mock('@/features/auth/AuthContext', () => ({
-  useAuth: () => ({ user: { userId: 'test-user', email: 'a@example.com' } }),
+  useAuth: () => ({ user: { userId: 'test-user' } }),
 }));
 
 // 楽観的更新は useRecordList が持つため、取得層だけをモックして本物のフックを動かす
