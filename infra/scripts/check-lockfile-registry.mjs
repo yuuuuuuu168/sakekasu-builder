@@ -10,13 +10,16 @@
  * （PR #230 で aws-security-agent が指摘）。
  *
  * **「認証情報より前だから安全」ではない。** ジョブには `id-token: write` が
- * あるので、動いたコードは自分で OIDC トークンを取ってデプロイロールに入れる。
- * 認証ステップより前かどうかは関係がない。だからこの検査は取得そのものより
- * 前に置く。
+ * あるので、動いたコードは自分で OIDC トークンを取ってロールに入れる。認証
+ * ステップより前かどうかは関係がない。だからこの検査は取得そのものより前に置く。
  *
  * 見るのは、認証情報の有無にかかわらずワークフローが取得・import する全部。
  * infra 本体と lambda ごとの lockfile。vitest.config の include が lambda 配下の
  * __tests__ を拾うため、`npm test` でそれらのモジュールと依存が読み込まれる。
+ *
+ * 取得元の在りかは lockfile の版で変わる。`packages` を見るだけでは v1 を
+ * 取りこぼし、`packages` が無いので「0件」として緑になる。版の下限を要求し、
+ * かつ旧来の入れ子 `dependencies` も歩く（同じ指摘の2件目）。
  *
  * 塞げないものも書いておく。
  *
@@ -33,6 +36,24 @@ import { join } from 'node:path';
 
 /** 許可する取得元 */
 export const ALLOWED_HOSTS = ['registry.npmjs.org'];
+
+/**
+ * 受け付ける lockfileVersion の下限。
+ *
+ * 2 以上なら `packages` が正本になる。1 は `resolved` が入れ子の
+ * `dependencies` にしか無く、`packages` を見る検査が素通りする。
+ */
+export const MIN_LOCKFILE_VERSION = 2;
+
+/** 取得元として許されるか */
+function isAllowed(resolved) {
+  try {
+    return ALLOWED_HOSTS.includes(new URL(resolved).host);
+  } catch {
+    // URL として読めないものは、そもそも素性が分からないので弾く
+    return false;
+  }
+}
 
 /**
  * 検査する lockfile を集める。
@@ -61,31 +82,80 @@ export function discoverLockfiles(root = process.cwd()) {
 }
 
 /**
+ * 旧来の入れ子 `dependencies` ツリーを歩いて `resolved` を集める。
+ *
+ * v1 はここにしか取得元が無い。v2 は `packages` と両方を持つ。
+ *
+ * @param {unknown} node
+ * @param {string} path
+ * @returns {{ name: string, resolved: string }[]}
+ */
+function walkLegacyDependencies(node, path = '') {
+  if (node === null || typeof node !== 'object') return [];
+
+  return Object.entries(node).flatMap(([name, dep]) => {
+    if (dep === null || typeof dep !== 'object') return [];
+
+    const here = path === '' ? name : `${path} > ${name}`;
+    const found = [];
+
+    const resolved = /** @type {{ resolved?: unknown }} */ (dep).resolved;
+    if (typeof resolved === 'string' && resolved !== '' && !isAllowed(resolved)) {
+      found.push({ name: here, resolved });
+    }
+
+    const nested = /** @type {{ dependencies?: unknown }} */ (dep).dependencies;
+    return [...found, ...walkLegacyDependencies(nested, here)];
+  });
+}
+
+/**
  * 許可していない取得元を指しているパッケージを集める。
  *
- * `resolved` を持たないものは対象外。親の tarball に同梱される依存で、
- * 個別に取りに行かない。
+ * `packages`（v2 以降の正本）と、旧来の入れ子 `dependencies` の両方を見る。
+ * `resolved` を持たないものは対象外で、親の tarball に同梱される依存。
+ * `packages` のルート（空文字キー）も対象外で、プロジェクト自身を指す。
  *
- * @param {{ packages?: Record<string, { resolved?: string, link?: boolean } | undefined> }} lock
+ * @param {{ packages?: Record<string, unknown>, dependencies?: unknown }} lock
  * @returns {{ name: string, resolved: string }[]}
  */
 export function findForeignResolved(lock) {
-  return Object.entries(lock.packages ?? {})
+  const fromPackages = Object.entries(lock.packages ?? {})
     .filter(([name]) => name !== '')
     .flatMap(([name, pkg]) => {
-      const resolved = pkg?.resolved;
+      const resolved = /** @type {{ resolved?: unknown }} */ (pkg ?? {}).resolved;
       if (typeof resolved !== 'string' || resolved === '') return [];
-
-      let host;
-      try {
-        host = new URL(resolved).host;
-      } catch {
-        // URL として読めないものは、そもそも素性が分からないので弾く
-        return [{ name, resolved }];
-      }
-
-      return ALLOWED_HOSTS.includes(host) ? [] : [{ name, resolved }];
+      return isAllowed(resolved) ? [] : [{ name, resolved }];
     });
+
+  return [...fromPackages, ...walkLegacyDependencies(lock.dependencies)];
+}
+
+/**
+ * 取得元の在りかを確かめられる形の lockfile かを見る。
+ *
+ * @param {{ lockfileVersion?: unknown, packages?: unknown, dependencies?: unknown }} lock
+ * @returns {string[]} 見つかった問題（空なら問題なし）
+ */
+export function findShapeProblems(lock) {
+  const problems = [];
+  const version = lock.lockfileVersion;
+
+  if (typeof version !== 'number') {
+    problems.push('lockfileVersion が数値で入っていません。lockfile として読めません。');
+  } else if (version < MIN_LOCKFILE_VERSION) {
+    problems.push(
+      `lockfileVersion ${version} は受け付けません（${MIN_LOCKFILE_VERSION} 以上が要る）。` +
+        ' 古い形式は取得元が入れ子の dependencies にしか無く、検査をすり抜けます。' +
+        ' npm install で作り直してください。',
+    );
+  }
+
+  if (lock.packages === undefined && lock.dependencies === undefined) {
+    problems.push('packages も dependencies も無く、取得元を確かめられません。');
+  }
+
+  return problems;
 }
 
 /**
@@ -95,17 +165,21 @@ export function findForeignResolved(lock) {
  * 「緑」になるのを避ける。
  *
  * @param {string[]} lockPaths
- * @returns {{ lockPath: string, offenders: { name: string, resolved: string }[] }[]}
+ * @returns {{ lockPath: string, offenders: { name: string, resolved: string }[], problems: string[] }[]}
  */
 export function checkLockfiles(lockPaths) {
   if (lockPaths.length === 0) {
     throw new Error('検査する lockfile が1本も見つかりませんでした。パスの指定を疑ってください。');
   }
 
-  return lockPaths.map((lockPath) => ({
-    lockPath,
-    offenders: findForeignResolved(JSON.parse(readFileSync(lockPath, 'utf8'))),
-  }));
+  return lockPaths.map((lockPath) => {
+    const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+    return {
+      lockPath,
+      offenders: findForeignResolved(lock),
+      problems: findShapeProblems(lock),
+    };
+  });
 }
 
 // 直に実行されたときだけ検査して終了コードを返す
@@ -121,15 +195,16 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     process.exit(1);
   }
 
-  const bad = results.filter(({ offenders }) => offenders.length > 0);
+  const bad = results.filter(({ offenders, problems }) => offenders.length + problems.length > 0);
 
   if (bad.length > 0) {
     console.error(
-      '::error::npm レジストリ以外から依存を取ろうとしている lockfile があります。' +
+      '::error::lockfile の取得元を確かめられませんでした。' +
         ' 認証情報の有無にかかわらず、動いたコードは id-token から AWS のロールに入れます。',
     );
-    for (const { lockPath, offenders } of bad) {
+    for (const { lockPath, offenders, problems } of bad) {
       console.error(`  ${lockPath}`);
+      for (const problem of problems) console.error(`    ${problem}`);
       for (const { name, resolved } of offenders) console.error(`    ${name} → ${resolved}`);
     }
     process.exit(1);
