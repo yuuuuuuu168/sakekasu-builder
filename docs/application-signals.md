@@ -115,9 +115,9 @@ done
 
 1. **サービスが計装済みになるまで待つ** — 一覧の `InstrumentationType` が `UNINSTRUMENTED` から変わる。デプロイ直後はデータが空で、反映まで数分から十数分かかる
 2. **トレースを確認する** — 実際に画像をアップロードし、OCR を走らせてから「Transaction search」を見る。Bedrock / S3 への呼び出しがスパンとして分かれていれば通っている。分かれていなければ ESM バンドルを疑う（下記の注意点）
-3. **ソムリエのトレースを確認する** — GenAI Observability にソムリエ Runtime のトレースが出るか見る
+3. **ソムリエのトレースを確認する** — GenAI Observability にソムリエ Runtime のトレースが出るか見る（確認済み。下の「ソムリエのトレース」を参照）
 4. **トレースに利用者の識別子が入っていないか確認する**（下記）
-5. **1週間後にコストを見る** — Cost Explorer で CloudWatch の増分を確認する
+5. **1週間後にコストを見る** — Cost Explorer で CloudWatch の増分を確認する（確認済み。下の「費用」を参照）
 
 出てこないときは、まずサービス検出が有効かを疑う（上記の `get-role`）。次に関数の環境変数とレイヤーが実機に入っているかを見る。
 
@@ -309,14 +309,48 @@ AWS_PROFILE=sakekasu-builder aws logs filter-log-events \
 
 24時間の窓に計装前の値が残っていれば、これ1回で前後が並ぶ。残っていなければ、同じコマンドを**マージ前**に流して控えておく。それも取り忘れたら、CloudWatch Logs Insights で計装が入った時刻をまたいで `Init Duration` を並べる。
 
+## ソムリエのトレース（2026-10-03 確認）
+
+GenAI Observability にソムリエ Runtime のトレースが出ている。サービスとして `sommelier_sommelier.DEFAULT`（`Environment: bedrock-agentcore:default`）が検出されていて、**下流ごとの内訳まで取れている**。
+
+```
+Service:                 sommelier_sommelier.DEFAULT
+Operation:               POST /invocations
+RemoteService:           AWS::BedrockAgentCore
+RemoteOperation:         RetrieveMemoryRecords / ListEvents
+RemoteResourceType:      AWS::BedrockAgentCore::Memory
+RemoteResourceIdentifier: sommelier_preference-MF60B0B2hE
+```
+
+Issue #86 が狙っていた「下流依存ごとの遅延・エラーの内訳」は、ソムリエについては計装を足さずに揃っている。AgentCore 側が最初から出しているため。
+
+GenAI 固有のメトリクス（`InputTokens` / `OutputTokens` / `GenAISystem-InputTokens` / `GenAISystem-OutputTokens`）も出る。レイテンシーは日次4〜5件で 1.2〜4.1 秒。
+
+```bash
+AWS_PROFILE=verify aws cloudwatch get-metric-statistics --region ap-northeast-1 \
+  --namespace ApplicationSignals --metric-name Latency \
+  --dimensions Name=Environment,Value=bedrock-agentcore:default \
+               Name=Service,Value=sommelier_sommelier.DEFAULT \
+  --start-time 2026-09-03T00:00:00Z --end-time 2026-10-03T00:00:00Z \
+  --period 86400 --statistics SampleCount Average
+```
+
+**メトリクスの名前空間は `ApplicationSignals`（`AWS/` が付かない）。** SLO 由来の `AttainmentRate` などが入っている `AWS/ApplicationSignals` とは別物で、サービスのゴールデンメトリクスはこちらにある。取り違えると空の結果が返るだけなので、間違いに気づきにくい。
+
 ## SLO
 
-OCR に2つ定義してある（`monitoring-stack.ts`）。`presigned-url` は計装が 2026-08-16 に入ったばかりで材料が無いため、まだ作っていない。SLO は Application Signals の課金対象なので、数は絞る。
+OCR と `presigned-url` に2つずつ定義してある（`monitoring-stack.ts` の `SLO_TARGETS`）。
 
 | SLO | 目標 | 評価期間 |
 |---|---|---|
 | `dev-sakekasu-ocr-analyzer-availability` | 成功率 90% | 30日 rolling |
 | `dev-sakekasu-ocr-analyzer-latency` | 90% が 15 秒未満 | 30日 rolling |
+| `dev-sakekasu-presigned-url-availability` | 成功率 90% | 30日 rolling |
+| `dev-sakekasu-presigned-url-latency` | 90% が 2 秒未満 | 30日 rolling |
+
+`presigned-url` は計装が 2026-08-16 に入ったあと、材料が溜まるのを待って 2026-10-03 に追加した。
+
+対象を増やすときは `SLO_TARGETS` に1行足す。**`idPrefix` は CloudFormation の論理 ID に入るので、既存のものは変えない。** 変えると SLO が作り直されて30日ぶんの達成率が消える。デプロイは成功するので、気づくのは「鳴るべきときに鳴らなかった」あとになる。
 
 ### なぜ既存のアラームがあるのに要るか
 
@@ -337,6 +371,25 @@ OCR に2つ定義してある（`monitoring-stack.ts`）。`presigned-url` は�
 **単位はミリ秒。** `get-metric-statistics` の応答が `Unit: Milliseconds` を返し、生値も4桁で出る（秒に直すと 4.6〜8.1 秒）。SLO の `MetricThreshold: 15000` はこの単位に合わせた 15 秒で、**秒だと思って 15 を入れると 15 ミリ秒になり達成率が 0% に張り付く**。逆にミリ秒の値を秒として読むと「15000 秒＝約4時間」と誤読される（PR #161 のレビューで実際に起きた）。数字を書き換えるときは単位を確認すること。
 
 所要時間の大半は Bedrock なので画像の大きさで振れる。8 秒台の実測に対して 10 秒だと余裕が 2 秒しかなく揺れで鳴るため、倍近い余裕を取った。ここを割るのは「いつもより明らかに遅い」ときだけでよい。
+
+#### presigned-url は 2 秒
+
+2026-10-03 の実測（30日、172リクエスト）。
+
+| 指標 | 値 |
+|---|---|
+| 件数 | 172 |
+| 日次 p99 | 476〜1,030ms |
+| 最大 | 1,041ms |
+| Error / Fault / Throttle | すべて 0 |
+
+最大 1,041ms に対して約2倍の余裕を取って 2,000ms にした。
+
+**コールドスタートの分を上積みしていないのは、この指標に乗らないため。** Application Signals の `Latency`（最大 1,041ms）と Lambda の `Duration`（最大 1,085ms）はほぼ一致し、どちらも Init Duration を含まない。計装込みのコールドスタートは 1.1〜1.2 秒あるが、そこは別の話になる。
+
+可用性 SLO も付けてある。実測はエラー 0 件だが、既存の `dev-sakekasu-lambda-errors-presignedurlfunction` は**15分で5件以上**でしか鳴らないので、ぽつぽつ失敗する形は素通りする。OCR で SLO を足した理由と同じ穴が空いている。
+
+ただし 172 リクエスト / 30日という規模では、90% を割るのに約17件の失敗が要る。**単発や数件の失敗を捕まえるものではない。** そこは既存のエラーアラーム側の仕事で、SLO が見ているのは「じわじわ壊れ続けている」状態のほう。
 
 ### request-based にしている理由
 
@@ -383,20 +436,26 @@ SLO を作った直後の可用性は **84.51%**（`60/71`）で、すでに目�
 
 #115 の修正（2026-08-10 02:04Z）以降、この失敗は一度も起きていない。08-11・08-12・08-16 のエラーはいずれも 0。
 
-### アラームは 2026-09-09 ごろまで赤いまま
+### 赤いまま置く期間を作らない（2026-08〜09 の教訓）
 
-**直すものは無いが、アラームは鳴り続ける。** 履歴が30日窓から抜けるまでそのままで、09-09 ごろに自然に戻る。Slack に通知が来ても、この期間は既知として扱ってよい。
+SLO を入れた直後、導入前に起きていた失敗が30日窓に残っているせいで可用性アラームが赤いままになった。当時この文書には「09-09 ごろに自然に戻る。Slack に通知が来ても、この期間は既知として扱ってよい」と書いていた。
 
-> **この「既知として扱ってよい」は 08-24 までで終わっている。** 実際には赤が続いている間に別の障害（下の 08-24 の項）が起き、状態遷移が起きないぶん Slack にも出ないまま埋もれた。赤い期間に来た通知を既知として流すなら、**期限を切って、明けたら実測を取り直すこと**。
+**これは失敗だった。** 赤が続いている間に別の障害（下の 08-24 の項）が起き、アラームは既に ALARM なので状態遷移が無く、Slack にも出ないまま埋もれた。「既知だから流す」運用は、その窓の中で起きた本物を一緒に捨てる。
 
-**除外ウィンドウ（`exclusionWindows`）では消せない。** 一度試して、デプロイが次のエラーで失敗した（PR #166、2026-08-17）。
+赤いまま放置する期間をどうしても作るなら、**期限を切って、明けたら実測を取り直すこと**。アラームの状態ではなく、SLO の達成率そのものを定期的に見るほうが確実。
+
+実際には 09-23 15:47 UTC に OK へ戻った（08-24 の78件が窓から抜けたタイミング）。想定していた 09-09 ではなく、2週間遅れている。**窓が明ける日付は、途中で新しい失敗が入れば後ろにずれる。** 日付を決め打ちにして待つ運用が成り立たないのはこのためでもある。
+
+### 除外ウィンドウでは消せない
+
+起きてしまった失敗を SLO の評価から外せないか試したが、デプロイが次のエラーで失敗した（PR #166、2026-08-17）。
 
 ```
 Invalid start time Mon Aug 03 00:00:00 UTC 2026:
 start time must not be in the past
 ```
 
-書式（ISO 8601）は正しく解釈されていて、拒否されたのは**開始時刻が過去である**こと。除外ウィンドウは計画メンテナンスのように**これから来る期間**を外すための機能で、起きてしまった事象を後から除外する用途には使えない。SLO を入れる前に起きたことは、窓から抜けるのを待つしかない。
+書式（ISO 8601）は正しく解釈されていて、拒否されたのは**開始時刻が過去である**こと。除外ウィンドウ（`exclusionWindows`）は計画メンテナンスのように**これから来る期間**を外すための機能で、起きてしまった事象を後から除外する用途には使えない。
 
 CloudFormation は `UPDATE_ROLLBACK_COMPLETE` で戻るため、失敗しても SLO とアラームは無事。ただし修正するまで以降のデプロイが毎回落ちるので、気づいたらすぐ戻すこと。
 
@@ -506,10 +565,37 @@ AWS_PROFILE=sakekasu-builder aws cloudwatch get-metric-statistics \
 
 ## 費用
 
-個人利用の規模なら月数十円から数百円の見込み。
+### 実測（2026-10-03、アカウント <アプリのアカウント ID>）
+
+導入前（6〜7月）と導入後を並べたもの。金額は `UnblendedCost` の `Usage` レコードのみで、クレジットによる相殺前の実使用額。
+
+| 月 | CloudWatch 合計 | うち Application Signals | うちアラーム | X-Ray スパン |
+|---|---|---|---|---|
+| 2026-06 | $0 | $0 | $0（アラーム1件） | $0 |
+| 2026-07 | $0 | $0 | $0（アラーム1件） | $0 |
+| 2026-08 | $1.25 | $0.14（93,518） | $1.10（20件） | $0.0055（7,354） |
+| 2026-09 | $1.84 | $0.22（149,442） | $1.61（25件） | $0.0015（1,954） |
+
+**Application Signals 自体は月 $0.22（約33円）で、見込み（月数十円〜数百円）の下限に収まっている。** 計装のコストは問題にならない。
+
+むしろ CloudWatch の請求を押し上げているのは**アラームのほう**で、9月は $1.84 中 $1.61（87%）を占める。無料枠が10件なので、アラームを増やすほうが費用に効く。APM を入れると高くつく、という事前の警戒は的を外していた。
+
+なお現時点では全額がクレジットで相殺されており、請求額としてはゼロになっている（`RECORD_TYPE` を見ると `Usage` $1.84 に対して `Credit` -$1.84）。**クレジットが切れたらこの額がそのまま出る**ので、ゼロだと思って放置しない。
+
+参考として、アカウント全体は9月 $1.32（うち Bedrock が $1.20）。CloudWatch はクレジットで消えているため合計に乗っていない。
+
+```bash
+AWS_PROFILE=verify-org aws ce get-cost-and-usage --region us-east-1 \
+  --time-period Start=2026-09-01,End=2026-10-01 --granularity MONTHLY \
+  --metrics UnblendedCost UsageQuantity --group-by Type=DIMENSION,Key=USAGE_TYPE \
+  --filter '{"And":[{"Dimensions":{"Key":"LINKED_ACCOUNT","Values":["<アプリのアカウント ID>"]}},{"Dimensions":{"Key":"SERVICE","Values":["AmazonCloudWatch"]}},{"Dimensions":{"Key":"RECORD_TYPE","Values":["Usage"]}}]}'
+```
+
+費用は管理アカウント側にあるので `verify-org` プロファイルを使う。`LINKED_ACCOUNT` で絞らないと管理アカウント自身の分しか見えず、ゼロが並ぶ。
+
+### 単価
 
 - Transaction Search: 取り込み $0.35/GB + インデックス済みスパン $0.75/100万（先頭 1% は無料）
-- 参考として、既存の監視スタックが月 $5 前後
 
 インデックス率は現在 100%（`Default` ルール）。当初は 1% にするつもりだったが、この規模では 100% のままでよい。OCR とソムリエを合わせて月に数百リクエスト、1リクエストあたり10スパンとしても月数千スパンで、$0.75/100万 に対して完全に誤差になる。むしろ 1% にするとトレースがほとんど残らず、障害時に見たいリクエストが入っていない状態になる。
 
