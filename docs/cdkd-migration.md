@@ -19,7 +19,7 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | 5 | `cdkd diff --all` で未対応リソースを洗い出す | 済 |
 | 5.5 | 取り込みを回す `migrate-to-cdkd.sh` を書く | 済 |
 | 6 | 影響の小さいスタックで CFn への戻しを確認 | 済（要・回避策） |
-| 7 | `cdkd import` で既存スタックを取り込む | これから |
+| 7 | `cdkd import` で既存スタックを取り込む | 済（2026-10-03。4スタックとも失敗0） |
 | 8 | `cdkd drift` で state と実物の一致を確認 | これから |
 | 9 | `deploy.yml` / `cdk-diff.yml` を cdkd に差し替え | PR 用意済み（マージは手順8 のあと） |
 
@@ -364,6 +364,26 @@ Summary:  6 imported, 0 not found, 0 unsupported, 0 out of scope, 3 failed   ←
 
 2回目は `mapfile` で引っかかった。**macOS の bash は 3.2 で `mapfile` が無い。** 配列が空のまま `--resource` が1つも渡されず、1回目と同じ結果になった。しかも `mapfile: command not found` が流れるだけで処理は続く。読み込みを `while read` に書き換え、組み立てた数が合わなければ落とすようにした。bash 3.2 で動かない書き方（`mapfile` / `readarray` / 連想配列 / `${x^^}` / `&>`）は検査で弾いている。
 
+### 2026-10-03 の取り込みの結果
+
+3回目で全スタックが通った。
+
+```
+Summary:  3 imported, 0 not found, 0 unsupported, 0 out of scope, 0 failed   ← health-global
+Summary: 48 imported, 0 not found, 0 unsupported, 0 out of scope, 0 failed   ← monitoring
+Summary: 54 imported, 0 not found, 0 unsupported, 0 out of scope, 0 failed   ← api
+Summary:  9 imported, 0 not found, 0 unsupported, 0 out of scope, 0 failed   ← auth
+engine=cdkd
+```
+
+4スタックとも `CloudFormation stack '...' retired.` まで進み、CloudFormation 側のスタックは残っていない。`identifier_overrides` の手当ては api で2件・auth で3件が `already overridden by --resource` として効いた（`UserPoolUserPoolClient40176907 (ap-northeast-1_eZOfInCT4|3a4unc2dbutrkm2hjn887s1h9m)`、`SakekasuApiED3BBF54 (6mtw5cju3naydf7mxnaoulowta)` など）。
+
+出力に混じった2種類のメッセージは、どちらも想定どおり。
+
+**`weak reference — producer is not cdkd-managed`。** `Fn::ImportValue` の解決元がまだ CloudFormation 側にいる、移行の途中だけ出る注意。取り込みが進むにつれ消える。
+
+**`Failed to read state for stack ...: Unsupported state schema version 10`。** 共有している state バケットに、先行リポジトリ（`sakekasu-kakeibo-dev-*` / `sakekasu-learning-dev-*` / `ReinventPlanner`）がより新しい cdkd で書いた state が入っている。0.291.31 はスキーマ 1〜8 までしか読めない。このリポジトリのスタックの取り込みには影響しないが、**こちらの cdkd も上げる必要がある**。窓を閉じた（手順9 をマージした）あとの宿題。
+
 **移す順は monitoring → api → auth。** CloudFormation は、他のスタックが `Fn::ImportValue` で読んでいる Export を持つスタックを消せない。合成結果で確かめた向きは次のとおり。
 
 | スタック | Export | ImportValue |
@@ -399,13 +419,22 @@ AWS_REGION=<スタックのリージョン> AWS_PROFILE=sakekasu-builder \
 
 ### 8. drift の確認
 
-各スタックの取り込み直後に流す。
+取り込みの直後に4スタックとも流す。
 
 ```bash
-AWS_PROFILE=sakekasu-builder npx cdkd drift sakekasu-dev-auth
+cd infra
+export AWS_PROFILE=sakekasu-builder
+npx cdkd drift sakekasu-dev-auth
+npx cdkd drift sakekasu-dev-api
+npx cdkd drift sakekasu-dev-monitoring
+AWS_REGION=us-east-1 npx cdkd drift sakekasu-dev-health-global
 ```
 
+`health-global` は us-east-1。手順7 と同じく、cdkd はスタックのリージョンを見ずに実行時の `AWS_REGION` でクライアントを作るので、ここでも合わせる。
+
 差分がなければ終了コード 0。出た場合は `cdkd drift <stack> --json` で中身を見る。state を実物に合わせるなら `--accept`、実物を state に合わせるなら `--revert`。
+
+**ここがクリーンになったら、手順9 の PR をすぐマージする。** 取り込みが終わった時点で CloudFormation のスタックは消えているので、main の `deploy.yml`（`cdk deploy --all`）が走ると全部を新規作成しにいく。drift の確認は窓を開けたままやっていることになる。
 
 ### 9. ワークフローの差し替え
 
