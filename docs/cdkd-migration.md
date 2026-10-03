@@ -611,13 +611,13 @@ mfaMessage: '認証コードは {####} です。',
 | --- | --- | --- |
 | `auth` | 1（UserPool の4パス） | `mfaMessage` を足して `cdkd deploy`。`--revert` は cdkd の不具合で落ちた（[#235](https://github.com/yuuuuuuu168/sakekasu-builder/issues/235)） |
 | `api` | 4（AppSync の Code） | `cdkd drift --revert`。`4 reverted` でそのまま通った |
-| `monitoring` | 31 | `scripts/fix-monitoring-mojibake.mjs`。drift が検出しないので `--revert` が動かない |
+| `monitoring` | 31 | `scripts/fix-monitoring-mojibake.mjs`。drift の土台が実物に替わっていて `--revert` が動かない |
 
 確認は実物を読んで行った。`auth` は Cognito の確認メールが `sakekasu-builder ?????` から `sakekasu-builder 確認コード` に戻り、`api` は AppSync のリゾルバのコメントが戻っている。
 
 **`?` は表示の問題ではなく実データ。** 読み取り専用プロファイルの AWS CLI でも、`PYTHONUTF8=1` を付けて UTF-8 が通るパイプに流しても `?`（1文字が1バイトの `0x3f`）。同じ CLI が修復後は日本語を返すので、これで区別できる。
 
-### `cdkd drift` の見落とし（0.291.31）
+### `cdkd drift` が「差なし」と言う（最初のデプロイ後）
 
 `monitoring` で、state と実物が違うのに「差なし」と出る。
 
@@ -627,9 +627,30 @@ mfaMessage: '認証コードは {####} です。',
 | AWS の実物 | `?`（`DescribeAlarms` と `cloudcontrol get-resource` の両方） |
 | `cdkd drift` | `no drift detected (49 resources checked, 3 unsupported)` |
 
-**より古い版では検出できていた。** 取り込み直後（手元の `node_modules` が lockfile より古かった時点）の手順8 では、同じ29件を drift として出していた。`npm ci` で 0.291.31 に揃えたあと出なくなった。`auth`（Cognito）と `api`（AppSync）は 0.291.31 でも検出できたので、型ごとの話。
+**版の退行ではない。** 最初はそう書いたが誤りだった。`dist` を読むと、drift の比較の土台は2通りある。
 
-見落としは危ない向きの誤り。「drift が無い」を信じると、実物がずれていることに気づけない。`cdkd diff`（テンプレートと state）と `cdkd drift`（state と実物）の両方を見る必要がある。
+```js
+const useObserved = resource.observedProperties !== void 0;
+const baseline = useObserved ? resource.observedProperties : resource.properties ?? {};
+```
+
+- `properties` … テンプレートの意図。取り込みが書くのはこれだけ
+- `observedProperties` … **デプロイ時に AWS から撮った実物のスナップショット**。`cdkd deploy` が記録する
+
+`cdkd diff` が「差分なし」なので `properties` はテンプレートどおりの日本語。それでも drift が「差なし」と言うなら、使われた土台は `properties` ではない。つまり `observedProperties`（= 文字化けした実物）が土台になっている。
+
+| 時点 | state の中身 | drift の土台 | 結果 |
+| --- | --- | --- | --- |
+| 取り込み直後 | `properties` だけ | テンプレートの意図（日本語） | 29件を検出 |
+| 最初の `cdkd deploy` 後 | `observedProperties` が入る | デプロイ時の実物（`?`） | 差なし |
+
+`auth` と `api` で検出できたのも版ではなく順番の問題。あれを見た時点では、そのスタックのリソースにまだ `observedProperties` が入っていなかった。
+
+**最初のデプロイが、既存のずれを黙って「正常」として焼き付ける。** drift の設計としては筋が通っている（「デプロイしてから変わったか」を見る道具なので）。ただ移行の場面では罠になる。手順8 で29件を見つけ、手順9 をマージしてデプロイすると、その29件が直らないまま消える。
+
+**`cdkd diff` と `cdkd drift` は別のものを見ている。** diff はテンプレートと state、drift は state（か実物のスナップショット）と実物。どちらも「差なし」でも実物がテンプレートと違うことがある。移行の直後は drift を先に見て、見つけた差分はデプロイより前に片付ける。
+
+上流への報告の下書きは [#239](https://github.com/yuuuuuuu168/sakekasu-builder/issues/239)。
 
 ### monitoring の修復スクリプト
 
@@ -649,6 +670,27 @@ AWS_PROFILE=sakekasu-builder node scripts/fix-monitoring-mojibake.mjs
 - 対象は非ASCII を含む説明文だけ（ASCII だけの文面は壊されようがない）。2026-10-03 時点で33件のうち31件が修復対象、2件は手順9 のデプロイで既に直っていた
 
 cdkd 側が drift を検出できるようになれば `cdkd drift <スタック> --revert` で済むので、このファイルは消してよい。
+
+#### 2026-10-03 の修復の結果
+
+```
+対象 33 件: 一致 2 / 直した 31 / 失敗 0
+```
+
+実物を読んで確かめた。
+
+| 確認項目 | 結果 |
+| --- | --- |
+| アラームの説明文 | 日本語に復帰（`ラベル画像の OCR が失敗しています（銘柄名の自動入力が効きません）` など） |
+| SNS の表示名 | `酒カス 監視アラート` |
+| EventBridge ルールの説明 | `AWS Health の障害・予定された変更を Slack へ流す` |
+| SLO の説明 | `ラベル OCR の成功率（30日で 90%）。…` |
+| アラーム27件の状態 | 全て OK。ALARM / INSUFFICIENT_DATA はゼロ |
+| 副作用 | 通知アクション・OK アクション・説明文の欠落ゼロ。`Dimensions` / `Threshold` / `Period` も元のまま |
+
+Cloud Control の read-modify-write が効いて、説明文だけが差し替わり他は無傷だった。
+
+**`?` は表示の問題ではなく実データだったことも、ここで裏が取れた。** 同じ読み取り専用プロファイルの同じ CLI が、修復後は日本語を返す。
 
 ### スクリプトが黙って終わった（`~` を含むパス）
 
@@ -709,9 +751,7 @@ pathToFileURL(argv[1])          : .../com%7Eapple%7ECloudDocs/probe.mjs
 
 | やること | なぜ |
 | --- | --- |
-| `monitoring` の文字化けを直す | `scripts/fix-monitoring-mojibake.mjs` を打つ。`auth` と `api` は済 |
-| `cdkd drift` の見落としを上流に報告する | 0.291.31 が CloudWatch Alarm / SNS Topic / Events Rule / SLO の差分を検出しない |
-| 手元で `npm ci` を打つ | `node_modules` が lockfile より古いとスキーマ10 の state が読めない |
+| drift の土台が入れ替わる件を上流に報告する | 最初のデプロイが既存のずれを `observedProperties` に焼き付け、drift から見えなくなる |
 | `infra/**` を main に入れさせない仕掛け | 上の歯止めでデプロイ側は守られた。PR 側で止めるかは未決 |
 
 ### state バケットのスキーマ版
