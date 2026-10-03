@@ -21,6 +21,7 @@ on:
     paths:
       - 'infra/**'
       - 'src/**'
+      - 'theme/**'
       - 'sommelier/**'
       - 'package.json'
       - 'package-lock.json'
@@ -33,6 +34,7 @@ on:
     paths:
       - 'infra/**'
       - 'src/**'
+      - 'theme/**'
       - 'sommelier/**'
       - 'package.json'
       - 'package-lock.json'

@@ -51,6 +51,7 @@ describe('ThemeProvider', () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.classList.remove('dark');
+    delete document.documentElement.dataset.theme;
   });
 
   afterEach(() => {
@@ -69,6 +70,7 @@ describe('ThemeProvider', () => {
     expect(screen.getByTestId('theme').textContent).toBe('system');
     expect(screen.getByTestId('resolved').textContent).toBe('dark');
     expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
   it('system のあいだは OS 設定の変更に追随する', () => {
@@ -100,6 +102,8 @@ describe('ThemeProvider', () => {
 
     expect(screen.getByTestId('resolved').textContent).toBe('light');
     expect(document.documentElement.classList.contains('dark')).toBe(false);
+    // 共通テーマは data-theme が無いと OS（ここではダーク）に従うので、ライトも明示する
+    expect(document.documentElement.dataset.theme).toBe('light');
     expect(localStorage.getItem('sakekasu-theme')).toBe('light');
 
     // OS 側が変わっても、選んだテーマのまま
