@@ -410,6 +410,12 @@ account <アプリのアカウント ID> (or access is denied). Refusing to use 
 
 `pull_request` ではワークフローの定義自体が PR のブランチから読まれるため、ワークフロー内の対策では閉じない。塞ぐには `pull_request_target` に移して信頼できる ref を checkout するか、PR のワークフローから OIDC を外すことになる。#131 の前提（private・fork 無し・PR を開けるのは admin 本人だけ）が変わる前にやる作業として、そちらに記録してある。
 
+**「認証情報より前だから安全」ではない。** ジョブには `id-token: write` があるので、動いたコードは自分で OIDC トークンを取って `sts:AssumeRoleWithWebIdentity` でロールに入れる。認証ステップより前かどうかは関係がない。だから `infra/scripts/check-lockfile-registry.mjs` は依存の取得そのものより前に置いてある。
+
+**取得元の検査は10本すべてを見る。** 認証情報の有無にかかわらずワークフローが取得・import する lockfile は、infra 本体の1本と lambda ごとの9本。`deploy.yml` は lambda ごとに `npm ci` を回し、`npm test` は `vitest.config` の include が lambda 配下の `__tests__` を拾うので、それらのモジュールと依存が読み込まれる。最初に書いた版は infra 本体しか見ておらず、9本が素通りしていた（PR #230 で aws-security-agent が指摘、HIGH）。
+
+1本も見つからないときは異常として落とす。黙って何も検査しない状態が緑になるのを避けるため。
+
 **合成のステップで `CDK_DEFAULT_ACCOUNT` を明示する。** この値は本来 CDK CLI が認証情報から入れる。認証前に合成すると undefined になり、`bin/app.ts` の `env.account` が未定義のスタックになって、テンプレート中のアカウント ID が `Ref: AWS::AccountId` に化ける。デプロイ時には同じ値に解決されるが、認証ありで合成した場合と別物のテンプレートになる。手元で測ると4スタックすべてで差が出た（auth 36行 / api 78行 / monitoring 79行 / health-global 62行）。#131 にも「PR #130 の作業中に実際に踏んだ」と記録がある。
 
 渡し方は `CDKD_APP` 環境変数が楽。cdkd は `-a, --app` の値として「合成済みのクラウドアセンブリのディレクトリ」を受け取り、省略時は `CDKD_APP`、次に `cdk.json` の `app` を見る。ジョブの `env` に `CDKD_APP: cdk.out` を置けば、`migrate-to-cdkd.sh` の中から呼ばれる `cdkd import` まで含めて、どの呼び出しも合成し直さない。コマンドごとに `--app` を書き足すより漏れにくい。

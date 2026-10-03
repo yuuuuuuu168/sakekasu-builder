@@ -22,8 +22,16 @@ export interface ForeignResolved {
   resolved: string;
 }
 
+/** lockfile 1本あたりの検査結果 */
+export interface LockfileResult {
+  lockPath: string;
+  offenders: ForeignResolved[];
+}
+
 export declare const ALLOWED_HOSTS: string[];
+
+export declare function discoverLockfiles(root?: string): string[];
 
 export declare function findForeignResolved(lock: Lockfile): ForeignResolved[];
 
-export declare function checkLockfile(lockPath: string): ForeignResolved[];
+export declare function checkLockfiles(lockPaths: string[]): LockfileResult[];
