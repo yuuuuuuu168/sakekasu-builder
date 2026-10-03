@@ -33,6 +33,7 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 /** 許可する取得元 */
 export const ALLOWED_HOSTS = ['registry.npmjs.org'];
@@ -183,7 +184,16 @@ export function checkLockfiles(lockPaths) {
 }
 
 // 直に実行されたときだけ検査して終了コードを返す
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+/**
+ * このファイルを直に実行したときだけ下を走らせる（テストからの import では走らせない）。
+ *
+ * `new URL(\`file://${process.argv[1]}\`)` と比べてはいけない。`import.meta.url` は
+ * `~` を `%7E` に符号化するが、`new URL` はそのまま残すため、パスに `~` が入ると
+ * 判定が偽になり本体が黙って走らない。iCloud Drive のパスには
+ * `com~apple~CloudDocs` が必ず入るので、手元から打つと何も起きずに終わる。
+ * 2026-10-03 に実際に踏んだ。`pathToFileURL` が正しい逆変換。
+ */
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const given = process.argv.slice(2);
   const lockPaths = given.length > 0 ? given : discoverLockfiles();
 
