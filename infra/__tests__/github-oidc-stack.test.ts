@@ -203,6 +203,33 @@ describe('GithubOidcStack', () => {
     expect(targets).not.toContain(`arn:aws:iam::${ACCOUNT}:role/cdk-hnb659fds-lookup-role-*`);
   });
 
+  it('diff ロールは cdkd のアセット保管庫を確かめられる', () => {
+    // cdkd は diff でもリージョンのアセット保管庫が自分のものかを
+    // HeadBucket（ExpectedBucketOwner 付き）で確かめる。権限が無いと 403 が
+    // 返り、cdkd はそれを「他アカウントのバケット」と解釈して止まる。
+    // 権限不足が乗っ取りに見えるエラーになるので、原因が分かりにくい（PR #230）
+    const statements = statementsFor(template, /^DiffRole/);
+    const probe = statements.filter(
+      (s) =>
+        s.Effect === 'Allow' &&
+        toArray(s.Action).includes('s3:ListBucket') &&
+        toArray(s.Resource).includes(`arn:aws:s3:::cdkd-assets-${ACCOUNT}-*`),
+    );
+
+    expect(
+      probe.length,
+      'cdkd-assets-* への s3:ListBucket が無い。cdkd diff が ' +
+        'ASSET_STORAGE_FOREIGN_BUCKET で落ちる',
+    ).toBeGreaterThan(0);
+
+    // 中身を読む権限は足さない
+    for (const statement of probe) {
+      expect(toArray(statement.Action), 'アセットの中身を読む権限が付いている').not.toContain(
+        's3:GetObject',
+      );
+    }
+  });
+
   it('diff ロールには書き込み権限が一切ない', () => {
     const statements = statementsFor(template, /^DiffRole/);
     expect(statements.length).toBeGreaterThan(0);

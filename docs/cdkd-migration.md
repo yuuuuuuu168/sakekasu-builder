@@ -389,7 +389,18 @@ PR は取り込み（手順7）より先に用意しておき、手順8まで全
 - `cdk-diff.yml` の diff ロールは `cdk-hnb659fds-lookup-role-*` への AssumeRole を消す（cdkd では使わない。読み取り権限は手順3の時点で付与済み）
 - 待ちモードは既定のまま。デプロイ後にカナリアとアラームが動く構成なので `--no-wait` は使わない
 
-**色の指定は要らない。** cdkd に `--no-color` は無く、`NO_COLOR` も読まない（0.291.31 の `dist` に文字列が存在しない）。ただし TTY でないときは色を付けない作りなので、パイプに流す限りエスケープシーケンスは混ざらない。`npx cdkd list | cat -v` で確認済み。
+**色はコメントに投稿する側で落とす。** cdkd に `--no-color` は無く、`NO_COLOR` も読まない（0.291.31 の `dist` に文字列が存在しない）。通常の出力は TTY でないと色が付かないが、**エラー出力には TTY でなくても付く**（PR #230 の最初の CI で、PR コメントに `\u001b[31m` が入った）。`cdkd` 側に逃げ道が無いので、コメントを組む `github-script` でエスケープシーケンスを落としている。
+
+**diff ロールに cdkd のアセット保管庫への `s3:ListBucket` が要る。** cdkd は `diff` でもリージョンのアセット保管庫が自分のものかを確かめる。`ExpectedBucketOwner` 付きの `HeadBucket` で問い合わせ、権限が無いと 403 が返る。cdkd は 403 を「他アカウントのバケット」と解釈して止まるため、権限不足が乗っ取りに見えるエラーになる。
+
+```
+CdkdError: Asset bucket 'cdkd-assets-232791540685-ap-northeast-1' exists but is not owned by
+account 232791540685 (or access is denied). Refusing to use it.
+```
+
+`HeadBucket` に要るのは `s3:ListBucket` だけで、中身を読む権限は要らない。ECR 側の `DescribeRepositories` は既存の `ecr:Describe*` で足りている。[cdkd-policies.ts](../infra/lib/cdkd-policies.ts) の `ProbeCdkdAssetStorage` がこれ。反映には `sakekasu-github-oidc` の手動デプロイが要る。
+
+**`| tee` に流す run には `set -o pipefail` を付ける。** パイプの終了コードは `tee` のものになる。GitHub Actions の `run` は `bash -e` で動くが、`-e` はパイプライン全体の最後のコマンドしか見ないため、`cdkd` が落ちてもステップが成功扱いになる。実際に上のアセット保管庫のエラーが出たまま `diff` チェックが緑で通った。`pipefail` を立てたうえで、コメントを投稿するステップに `if: always()` を付けて、落ちてもエラー内容が PR に出るようにしている。
 
 あわせて、セキュリティレビュー（PR #151）で挙がった2件をここで入れる。
 
@@ -399,7 +410,7 @@ PR は取り込み（手順7）より先に用意しておき、手順8まで全
 
 CDK CLI 側のフォールバック（`cdk deploy`）には `--app cdk.out` を明示する。`CDKD_APP` は cdkd しか見ない。
 
-`infra/__tests__/workflow-credentials.test.ts` が、合成が認証情報より前にあること、`CDKD_APP: cdk.out` があること、認証後に合成し直す CDK CLI の呼び出しが無いことを検査する。
+`infra/__tests__/workflows.test.ts` が、合成が認証情報より前にあること、`CDKD_APP: cdk.out` があること、認証後に合成し直す CDK CLI の呼び出しが無いこと、`tee` に流す run に `pipefail` があること、投稿ステップに `if: always()` があることを検査する。
 
 **state に平文が残っていないか見張る。** `npx cdkd scrub --all --dry-run --fail` をデプロイ前のゲートに入れる。現状このアプリの合成テンプレートに `{{resolve:secretsmanager:...}}` は無く、シークレットは ID を環境変数に置いて実行時に取りに行く作りなので平文が残る余地は無いが、将来そうなったときに気づけるようにしておく。
 

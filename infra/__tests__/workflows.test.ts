@@ -63,3 +63,45 @@ describe.each(['deploy.yml', 'cdk-diff.yml'])('%s', (file) => {
     expect(offenders, '合成済みを渡さない CDK CLI の呼び出しが認証後にある').toEqual([]);
   });
 });
+
+/**
+ * パイプに流すコマンドが、パイプ元の失敗を飲み込まないかの検査。
+ *
+ * `cmd | tee file` の終了コードは tee のものになる。GitHub Actions の run は
+ * bash -e で動くが、-e はパイプライン全体の最後のコマンドしか見ないため、
+ * cmd が落ちてもステップは成功扱いになる。これで cdkd が権限不足で止まった
+ * まま diff チェックが緑になった（PR #230）。
+ */
+describe('パイプの失敗検知', () => {
+  const file = 'cdk-diff.yml';
+  const source = readFileSync(join(WORKFLOW_DIR, file), 'utf8');
+
+  it('tee に流す run に set -o pipefail がある', () => {
+    const runs = [...source.matchAll(/ {8}run: \|\n((?: {10}.*\n)+)/g)].map((m) => m[1]);
+    expect(runs.length, `${file} に複数行の run が無い`).toBeGreaterThan(0);
+
+    const piped = runs.filter((block) => block.includes('| tee '));
+    expect(piped.length, `${file} に tee へ流す run が無い`).toBeGreaterThan(0);
+
+    for (const block of piped) {
+      expect(
+        block.includes('set -o pipefail'),
+        `pipefail が無いので tee がパイプ元の失敗を飲み込む:\n${block}`,
+      ).toBe(true);
+    }
+  });
+
+  it('diff の出力を投稿するステップが失敗時にも走る', () => {
+    // pipefail で diff ステップが落ちたとき、既定だと後続が飛ばされて
+    // エラー内容が PR に出ない。
+    //
+    // 探すのは YAML のキーとしての if。コメントに書いた "if: always()" に
+    // 当たらないよう、行頭の空白のあとすぐ if: で始まる行だけを見る
+    const guards = source
+      .split('\n')
+      .filter((line) => /^\s+if:/.test(line))
+      .filter((line) => line.includes('always()'));
+
+    expect(guards, 'always() を持つ if: のステップが無い').not.toEqual([]);
+  });
+});

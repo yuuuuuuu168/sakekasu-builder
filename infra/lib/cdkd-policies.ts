@@ -483,6 +483,23 @@ export function cdkdDiffStatements(account: string): iam.PolicyStatement[] {
       ],
     }),
 
+    // cdkd は diff でもリージョンのアセット保管庫が自分のものかを確かめる。
+    // ExpectedBucketOwner 付きの HeadBucket で問い合わせ、権限が無いと 403 が
+    // 返る。cdkd は 403 を「他アカウントのバケット」と解釈して止まるため、
+    // 権限不足が「バケットの乗っ取り」に見えるエラーになる（PR #230 の CI で判明）。
+    //
+    //   CdkdError: Asset bucket 'cdkd-assets-...' exists but is not owned by
+    //   account ... (or access is denied). Refusing to use it.
+    //
+    // HeadBucket に要るのは s3:ListBucket だけ。中身は読まないので
+    // GetObject は入れない。ECR 側の DescribeRepositories は
+    // ReadStatelessServices の ecr:Describe* で足りている
+    new iam.PolicyStatement({
+      sid: 'ProbeCdkdAssetStorage',
+      actions: ['s3:ListBucket'],
+      resources: [`arn:aws:s3:::cdkd-assets-${account}-*`],
+    }),
+
     new iam.PolicyStatement({
       sid: 'ReadApplicationRoles',
       actions: [

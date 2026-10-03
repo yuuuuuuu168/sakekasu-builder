@@ -59,19 +59,28 @@ jobs:
           aws-region: ap-northeast-1
       - name: cdkd diff
         id: diff
-        # diff があっても exit 0 のままにし、出力だけをコメントに回す
-        # （--fail を付けると差分があるだけで落ちてしまう）。
-        # cdkd に --no-color は無く NO_COLOR も読まないが、TTY でないときは
-        # 色を付けない作りなので、パイプに流す限りエスケープシーケンスは混ざらない
+        # --fail は付けない。差分があるだけで落ちてしまう。
+        #
+        # 一方で cdkd 自体が落ちたときは落ちてほしいので pipefail を立てる。
+        # これが無いとパイプの終了コードが tee のものになり、cdkd が
+        # エラーで止まってもステップが成功扱いになる（この形の最初の実行で、
+        # 権限不足のエラーを出したまま diff チェックが緑になった）。
+        # 出力は下のステップが if: always() で拾うので、落ちてもコメントは出る
         run: |
+          set -o pipefail
           npx cdkd diff --all 2>&1 | tee diff.txt
       - name: PRコメントに diff を投稿（既存コメントは更新）
+        if: always() && hashFiles('infra/diff.txt') != ''
         uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
             const marker = '<!-- cdk-diff -->';
             let body = fs.readFileSync('infra/diff.txt', 'utf8');
+            // cdkd は --no-color も NO_COLOR も持たず、TTY でなくても
+            // エラー出力には色を付ける。コメントにエスケープシーケンスが
+            // 混ざるので落とす（正規表現に制御文字を直書きしない形で組む）
+            body = body.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g'), '');
             // GitHub コメントの上限（65536字）に収める
             const limit = 60000;
             if (body.length > limit) {
