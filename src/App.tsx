@@ -28,16 +28,13 @@ function NavigationBar({
   currentPage: Page;
   onPageChange: (page: Page) => void;
 }) {
-  const { user, signOut } = useAuth();
+  const { signOut } = useAuth();
   const [isMfaDialogOpen, setIsMfaDialogOpen] = useState(false);
 
   return (
     <nav className="sticky top-0 z-50 border-b border-gray-200 bg-white/80 backdrop-blur-md dark:border-white/10 dark:bg-dark-bg/80">
-      {/* ユーザー情報 + MFA設定 + サインアウト */}
-      <div className="mx-auto flex max-w-md items-center justify-between px-4 py-2 text-xs">
-        <span className="truncate text-gray-500 dark:text-gray-400">
-          {user?.email ?? ''}
-        </span>
+      {/* MFA設定 + サインアウト（誰がログインしているかは出さない） */}
+      <div className="mx-auto flex max-w-md items-center justify-end px-4 py-2 text-xs">
         <div className="flex shrink-0 items-center gap-1">
           <button
             onClick={() => setIsMfaDialogOpen(true)}
