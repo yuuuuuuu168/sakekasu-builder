@@ -543,6 +543,37 @@ Failed to read state for stack sakekasu-kakeibo-dev-api: Unsupported state schem
 
 state バケット `cdkd-state-232791540685` は3リポジトリの共用で、先行の2本（と ReinventPlanner）はより新しい cdkd で書いている。こちらの 0.291.31 は 1〜8 までしか読めない。自分のスタックの処理には影響しないが、出力の大半がこれで埋まる。**窓を閉じたあとに cdkd を上げる。**
 
+### `cdkd scrub` はデプロイの後ろに置く
+
+初回のデプロイがここで止まった。
+
+```
+Scrub of sakekasu-dev-api failed: could not resolve the Fn::ImportValue in resource
+  SakekasuApiED3BBF54 at UserPoolConfig.UserPoolId: export
+  'sakekasu-dev-auth:ExportsOutputRefUserPool6BA7E5F296FD7236' not found in any stack.
+  Searched 17 cdkd state record(s) and CloudFormation exports.
+```
+
+scrub は state の中身を見る前に `Fn::ImportValue` を解決する。解決できないと
+「解決できないので清いとは言えない」と言って拒否する（`ScrubRefusalError`）。値が
+シークレットだった場合に「探す平文が無い」状態で清いと報告してしまうためで、
+判断としては正しい。
+
+**cdkd へ移した直後の state はリソースだけで、スタックの Output を持っていない。**
+取り込みはリソースを記録するだけで、Output と Export を state に書くのは最初の
+`cdkd deploy`。CloudFormation のスタックはもう無いので、そちらの Exports にも
+フォールバックできない。つまり scrub をデプロイの前に置くと、移行の直後は必ず
+そこで止まる。
+
+デプロイの後ろに移した。**見張りとしては弱くならない。** 平文を state に書くのは
+deploy そのもので、前に見ているのは1回古い state でしかない。後ろなら書いたその回で
+気づける。`always()` を付けてあるのは、deploy が途中で落ちた回こそ state に何が
+残ったかを見たいため。
+
+検査を2件足した（`infra/__tests__/workflows.test.ts`）。scrub が `cdkd deploy` より
+後ろにあることと、`always()` が付いていること。順序を戻す変異と `always()` を
+外す変異のどちらでも落ちる。
+
 ### スクリプト自身が打つ aws の資格情報
 
 手順9 をマージした直後の deploy がここで落ちた。
@@ -639,7 +670,7 @@ CDK CLI 側のフォールバック（`cdk deploy`）には `--app cdk.out` を�
 
 `infra/__tests__/workflows.test.ts` が、合成が認証情報より前にあること、`CDKD_APP: cdk.out` があること、認証後に合成し直す CDK CLI の呼び出しが無いこと、`tee` に流す run に `pipefail` があること、投稿ステップに `if: always()` があることを検査する。
 
-**state に平文が残っていないか見張る。** `npx cdkd scrub --all --dry-run --fail` をデプロイ前のゲートに入れる。現状このアプリの合成テンプレートに `{{resolve:secretsmanager:...}}` は無く、シークレットは ID を環境変数に置いて実行時に取りに行く作りなので平文が残る余地は無いが、将来そうなったときに気づけるようにしておく。
+**state に平文が残っていないか見張る。** `npx cdkd scrub --all --dry-run --fail` を**デプロイの後ろ**に置く。現状このアプリの合成テンプレートに `{{resolve:secretsmanager:...}}` は無く、シークレットは ID を環境変数に置いて実行時に取りに行く作りなので平文が残る余地は無いが、将来そうなったときに気づけるようにしておく。
 
 ### `deploy.yml` から migrate-to-cdkd.sh を呼ぶ
 
