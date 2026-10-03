@@ -64,6 +64,50 @@ describe('AuthStack', () => {
         EnabledMfas: ['SOFTWARE_TOKEN_MFA'],
       });
     });
+
+    /**
+     * SMS の MFA は使わないが、文面は空にしない。
+     *
+     * cdkd は provider.update に state の全体像を渡し、state に無い任意
+     * プロパティを「省略」ではなく「空文字」として送る。Cognito は
+     * smsAuthenticationMessage の空文字を長さと {####} の両方で拒否するので、
+     * この1件が欠けると UserPool へのあらゆる更新が落ちる。
+     *
+     * 2026-10-03、文字化けの修復（cdkd drift --revert）が実際にここで落ちた。
+     * cdkd 側が直るまでは外せない。
+     */
+    it('SmsAuthenticationMessage が Cognito の制約を満たす', () => {
+      const pools = template.findResources('AWS::Cognito::UserPool');
+      const values = Object.values(pools).map(
+        (r) => (r as { Properties: { SmsAuthenticationMessage?: unknown } }).Properties
+          .SmsAuthenticationMessage,
+      );
+
+      expect(values.length, 'UserPool が見つからない').toBeGreaterThan(0);
+      for (const value of values) {
+        expect(
+          typeof value,
+          'SmsAuthenticationMessage が無い。cdkd が空文字を送って UserPool の更新が落ちる',
+        ).toBe('string');
+        // Cognito の制約そのまま: 6文字以上で {####} を含む
+        expect(String(value).length, '6文字未満だと Cognito が拒否する').toBeGreaterThanOrEqual(6);
+        expect(String(value), '{####} が無いと Cognito が拒否する').toContain('{####}');
+      }
+    });
+
+    it('SMS の MFA そのものは有効にしていない', () => {
+      // 上の文面は cdkd の回避でしかない。SmsConfiguration を置いたり
+      // EnabledMfas に SMS_MFA を混ぜたりはしない
+      const pools = template.findResources('AWS::Cognito::UserPool');
+      for (const pool of Object.values(pools)) {
+        const props = (pool as {
+          Properties: { SmsConfiguration?: unknown; EnabledMfas?: unknown[] };
+        }).Properties;
+
+        expect(props.SmsConfiguration, 'SmsConfiguration が付いている').toBeUndefined();
+        expect(props.EnabledMfas, 'EnabledMfas に SMS が混ざっている').not.toContain('SMS_MFA');
+      }
+    });
   });
 
   // Requirements 2.4: UserPool Client が SRP 認証フローを有効化している

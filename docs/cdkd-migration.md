@@ -382,7 +382,7 @@ engine=cdkd
 
 **`weak reference — producer is not cdkd-managed`。** `Fn::ImportValue` の解決元がまだ CloudFormation 側にいる、移行の途中だけ出る注意。取り込みが進むにつれ消える。
 
-**`Failed to read state for stack ...: Unsupported state schema version 10`。** 共有している state バケットに、先行リポジトリ（`sakekasu-kakeibo-dev-*` / `sakekasu-learning-dev-*` / `ReinventPlanner`）がより新しい cdkd で書いた state が入っている。0.291.31 はスキーマ 1〜8 までしか読めない。このリポジトリのスタックの取り込みには影響しないが、**こちらの cdkd も上げる必要がある**。窓を閉じた（手順9 をマージした）あとの宿題。
+**`Failed to read state for stack ...: Unsupported state schema version 10`。** 手元の `node_modules` が lockfile より古かっただけ。`infra/` で `npm ci` を打てば消える。下の「state バケットのスキーマ版」を参照。
 
 **移す順は monitoring → api → auth。** CloudFormation は、他のスタックが `Fn::ImportValue` で読んでいる Export を持つスタックを消せない。合成結果で確かめた向きは次のとおり。
 
@@ -557,6 +557,52 @@ Lambda の環境変数（`HEALTH_CHECK_TARGETS` / `USER_POOL_ID` / `USER_POOL_CL
 
 外形監視はデプロイ後の 05:16 にメトリクスを発行しており、環境変数は壊れていない。カナリアは実行間隔が長く、デプロイ直後の時点では次の実行がまだ来ていなかった。止まれば `WatcherSilentsommeliercanary` が鳴る。デプロイ直後のアラームは27件すべて OK。
 
+### 文字化けを直す（`cdkd drift --revert`）
+
+`auth` から始めた。`--dry-run` は4つのパスだけを当てる計画に見えたが、本番は落ちた。**AWS は変更されていない**（`0 reverted, 1 failed`）。
+
+```
+✗ sakekasu-dev-auth/UserPool6BA7E5F2 (AWS::Cognito::UserPool): AWS update failed —
+  2 validation errors detected:
+  Value '' at 'smsAuthenticationMessage' failed to satisfy constraint:
+    Member must satisfy regular expression pattern: (?s).*\{####\}(?s).*;
+  Value '' at 'smsAuthenticationMessage' failed to satisfy constraint:
+    Member must have length greater than or equal to 6
+```
+
+`SmsAuthenticationMessage` はテンプレートにも実物にも無い（`describe-user-pool` で `null`）。cdkd がそこに**空文字を入れて送っている**。
+
+**cdkd 側の機構（0.291.31、`dist/program-*.js`）。** 読み取り側が、無い任意プロパティを `""` に正規化する。
+
+```js
+result["SmsAuthenticationMessage"] = pool.SmsAuthenticationMessage ?? "";
+```
+
+更新側は `!== void 0` で入れるかどうかを決めるので、この `""` が素通りして API に渡る。
+
+```js
+if (properties["SmsAuthenticationMessage"] !== void 0)
+  updateParams.SmsAuthenticationMessage = properties["SmsAuthenticationMessage"];
+```
+
+オブジェクト型（`SmsConfiguration` / `UserPoolAddOns`）には `isEmptyObjectPlaceholder` で同じ穴を塞いである。文字列型には無い。作成側は真偽値で見ている（`if (properties[...])`）ので `""` は落ちる。**更新だけが通る。**
+
+**文字化けより重い。** cdkd は provider.update に state の全体像を渡すので、この1件のために **UserPool へのあらゆる更新が落ちる**。auth に何か変更を入れたときも同じ所で止まる。
+
+#### 回避
+
+`mfaMessage` を明示して、送られる値を妥当にする。SMS の MFA を有効にするわけではない（`mfaSecondFactor.sms` は `false` のまま、`SmsConfiguration` も置かない）。
+
+```ts
+mfaMessage: '認証コードは {####} です。',
+```
+
+**これで文字化けも同時に直る。** provider.update は state の全体像を書くので、一度 update が呼ばれれば state が持つ正しい日本語もまとめて入る。`--revert` は要らない。
+
+検査を2件足した（`infra/__tests__/auth-stack.test.ts`）。`SmsAuthenticationMessage` が Cognito の制約（6文字以上・`{####}` を含む）を満たすことと、SMS の MFA そのものは有効にしていないこと。`mfaMessage` を落とす変異と `sms: true` にする変異のどちらでも落ちる。`{####}` を抜く変異は CDK 自身が合成時に弾く。
+
+上流への報告の下書きは [#235](https://github.com/yuuuuuuu168/sakekasu-builder/issues/235)。
+
 ### 文字化けの直し方はスタックごとに違った
 
 3スタックとも「state は正しい日本語、実物は `?`」という同じ形なのに、通った手立てが違う。
@@ -610,7 +656,7 @@ cdkd 側が drift を検出できるようになれば `cdkd drift <スタック
 | --- | --- |
 | `monitoring` の文字化けを直す | `scripts/fix-monitoring-mojibake.mjs` を打つ。`auth` と `api` は済 |
 | `cdkd drift` の見落としを上流に報告する | 0.291.31 が CloudWatch Alarm / SNS Topic / Events Rule / SLO の差分を検出しない |
-| cdkd を上げる | 共有 state バケットのスキーマ10 を 0.291.31 が読めない |
+| 手元で `npm ci` を打つ | `node_modules` が lockfile より古いとスキーマ10 の state が読めない |
 | 取り込み中に `infra/**` を main に入れさせない仕掛け | 今回は約束だけで、たまたま順序に救われた |
 
 ### state バケットのスキーマ版
@@ -622,7 +668,21 @@ Failed to read state for stack sakekasu-kakeibo-dev-api: Unsupported state schem
   This cdkd binary supports versions 1, 2, 3, 4, 5, 6, 7, 8.
 ```
 
-state バケット `cdkd-state-232791540685` は3リポジトリの共用で、先行の2本（と ReinventPlanner）はより新しい cdkd で書いている。こちらの 0.291.31 は 1〜8 までしか読めない。自分のスタックの処理には影響しないが、出力の大半がこれで埋まる。**窓を閉じたあとに cdkd を上げる。**
+**原因は手元の `node_modules` が lockfile より古いこと。** cdkd を上げる必要は無い。0.291.31 の `dist` を直接読むと、スキーマ10 まで読める。
+
+```
+SCHEMA_VERSIONS_READABLE = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+```
+
+手元のエラーは `supports versions 1, 2, 3, 4, 5, 6, 7, 8` と言うので、0.291.31 より古いものが入っている。CI は毎回 `npm ci` で入れ直すため最初から出ていない。
+
+```bash
+cd infra
+npm ci
+npx cdkd --version   # 0.291.31
+```
+
+**自分の state も読めなくなる。** 手順9 のデプロイ（CI、0.291.31）が4スタックの state をスキーマ10 に上げたため、古い手元からは `cdkd drift` も `StateError` で止まる。2026-10-03 に実際に当たった。
 
 ### `cdkd scrub` はデプロイの後ろに置く
 
