@@ -460,7 +460,18 @@ AWS_REGION=us-east-1 npx cdkd drift sakekasu-dev-health-global
 
 書いたのは CloudFormation。これらのリソースは全部 `cdk deploy` が最後に書いており、cdkd の state はテンプレートの値（正しい日本語）を持っている。`cdk diff` はテンプレート同士を比べるだけで実物を見ないので、これまで誰も気づかなかった。cdkd が実物と比べる仕組みを持っていて初めて見えた。
 
-**`--accept` を打たない。** 打つと壊れたほうを state に焼き付けてしまう。何もしなくてよい。最初の `cdkd deploy` が Cloud Control / SDK で直接書くので、正しい日本語に戻る。**これは退行ではなく修復。** いま利用者に届いている確認メールは次のようになっている。
+**`--accept` を打たない。** 打つと壊れたほうを state に焼き付けてしまう。直すなら `cdkd drift <スタック> --revert`（AWS ← state）。
+
+**`cdkd deploy` では直らない。** 2026-10-03 の初回デプロイで実地に確かめた。deploy が比べるのは合成テンプレートと state であって、AWS の実物ではない。文字化けは state と実物のあいだにしか無いので、deploy からは見えない。
+
+| アラーム | テンプレートと state の差 | デプロイ後 |
+| --- | --- | --- |
+| `dev-sakekasu-ocr-slo-availability` | あり（#231 で説明文を変えた） | 05:14:53 に更新。日本語が正しく入った |
+| `dev-sakekasu-ocr-errors` | なし | 04:06:53 のまま。`?` が残る |
+
+前者が通ったことで、**cdkd 自身は日本語を正しく書ける**ことも裏が取れた。壊したのは CloudFormation の側。
+
+いま利用者に届いている確認メールは次のようになっている。
 
 ```
 件名: sakekasu-builder ?????
@@ -531,6 +542,28 @@ aws cloudwatch describe-alarms --region ap-northeast-1 \
 - `SommelierCanaryFunctionServiceRoleDefaultPolicy` の `cognito-idp:AdminInitiateAuth` のリソース
 
 前者2つは外形監視とカナリアが失敗すれば `WatcherFailure*` アラームで気づけるが、アラーム自身の `Dimensions` には見張り役がいない。
+
+### 2026-10-03 の初回デプロイの結果
+
+成功した。確かめた3点のうち2つは想定どおり、1つは余の読み違いだった。
+
+**`Fn::ImportValue` は正しく解決された。** アラームの `Dimensions` には実際の値が入っている（`dev-sakekasu-ocr-analyzer` / `6mtw5cju3naydf7mxnaoulowta` / `dev-sakekasu-presigned-url`）。`Fn::ImportValue` の文字列は残っていない。解決後の値が state の直値と同じだったため、cdkd は API を呼ばずに済ませている（`dev-sakekasu-ocr-errors` の `AlarmConfigurationUpdatedTimestamp` が 04:06:53 のまま）。「17 to update」の大半はこれで、実際の書き込みが起きたのは #231 の説明文変更とアセットの張り替えだけだった。
+
+**実変更は適用された。** `dev-sakekasu-ocr-slo-availability` の説明文と Lambda 3本のコードの取得元が 05:14:53 に更新されている。
+
+**文字化けは直らなかった。** 上の「2026-10-03 の drift の結果」を参照。`cdkd drift --revert` が要る。
+
+Lambda の環境変数（`HEALTH_CHECK_TARGETS` / `USER_POOL_ID` / `USER_POOL_CLIENT_ID`）は読み取り専用プロファイルからは確かめられない。`kms:Decrypt` が Permission Set で明示的に拒否されているため、`get-function-configuration` が `Environment.Error` を返す（設計どおり）。外形監視とカナリアが動き続けているかを、メトリクスの発行とアラームの状態で代わりに見る。
+
+外形監視はデプロイ後の 05:16 にメトリクスを発行しており、環境変数は壊れていない。カナリアは実行間隔が長く、デプロイ直後の時点では次の実行がまだ来ていなかった。止まれば `WatcherSilentsommeliercanary` が鳴る。デプロイ直後のアラームは27件すべて OK。
+
+### 残っている宿題
+
+| やること | なぜ |
+| --- | --- |
+| `cdkd drift <スタック> --revert` で文字化けを直す | 実物の日本語が `?` のまま。確認メールが利用者に届いている |
+| cdkd を上げる | 共有 state バケットのスキーマ10 を 0.291.31 が読めない |
+| 取り込み中に `infra/**` を main に入れさせない仕掛け | 今回は約束だけで、たまたま順序に救われた |
 
 ### state バケットのスキーマ版
 
