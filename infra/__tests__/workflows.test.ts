@@ -25,6 +25,52 @@ function lineIndexOf(lines: string[], needle: string, what: string): number {
   return index;
 }
 
+/**
+ * `cdkd scrub` の置き場所。
+ *
+ * scrub は state の中身を見る前に `Fn::ImportValue` を解決する。参照先の Export が
+ * state にも CloudFormation にも無いと「解決できないので清いとは言えない」と言って
+ * 拒否する（ScrubRefusalError）。
+ *
+ * cdkd へ移した直後の state はリソースだけで、スタックの Output を持っていない。
+ * それを書くのは最初の `cdkd deploy`。だから scrub をデプロイの前に置くと、
+ * 移行の直後に必ずそこで止まる。2026-10-03 の初回デプロイで実際に止まった。
+ *
+ * 後ろに置いても見張りとしては弱くならない。平文を state に書くのは deploy
+ * そのもので、前に見ているのは1回古い state でしかない。
+ */
+describe('deploy.yml の scrub の位置', () => {
+  const lines = readFileSync(join(WORKFLOW_DIR, 'deploy.yml'), 'utf8').split('\n');
+
+  it('scrub が cdkd deploy より後にある', () => {
+    const deploy = lineIndexOf(lines, 'npx cdkd deploy --all', 'cdkd deploy のステップ');
+    const scrub = lineIndexOf(lines, 'npx cdkd scrub --all', 'scrub のステップ');
+
+    expect(
+      scrub,
+      `scrub（${scrub + 1}行目）が cdkd deploy（${deploy + 1}行目）より前にある。` +
+        ' 参照先の Export が state に無い状態で ScrubRefusalError になり、デプロイに届かない',
+    ).toBeGreaterThan(deploy);
+  });
+
+  it('scrub が deploy の失敗時にも走る', () => {
+    // 途中で落ちた回こそ、state に何が残ったかを見たい。
+    //
+    // 見るのは YAML のキーとしての if。コメントの "always()" に当たらないよう、
+    // 行頭の空白のあとすぐ if: で始まる行だけを見る
+    const scrub = lineIndexOf(lines, 'npx cdkd scrub --all', 'scrub のステップ');
+    const stepStart = lines
+      .slice(0, scrub)
+      .reduce((last, line, index) => (/^ {6}- /.test(line) ? index : last), 0);
+    const step = lines.slice(stepStart, scrub + 1);
+
+    expect(
+      step.some((line) => /^\s+if:/.test(line) && line.includes('always()')),
+      'scrub のステップに always() が無い。deploy が落ちた回に state を見られない',
+    ).toBe(true);
+  });
+});
+
 describe.each(['deploy.yml', 'cdk-diff.yml'])('%s', (file) => {
   const lines = readFileSync(join(WORKFLOW_DIR, file), 'utf8').split('\n');
 

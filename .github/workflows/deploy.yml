@@ -104,17 +104,29 @@ jobs:
       - name: cdkd への取り込み状態を確かめる
         id: migrate
         run: bash scripts/migrate-to-cdkd.sh
-      # state に平文のシークレットが残っていないかの番人（PR #151 のレビュー）。
-      # いまこのアプリの合成テンプレートに {{resolve:secretsmanager:...}} は無く
-      # 残る余地も無いが、将来そうなったときに気づけるようにしておく
-      - name: state に平文のシークレットが無いか
-        if: steps.migrate.outputs.engine == 'cdkd'
-        run: npx cdkd scrub --all --dry-run --fail
       # 待ちモードは既定のまま。デプロイ後にカナリアとアラームが動く構成なので
       # --no-wait は使わない
       - name: デプロイ（cdkd）
         if: steps.migrate.outputs.engine == 'cdkd'
         run: npx cdkd deploy --all --yes
+      # state に平文のシークレットが残っていないかの番人（PR #151 のレビュー）。
+      # いまこのアプリの合成テンプレートに {{resolve:secretsmanager:...}} は無く
+      # 残る余地も無いが、将来そうなったときに気づけるようにしておく。
+      #
+      # デプロイの「後」に置く。scrub は Fn::ImportValue を解決してから中身を
+      # 見るので、参照先の Export が state にも CloudFormation にも無いと
+      # 「解決できないので清いとは言えない」と言って拒否する。cdkd へ移した
+      # 直後の state はリソースだけでスタックの Output を持っておらず、
+      # それを書くのは最初の cdkd deploy なので、前に置くと必ずそこで止まる
+      # （2026-10-03、実際に止まった）。
+      #
+      # 後ろでも見張りとしては弱くならない。平文を state に書くのは deploy
+      # そのもので、前に見ているのは1回古い state でしかない。後ろなら
+      # 書いたその回で気づける。always() にしてあるのは、deploy が途中で
+      # 落ちた回こそ state に何が残ったかを見たいため
+      - name: state に平文のシークレットが無いか
+        if: always() && steps.migrate.outputs.engine == 'cdkd'
+        run: npx cdkd scrub --all --dry-run --fail
       - name: デプロイ（CloudFormation へのフォールバック）
         if: steps.migrate.outputs.engine == 'cfn'
         run: npx cdk deploy --all --require-approval never --app cdk.out
