@@ -47,13 +47,23 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 
 **版を 0.291.16 に揃えなかった。** 他2本が踏んだ不具合のうち1件は 0.291.23 で直っている（[#3701](https://github.com/go-to-k/cdkd/issues/3701) `complete a bare CloudFormation id to the Cloud Control composite identifier`）。16 に固定すると、上流で直っているものに対して回避コードを新しく書くことになる。揃える先は「他2本がたまたま使っていた版」ではなく最新とし、他2本は後から追随して回避を1つ落とせばよい。
 
-判明している不具合は3件。どれもこのリポジトリに当たる。1件目と2件目は先行リポジトリ由来、3件目は手順6 でこちらが踏んだ。
+判明している不具合は3件。どれもこのリポジトリに当たる。1件目は先行リポジトリ由来、2件目は手順7 の前検査、3件目は手順6 でこちらが踏んだ。どれも未修正で回避が要る。
 
 **リージョンの取り違え（未修正。回避が要る）。** `cdkd import` は CloudFormation を読むクライアントを実行時の `AWS_REGION` で作り、スタックのリージョンを見ない。us-east-1 のスタックを ap-northeast-1 から探して、全リソースが「not found」になる。0.291.31 の `cdkd import --help` を見ても `--stack-region` に当たるオプションは無いので、スタックごとに `AWS_REGION` を合わせて打つしかない。
 
 このリポジトリで当たるのは `sakekasu-dev-health-global`（us-east-1）。手順6 はそのスタックで往復を確認する手順なので、回避を入れないまま打つと最初の一手が分かりにくい形で落ちる。
 
-**Cognito UserPoolClient の物理 ID（0.291.23 で修正済み）。** Cloud Control は `<UserPoolId>|<ClientId>` の組を識別子に求めるが、CloudFormation から引ける物理 ID は ClientId だけ。他2本は `--resource <論理ID>=<pool>|<client>`（と、残りを自動解決させる `--auto`）で明示して避けている。0.291.31 では要らないはずで、手順5 の `cdkd diff --all` では何も言われなかった。ただし `health-global` に UserPoolClient は無いため、実物での確認は手順7 で auth を取り込むときになる。このリポジトリの UserPoolClient は2つ。
+**物理 ID と Cloud Control の識別子の食い違い（未修正。回避が要る）。** cdkd は取り込むリソースの識別子に CloudFormation の物理 ID を使うが、Cloud Control 側が別の形を求める型がある。そのままだと `Identifier ... is not valid for identifier [...]` で落ちる。2026-10-03 の手順7 の前検査で3型・5件に当たった。
+
+| 型 | 要る識別子 | 物理 ID | 件数 |
+| --- | --- | --- | --- |
+| `AWS::Cognito::UserPoolClient` | `<UserPoolId>\|<ClientId>` | ClientId だけ | auth 2 |
+| `AWS::Logs::MetricFilter` | `<LogGroupName>\|<FilterName>` | FilterName だけ | auth 1 / api 1 |
+| `AWS::AppSync::GraphQLApi` | `<ApiId>` | ARN | api 1 |
+
+回避は `--resource <論理ID>=<値>` で明示すること。`--resource` を1つでも渡すと指定したものしか取り込まなくなるので、残りを自動解決させる `--auto` も付ける。`migrate-to-cdkd.sh` の `identifier_overrides` が CloudFormation から引いて組み立てる。
+
+**UserPoolClient は「0.291.23 で修正済み」ではなかった。** 先行リポジトリが 0.291.16 で踏んだ件を [go-to-k/cdkd#3701](https://github.com/go-to-k/cdkd/issues/3701) が直したと読んで回避を落としたが、0.291.31 で現に落ちた。手順5 の `cdkd diff --all` には出ず、取り込みで初めて出る。診断を diff だけで済ませたのが誤りだった。
 
 **`cdkd export` のインラインポリシー削除が空振りする（未修正。回避が要る）。** `AWS::IAM::Policy` を消すときに `PolicyName` ではなく物理 ID を使うため実体が残り、戻しのフェーズ2 が必ず落ちる。2026-10-03 の手順6 で実地に踏んだ。詳細と回避は下の「`cdkd export` はインラインポリシーの手当てが要る」、上流への報告の下書きは [#228](https://github.com/yuuuuuuu168/sakekasu-builder/issues/228)。取り込み（手順7）には影響しない。
 
@@ -201,7 +211,9 @@ AWS_PROFILE=sakekasu-builder npx cdkd diff --all
 | monitoring | 48 | 48 |
 | health-global | 3 | 3 |
 
-Cloud Control にフォールバックする3種類（UserPoolClient 2、FunctionConfiguration 4、MetricFilter 2）も一覧に出たうえで何も言われていない。0.291.23 で直ったはずの UserPoolClient の物理 ID は、実物での確認は手順6 待ち。
+Cloud Control にフォールバックする3種類（UserPoolClient 2、FunctionConfiguration 4、MetricFilter 2）も一覧に出たうえで何も言われていない。
+
+**ただし `cdkd diff` が通ることは取り込めることを意味しない。** 手順7 の前検査で、UserPoolClient 2件・MetricFilter 2件・GraphQLApi 1件が識別子の食い違いで取り込めなかった。diff は合成結果と state／AWS を比べるだけで、Cloud Control の識別子を解決しない。この型の問題は `cdkd import` を打って初めて出る。
 
 8/16 に 0.283.25 で取った値（auth 12 / api 49 / monitoring 46 / health-global 3）とは件数が違うが、原因は cdkd ではなく CDK 側のコードの変化。auth が 12 → 9 と減ったのは [#129](https://github.com/yuuuuuuu168/sakekasu-builder/issues/129) の `logRetention` → `logGroup`（8/18 反映）で `Custom::LogRetention` と provider 一式が消え、明示の LogGroup が1つ増えた差。api と monitoring は同じ分を引いたうえで機能追加で増えている。
 
@@ -335,6 +347,20 @@ AWS_PROFILE=sakekasu-builder bash scripts/migrate-to-cdkd.sh
 スクリプトは全スタックを `--dry-run` で調べ、全リソースが取り込めると分かったときだけ移す。1つでも引っかかれば、どのスタックにも手を付けずに `engine=cfn` を返して抜ける。移し終えた後に打っても何もしない。
 
 `--record-resource-mapping` が書き出す論理 ID と物理 ID の対応表は `mapping-<スタック名>.json` に残る。後から「何を取り込んだか」を追うときに要る。
+
+**識別子の食い違う型は `--resource` で明示する。** スクリプトの `identifier_overrides` が CloudFormation から引いて組み立てる。詳しくは上の「cdkd の版と、先行リポジトリで判明している不具合」。手当てが要るのは UserPoolClient / MetricFilter / GraphQLApi の3型で、`infra/__tests__/migrate-to-cdkd.test.ts` が対象が落ちていないかと件数が変わっていないかを見ている。
+
+### 2026-10-03 の前検査の結果
+
+1回目は引っかかり、**どのスタックにも手を付けずに `engine=cfn` で抜けた**。設計どおりの止まり方で、AWS の状態は手順7 の前と同じ。
+
+```
+Summary: 52 imported, 1 not found, 0 unsupported, 0 out of scope, 1 failed   ← api
+Summary:  6 imported, 0 not found, 0 unsupported, 0 out of scope, 3 failed   ← auth
+::warning::cdkd への移行を見送ります。スタックには手を付けていません
+```
+
+落ちた5件はすべて識別子の食い違い。`identifier_overrides` を足して解決できるようにした。
 
 **移す順は monitoring → api → auth。** CloudFormation は、他のスタックが `Fn::ImportValue` で読んでいる Export を持つスタックを消せない。合成結果で確かめた向きは次のとおり。
 
