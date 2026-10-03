@@ -393,6 +393,20 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
       ],
       resources: ['*'],
     }),
+
+    // cdkd は型ごとの「作成時にしか指定できないプロパティ」を
+    // cloudformation:DescribeType で引き、差し替えが要る変更かどうかを判定する。
+    // 読めないと同梱のスキーマ写しに落ちる。写しは AWS の現物より古くなりうるので、
+    // AWS 側で更新可能になったプロパティを差し替えと誤判定する余地が残る。
+    // DynamoDB テーブルのような作り直しの効かないものに当たると取り返しがつかない。
+    //
+    // 対象は公開されている型のスキーマだけ（リソースの中身ではない）なので、
+    // リソースは type/resource/* に絞って渡す
+    new iam.PolicyStatement({
+      sid: 'ReadResourceTypeSchemas',
+      actions: ['cloudformation:DescribeType'],
+      resources: ['arn:aws:cloudformation:*::type/resource/*'],
+    }),
   ];
 }
 
@@ -483,6 +497,23 @@ export function cdkdDiffStatements(account: string): iam.PolicyStatement[] {
       ],
     }),
 
+    // cdkd は diff でもリージョンのアセット保管庫が自分のものかを確かめる。
+    // ExpectedBucketOwner 付きの HeadBucket で問い合わせ、権限が無いと 403 が
+    // 返る。cdkd は 403 を「他アカウントのバケット」と解釈して止まるため、
+    // 権限不足が「バケットの乗っ取り」に見えるエラーになる（PR #230 の CI で判明）。
+    //
+    //   CdkdError: Asset bucket 'cdkd-assets-...' exists but is not owned by
+    //   account ... (or access is denied). Refusing to use it.
+    //
+    // HeadBucket に要るのは s3:ListBucket だけ。中身は読まないので
+    // GetObject は入れない。ECR 側の DescribeRepositories は
+    // ReadStatelessServices の ecr:Describe* で足りている
+    new iam.PolicyStatement({
+      sid: 'ProbeCdkdAssetStorage',
+      actions: ['s3:ListBucket'],
+      resources: [`arn:aws:s3:::cdkd-assets-${account}-*`],
+    }),
+
     new iam.PolicyStatement({
       sid: 'ReadApplicationRoles',
       actions: [
@@ -508,6 +539,20 @@ export function cdkdDiffStatements(account: string): iam.PolicyStatement[] {
         'cloudformation:GetTemplate',
       ],
       resources: ['*'],
+    }),
+
+    // cdkd は型ごとの「作成時にしか指定できないプロパティ」を
+    // cloudformation:DescribeType で引き、差し替えが要る変更かどうかを判定する。
+    // 読めないと同梱のスキーマ写しに落ちる。写しは AWS の現物より古くなりうるので、
+    // AWS 側で更新可能になったプロパティを差し替えと誤判定する余地が残る。
+    // DynamoDB テーブルのような作り直しの効かないものに当たると取り返しがつかない。
+    //
+    // 対象は公開されている型のスキーマだけ（リソースの中身ではない）なので、
+    // リソースは type/resource/* に絞って渡す
+    new iam.PolicyStatement({
+      sid: 'ReadResourceTypeSchemas',
+      actions: ['cloudformation:DescribeType'],
+      resources: ['arn:aws:cloudformation:*::type/resource/*'],
     }),
   ];
 }

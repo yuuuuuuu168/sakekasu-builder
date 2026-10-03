@@ -19,8 +19,7 @@ export interface GithubOidcStackProps extends cdk.StackProps {
  *   実権限は持たず、CDK bootstrap が作った cdk-hnb659fds-* ロール群への
  *   sts:AssumeRole だけを許可する（実際の作成・変更権限は bootstrap 側に委譲）
  * - diff ロール: pull_request イベントからのみ引き受け可能。
- *   読み取り専用の lookup ロールにしか入れないため、PR 上で cdk diff は
- *   できてもリソース変更はできない
+ *   読み取り権限しか持たないため、PR 上で差分は取れてもリソース変更はできない
  *
  * これに加えて、cdkd（CDK Direct）移行用のロールを1本足している（Issue #150）。
  * cdkd は CloudFormation を通さないため bootstrap のロールが使えず、強い権限を
@@ -46,7 +45,6 @@ export class GithubOidcStack extends cdk.Stack {
     // CDK bootstrap のロール名にはリージョンが含まれるため、ワイルドカードで
     // ap-northeast-1 と us-east-1（health-global スタック用）の両方を許可する
     const bootstrapRoleArns = `arn:aws:iam::${this.account}:role/cdk-hnb659fds-*`;
-    const lookupRoleArns = `arn:aws:iam::${this.account}:role/cdk-hnb659fds-lookup-role-*`;
 
     const deployRole = new iam.Role(this, 'DeployRole', {
       roleName: 'sakekasu-github-actions-deploy',
@@ -109,18 +107,12 @@ export class GithubOidcStack extends cdk.Stack {
         },
       }),
     });
-    diffRole.addToPolicy(
-      new iam.PolicyStatement({
-        actions: ['sts:AssumeRole'],
-        resources: [lookupRoleArns],
-      }),
-    );
 
     // cdkd diff 用の読み取り権限（Issue #150）。
     //
     // cdkd は lookup ロールに入らず、自分の認証情報で各リソースを読む。
-    // 移行が終わるまでは cdk diff も動かし続けるため、上の lookup ロールへの
-    // AssumeRole は残したまま、読み取り権限を足す形にしている。
+    // cdk-diff.yml が cdkd diff に切り替わり、CDK bootstrap の
+    // cdk-hnb659fds-lookup-role-* への AssumeRole は使われなくなったので外した。
     // 書き込みは入れないので、PR からリソースを変更できない構成は変わらない
     for (const statement of cdkdDiffStatements(this.account)) {
       diffRole.addToPolicy(statement);

@@ -3,6 +3,10 @@
 # deploy ロール）を使う。フロントは Amplify が別途自動デプロイするため、
 # ここでは infra/ の変更だけを対象にする。ソムリエ（AgentCore）は
 # デプロイ先のスタックが別なので deploy-sommelier.yml が受け持つ。
+#
+# デプロイは cdkd（CloudFormation を経由せず AWS SDK / Cloud Control API を
+# 直に叩く）で行う（Issue #150）。取り込みが済んでいないスタックが残っている
+# 間は migrate-to-cdkd.sh が検知して CloudFormation 側へフォールバックする。
 name: deploy
 
 on:
@@ -22,6 +26,15 @@ concurrency:
   group: cdk-deploy
   cancel-in-progress: false
 
+env:
+  # cdkd が直接読む。AWS への操作はこのロールで行われる。
+  # CDK CLI の cdk-hnb659fds-* ロールは cdkd では使えない（CloudFormation を
+  # 経由せず生の API を叩くため、必要な権限が別物になる）
+  CDKD_ROLE_ARN: arn:aws:iam::232791540685:role/sakekasu-cdkd-deploy
+  # 認証情報を入れる前に済ませた合成結果を使わせる。これを外すと cdkd が
+  # 自分で合成し直し、CDK アプリのコードが認証情報付きで走ることになる
+  CDKD_APP: cdk.out
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -35,12 +48,18 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: infra/package-lock.json
+      # 依存の取得元がレジストリだけかを、取得より前に確かめる。
+      # main への push で動くワークフローなので lockfile は一度マージを
+      # 通っているが、cdkd のデプロイロールは強いので同じ検査を置いておく
+      # （cdk-diff.yml と対称。理由はスクリプトのコメント）
+      - name: 依存の取得元を確かめる
+        run: node scripts/check-lockfile-registry.mjs
       # 依存の取得とテストは AWS の認証情報を入れる前に済ませる。
       #
       # npm のライフサイクルスクリプトはインストール時に任意のコードを実行できる。
       # 認証後に npm ci を走らせると、依存のどれか1つが乗っ取られただけで、
-      # そのスクリプトが AWS_SESSION_TOKEN を読んで cdk-hnb659fds-* ロールへ
-      # assume できてしまう（このロールは CloudFormation を自由に操作できる）。
+      # そのスクリプトが AWS_SESSION_TOKEN を読んで cdkd のデプロイロールへ
+      # assume できてしまう（このロールはアプリのリソースを自由に操作できる）。
       # 認証前に済ませておけば、スクリプトが走っても掴めるものが無い。
       # そのうえで --ignore-scripts も付ける（多層で塞ぐ）。
       - run: npm ci --ignore-scripts
@@ -58,8 +77,44 @@ jobs:
       # paths 条件やマージの経路によっては走らないことがある。本番へ出す手前で
       # 必ず1回通す（Issue #82 のレビュー指摘）
       - run: npm test
+      # 合成も認証情報を入れる前に済ませる（PR #151 のセキュリティレビュー）。
+      #
+      # --ignore-scripts が止めるのは npm のインストール時スクリプトだけで、
+      # CDK アプリのコードは合成時に実行される。認証後に合成すると、そこに
+      # 仕込まれた AWS SDK の呼び出しが認証情報付きで動く。
+      # 以降は CDKD_APP=cdk.out でこの成果物を使い回し、二度と合成しない
+      - name: 合成
+        # CDK_DEFAULT_ACCOUNT は本来 CDK CLI が認証情報から入れる。認証前に
+        # 合成するとこれが undefined になり、bin/app.ts の env.account が
+        # 未定義のスタックになって、テンプレート中のアカウント ID が
+        # Ref: AWS::AccountId に化ける。デプロイ時には同じ値に解決されるが、
+        # 認証ありで合成した場合と別物のテンプレートになる。明示しておけば
+        # 両者が一致する（Issue #131 に記録のある落とし穴）
+        env:
+          CDK_DEFAULT_ACCOUNT: '232791540685'
+        run: npx cdk synth --all -q
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::232791540685:role/sakekasu-github-actions-deploy
           aws-region: ap-northeast-1
-      - run: npx cdk deploy --all --require-approval never
+      # CloudFormation 管理のまま残っているスタックがあれば cdkd へ取り込む。
+      # 取り込み済みなら何もしない（冪等）。前検査で1つでも引っかかれば、
+      # どのスタックにも手を付けずに engine=cfn を返すので、その回は
+      # CloudFormation 側でデプロイされる（詳細は docs/cdkd-migration.md の手順7）
+      - name: cdkd への取り込み状態を確かめる
+        id: migrate
+        run: bash scripts/migrate-to-cdkd.sh
+      # state に平文のシークレットが残っていないかの番人（PR #151 のレビュー）。
+      # いまこのアプリの合成テンプレートに {{resolve:secretsmanager:...}} は無く
+      # 残る余地も無いが、将来そうなったときに気づけるようにしておく
+      - name: state に平文のシークレットが無いか
+        if: steps.migrate.outputs.engine == 'cdkd'
+        run: npx cdkd scrub --all --dry-run --fail
+      # 待ちモードは既定のまま。デプロイ後にカナリアとアラームが動く構成なので
+      # --no-wait は使わない
+      - name: デプロイ（cdkd）
+        if: steps.migrate.outputs.engine == 'cdkd'
+        run: npx cdkd deploy --all --yes
+      - name: デプロイ（CloudFormation へのフォールバック）
+        if: steps.migrate.outputs.engine == 'cfn'
+        run: npx cdk deploy --all --require-approval never --app cdk.out

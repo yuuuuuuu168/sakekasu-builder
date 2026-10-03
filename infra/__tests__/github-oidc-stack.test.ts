@@ -177,7 +177,7 @@ describe('GithubOidcStack', () => {
     });
   });
 
-  it('diff ロールは pull_request からのみで、読み取り専用の lookup ロールにしか入れない', () => {
+  it('diff ロールは pull_request からのみで、CDK bootstrap のロールには入れない', () => {
     template.hasResourceProperties('AWS::IAM::Role', {
       RoleName: 'sakekasu-github-actions-diff',
       AssumeRolePolicyDocument: {
@@ -192,9 +192,42 @@ describe('GithubOidcStack', () => {
         ]),
       },
     });
+    // cdk-diff.yml が cdkd diff に切り替わり、lookup ロールは使われなくなった。
+    // cdkd は自分の認証情報で読むので、AssumeRole 自体を持たない
     const statements = statementsFor(template, /^DiffRole/);
+    expect(statements.length).toBeGreaterThan(0);
+    expect(allows(statements, 'sts:AssumeRole'), 'diff ロールが AssumeRole を持っている').toBe(
+      false,
+    );
     const targets = statements.flatMap((s) => toArray(s.Resource));
-    expect(targets).toContain(`arn:aws:iam::${ACCOUNT}:role/cdk-hnb659fds-lookup-role-*`);
+    expect(targets).not.toContain(`arn:aws:iam::${ACCOUNT}:role/cdk-hnb659fds-lookup-role-*`);
+  });
+
+  it('diff ロールは cdkd のアセット保管庫を確かめられる', () => {
+    // cdkd は diff でもリージョンのアセット保管庫が自分のものかを
+    // HeadBucket（ExpectedBucketOwner 付き）で確かめる。権限が無いと 403 が
+    // 返り、cdkd はそれを「他アカウントのバケット」と解釈して止まる。
+    // 権限不足が乗っ取りに見えるエラーになるので、原因が分かりにくい（PR #230）
+    const statements = statementsFor(template, /^DiffRole/);
+    const probe = statements.filter(
+      (s) =>
+        s.Effect === 'Allow' &&
+        toArray(s.Action).includes('s3:ListBucket') &&
+        toArray(s.Resource).includes(`arn:aws:s3:::cdkd-assets-${ACCOUNT}-*`),
+    );
+
+    expect(
+      probe.length,
+      'cdkd-assets-* への s3:ListBucket が無い。cdkd diff が ' +
+        'ASSET_STORAGE_FOREIGN_BUCKET で落ちる',
+    ).toBeGreaterThan(0);
+
+    // 中身を読む権限は足さない
+    for (const statement of probe) {
+      expect(toArray(statement.Action), 'アセットの中身を読む権限が付いている').not.toContain(
+        's3:GetObject',
+      );
+    }
   });
 
   it('diff ロールには書き込み権限が一切ない', () => {
@@ -474,6 +507,43 @@ describe('GithubOidcStack', () => {
       expect(denied, `${roleName} が Deny に入っていない`).toContain(
         `arn:aws:iam::${ACCOUNT}:role/${roleName}`,
       );
+    }
+  });
+
+  // cdkd は「作成時にしか指定できないプロパティ」を cloudformation:DescribeType で
+  // 型ごとに引く。読めないと同梱のスキーマ写しに落ち、AWS 側で更新可能になった
+  // プロパティを差し替えと誤判定しうる。PR #230 の cdkd diff が実際に
+  // 「Grant cloudformation:DescribeType to use the live schema」を出した
+  it.each([
+    ['cdkd のデプロイロール', /^CdkdDeployRole/],
+    ['diff ロール', /^DiffRole/],
+  ])('%s は型スキーマを引ける', (_label, logicalId) => {
+    const statements = statementsFor(template, logicalId);
+    expect(statements.length).toBeGreaterThan(0);
+
+    expect(
+      allows(statements, 'cloudformation:DescribeType'),
+      'DescribeType が無いと同梱のスキーマ写しに落ちる',
+    ).toBe(true);
+  });
+
+  it.each([
+    ['cdkd のデプロイロール', /^CdkdDeployRole/],
+    ['diff ロール', /^DiffRole/],
+  ])('%s の型スキーマ参照は型だけに絞ってある', (_label, logicalId) => {
+    // DescribeType は公開された型のスキーマを読むだけ。リソースの中身には
+    // 関係しないので、ワイルドカードを広げる理由がない
+    const statements = statementsFor(template, logicalId).filter(
+      (st) => st.Effect !== 'Deny' && toArray(st.Action).includes('cloudformation:DescribeType'),
+    );
+    expect(statements.length, 'DescribeType を許可する文が無い').toBeGreaterThan(0);
+
+    for (const statement of statements) {
+      for (const resource of toArray(statement.Resource)) {
+        expect(resource, 'DescribeType のリソースが絞られていない').toMatch(
+          /^arn:aws:cloudformation:[^:]*::type\/resource\//,
+        );
+      }
     }
   });
 

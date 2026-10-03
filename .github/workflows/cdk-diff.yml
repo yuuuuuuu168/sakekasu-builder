@@ -1,6 +1,10 @@
-# PR で cdk diff を実行し、結果を PR コメントに出す（Issue #94）。
+# PR で差分を取り、結果を PR コメントに出す（Issue #94）。
 # iPhone だけでレビューするための仕組み。使うのは読み取り専用の diff ロール
-# （lookup ロールにしか入れない）なので、PR からリソースは変更できない。
+# なので、PR からリソースは変更できない。
+#
+# 差分は cdkd で取る（Issue #150）。cdkd は CDK bootstrap の lookup ロールに
+# 入らず、自分の認証情報で各リソースを読む。diff ロールにはその読み取り権限
+# だけが入っていて、書き込みは無い。
 name: cdk-diff
 
 on:
@@ -18,6 +22,10 @@ concurrency:
   group: cdk-diff-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+env:
+  # 認証情報を入れる前に済ませた合成結果を使わせる（下の「合成」を参照）
+  CDKD_APP: cdk.out
+
 jobs:
   diff:
     runs-on: ubuntu-latest
@@ -31,34 +39,72 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: infra/package-lock.json
+      # 依存の取得元がレジストリだけかを、取得より前に確かめる。
+      #
+      # lockfile は PR が書き換えられる。resolved を自前のターゲットへ向けて
+      # 整合性ハッシュをそれに合わせると、認証後に動く cdkd 自体が PR のコードに
+      # なる（aws-security-agent の指摘）。版を上げる PR は resolved が
+      # レジストリのまま変わるだけなので、この検査では止まらない。
+      # 塞げない範囲はスクリプトのコメントと Issue #131 にある
+      - name: 依存の取得元を確かめる
+        run: node scripts/check-lockfile-registry.mjs
       # 依存の取得は AWS の認証情報を入れる前に済ませる（deploy.yml と同じ理由）。
       # このワークフローは PR のブランチをそのまま checkout するので、lock を
       # 差し替えた PR を出せばインストール時スクリプトを走らせられる。認証後だと
       # そのスクリプトが diff ロールのセッショントークンを読める
       - run: npm ci --ignore-scripts
+      # 合成も認証情報を入れる前に済ませる（PR #151 のセキュリティレビュー）。
+      #
+      # --ignore-scripts が止めるのは npm のインストール時スクリプトだけで、
+      # CDK アプリのコードは合成時に実行される。認証後に合成すると、PR に
+      # 仕込んだ AWS SDK の呼び出しが diff ロールの認証情報付きで動いてしまう。
+      # 合成を先に済ませ、以降は CDKD_APP=cdk.out でこの成果物だけを読ませる。
+      #
+      # 消えるのは「合成時にアプリのコードが走る」経路だけ。lockfile は PR が
+      # 書き換えられるので、認証後に動く cdkd 自体が PR 由来である点は残る
+      # （Issue #131 の1番。この順序替えは部分的な対処）
+      - name: 合成
+        # CDK_DEFAULT_ACCOUNT は本来 CDK CLI が認証情報から入れる。認証前に
+        # 合成するとこれが undefined になり、bin/app.ts の env.account が
+        # 未定義のスタック（environment-agnostic）になって、テンプレート中の
+        # アカウント ID が Ref: AWS::AccountId に化ける。デプロイ時には同じ値に
+        # 解決されるが、認証ありで合成した場合と別物のテンプレートになる。
+        # 明示しておけば両者が一致する（Issue #131 に記録のある落とし穴）
+        env:
+          CDK_DEFAULT_ACCOUNT: '232791540685'
+        run: npx cdk synth --all -q
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::232791540685:role/sakekasu-github-actions-diff
           aws-region: ap-northeast-1
-      - name: cdk diff
+      - name: cdkd diff
         id: diff
-        # diff があっても exit 0 のままにし、出力だけをコメントに回す。
-        # --no-color はコメントにエスケープシーケンスを混ぜないため
+        # --fail は付けない。差分があるだけで落ちてしまう。
+        #
+        # 一方で cdkd 自体が落ちたときは落ちてほしいので pipefail を立てる。
+        # これが無いとパイプの終了コードが tee のものになり、cdkd が
+        # エラーで止まってもステップが成功扱いになる（この形の最初の実行で、
+        # 権限不足のエラーを出したまま diff チェックが緑になった）。
+        # 出力は下のステップが if: always() で拾うので、落ちてもコメントは出る
         run: |
-          npx cdk diff --all --no-color 2>&1 | tee diff.txt
+          set -o pipefail
+          npx cdkd diff --all 2>&1 | tee diff.txt
       - name: PRコメントに diff を投稿（既存コメントは更新）
+        if: always() && hashFiles('infra/diff.txt') != ''
         uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
+            // 本文の組み立ては infra/scripts/diff-comment.cjs にある。
+            // cdkd diff の出力は PR 側が中身を決められるので、「何を仕込まれても
+            // 壊れないか」を単体で試せる場所に置いてある
+            // （infra/__tests__/diff-comment.test.ts）
+            const { buildComment } = require(`${process.env.GITHUB_WORKSPACE}/infra/scripts/diff-comment.cjs`);
             const marker = '<!-- cdk-diff -->';
-            let body = fs.readFileSync('infra/diff.txt', 'utf8');
-            // GitHub コメントの上限（65536字）に収める
-            const limit = 60000;
-            if (body.length > limit) {
-              body = body.slice(0, limit) + '\n...（長すぎるため省略。全文は Actions のログを参照）';
-            }
-            const full = `${marker}\n## cdk diff\n\n\`\`\`\n${body}\n\`\`\``;
+            const full = buildComment({
+              raw: fs.readFileSync('infra/diff.txt', 'utf8'),
+              marker,
+            });
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
