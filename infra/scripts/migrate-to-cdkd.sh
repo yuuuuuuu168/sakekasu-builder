@@ -161,23 +161,40 @@ identifier_overrides() {
   printf '%s\n' "${out[@]}" --auto
 }
 
+# bash 3.2 で動かすこと。macOS に入っているのはいまも 3.2 で、mapfile や
+# readarray、連想配列は使えない。最初に書いたときは mapfile を使っていて、
+# macOS では「mapfile: command not found」を出しながら --resource を1つも
+# 渡さずに走り、前検査が同じ失敗を繰り返した。警告が流れるだけで止まらないので
+# 気づきにくい。__tests__/migrate-to-cdkd.test.ts が書き方を検査している。
 cdkd_import() {
   local name="$1" region="$2"
   shift 2
 
-  local raw overrides=()
+  local raw line expected=0 added=0
   if ! raw="$(identifier_overrides "$name" "$region")"; then
     exit 1
   fi
+
+  local args=("$name" --record-resource-mapping "${mapping_dir}/mapping-${name}.json")
   if [ -n "$raw" ]; then
-    mapfile -t overrides <<<"$raw"
+    expected="$(grep -c . <<<"$raw")"
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      args+=("$line")
+      added=$((added + 1))
+    done <<<"$raw"
   fi
 
-  AWS_REGION="$region" AWS_DEFAULT_REGION="$region" \
-    npx cdkd import "$name" \
-      --record-resource-mapping "${mapping_dir}/mapping-${name}.json" \
-      ${overrides[@]+"${overrides[@]}"} \
-      "$@" -c "env=${env_name}"
+  # 組み立てに失敗したまま素通りさせない。黙って --resource 無しで走ると、
+  # 取り込めるはずのリソースが「識別子が不正」で落ちる
+  if [ "$added" -ne "$expected" ]; then
+    echo "::error::${name} の --resource を組み立てられませんでした（${expected} 件のうち ${added} 件）" >&2
+    exit 1
+  fi
+
+  args+=("$@" -c "env=${env_name}")
+
+  AWS_REGION="$region" AWS_DEFAULT_REGION="$region" npx cdkd import "${args[@]}"
 }
 
 # 取り込みが要るスタックを集める
