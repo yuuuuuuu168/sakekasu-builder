@@ -78,6 +78,14 @@ jobs:
       # 仕込まれた AWS SDK の呼び出しが認証情報付きで動く。
       # 以降は CDKD_APP=cdk.out でこの成果物を使い回し、二度と合成しない
       - name: 合成
+        # CDK_DEFAULT_ACCOUNT は本来 CDK CLI が認証情報から入れる。認証前に
+        # 合成するとこれが undefined になり、bin/app.ts の env.account が
+        # 未定義のスタックになって、テンプレート中のアカウント ID が
+        # Ref: AWS::AccountId に化ける。デプロイ時には同じ値に解決されるが、
+        # 認証ありで合成した場合と別物のテンプレートになる。明示しておけば
+        # 両者が一致する（Issue #131 に記録のある落とし穴）
+        env:
+          CDK_DEFAULT_ACCOUNT: '<アプリのアカウント ID>'
         run: npx cdk synth --all -q
       - uses: aws-actions/configure-aws-credentials@v6
         with:
