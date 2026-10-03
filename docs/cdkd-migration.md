@@ -21,7 +21,7 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | 6 | 影響の小さいスタックで CFn への戻しを確認 | 済（要・回避策） |
 | 7 | `cdkd import` で既存スタックを取り込む | これから |
 | 8 | `cdkd drift` で state と実物の一致を確認 | これから |
-| 9 | `deploy.yml` / `cdk-diff.yml` を cdkd に差し替え | これから（別 PR） |
+| 9 | `deploy.yml` / `cdk-diff.yml` を cdkd に差し替え | PR 用意済み（マージは手順8 のあと） |
 
 手順3と3.5 は 2026-10-03 に完了を確認した。`sakekasu-cdkd-deploy` ロールと `sakekasu-role-boundary` ポリシーはどちらも 2026-08-16 付で実在し、境界の `PermissionsBoundaryUsageCount` は 13。合成した4スタックの IAM ロール数（api 8 / auth 1 / monitoring 3 / health-global 1 = 13）と一致するので、全ロールに境界が付いている。
 
@@ -384,16 +384,46 @@ AWS_PROFILE=sakekasu-builder npx cdkd drift sakekasu-dev-auth
 PR は取り込み（手順7）より先に用意しておき、手順8まで全部クリーンになったらすぐマージする。取り込みから差し替えまでの間は `cdk deploy --all` と実体がずれた状態になるため、窓を開けたままにしない。
 
 - `npx cdk deploy --all --require-approval never` → `npx cdkd deploy --all --yes`
-- `npx cdk diff --all --no-color` → `npx cdkd diff --all`（cdkd に `--no-color` は無いので `NO_COLOR=1` を渡す）
+- `npx cdk diff --all --no-color` → `npx cdkd diff --all`
 - `CDKD_ROLE_ARN` に `arn:aws:iam::232791540685:role/sakekasu-cdkd-deploy` を入れる
 - `cdk-diff.yml` の diff ロールは `cdk-hnb659fds-lookup-role-*` への AssumeRole を消す（cdkd では使わない。読み取り権限は手順3の時点で付与済み）
 - 待ちモードは既定のまま。デプロイ後にカナリアとアラームが動く構成なので `--no-wait` は使わない
 
+**色の指定は要らない。** cdkd に `--no-color` は無く、`NO_COLOR` も読まない（0.291.31 の `dist` に文字列が存在しない）。ただし TTY でないときは色を付けない作りなので、パイプに流す限りエスケープシーケンスは混ざらない。`npx cdkd list | cat -v` で確認済み。
+
 あわせて、セキュリティレビュー（PR #151）で挙がった2件をここで入れる。
 
-**合成と差分を分ける。** いまの `cdk-diff.yml` は認証情報を入れたあとに `cdk diff` を走らせている。`--ignore-scripts` は npm のインストール時スクリプトを止めるが、CDK アプリのコードは合成時に実行されるため、PR に AWS SDK の呼び出しを仕込めば認証情報付きで動く。cdkd も CDK CLI も合成済みのアセンブリを `--app cdk.out` で受け取れるので、認証情報を入れる前に `synth` を済ませ、そのあと差分だけを取る形にする。これで PR のコードが認証情報に触れる経路が消える（[#131](https://github.com/yuuuuuuu168/sakekasu-builder/issues/131) にも効く）。
+**合成と差分を分ける。** いまの `cdk-diff.yml` は認証情報を入れたあとに `cdk diff` を走らせている。`--ignore-scripts` は npm のインストール時スクリプトを止めるが、CDK アプリのコードは合成時に実行されるため、PR に AWS SDK の呼び出しを仕込めば認証情報付きで動く。認証情報を入れる前に `npx cdk synth --all -q` を済ませ、そのあとは合成済みのアセンブリだけを読ませる。これで PR のコードが認証情報に触れる経路が消える（[#131](https://github.com/yuuuuuuu168/sakekasu-builder/issues/131) にも効く）。
 
-**state に平文が残っていないか見張る。** `npx cdkd scrub --dry-run --fail` をデプロイ前のゲートに入れる。現状このアプリの合成テンプレートに `{{resolve:secretsmanager:...}}` は無く、シークレットは ID を環境変数に置いて実行時に取りに行く作りなので平文が残る余地は無いが、将来そうなったときに気づけるようにしておく。
+渡し方は `CDKD_APP` 環境変数が楽。cdkd は `-a, --app` の値として「合成済みのクラウドアセンブリのディレクトリ」を受け取り、省略時は `CDKD_APP`、次に `cdk.json` の `app` を見る。ジョブの `env` に `CDKD_APP: cdk.out` を置けば、`migrate-to-cdkd.sh` の中から呼ばれる `cdkd import` まで含めて、どの呼び出しも合成し直さない。コマンドごとに `--app` を書き足すより漏れにくい。
+
+CDK CLI 側のフォールバック（`cdk deploy`）には `--app cdk.out` を明示する。`CDKD_APP` は cdkd しか見ない。
+
+`infra/__tests__/workflow-credentials.test.ts` が、合成が認証情報より前にあること、`CDKD_APP: cdk.out` があること、認証後に合成し直す CDK CLI の呼び出しが無いことを検査する。
+
+**state に平文が残っていないか見張る。** `npx cdkd scrub --all --dry-run --fail` をデプロイ前のゲートに入れる。現状このアプリの合成テンプレートに `{{resolve:secretsmanager:...}}` は無く、シークレットは ID を環境変数に置いて実行時に取りに行く作りなので平文が残る余地は無いが、将来そうなったときに気づけるようにしておく。
+
+### `deploy.yml` から migrate-to-cdkd.sh を呼ぶ
+
+ワークフローは `cdkd deploy` を直書きせず、先に `migrate-to-cdkd.sh` を通してから `engine` の値で分岐する。sakekasu-kakeibo と同じ形。
+
+```yaml
+- name: cdkd への取り込み状態を確かめる
+  id: migrate
+  run: bash scripts/migrate-to-cdkd.sh
+- name: デプロイ（cdkd）
+  if: steps.migrate.outputs.engine == 'cdkd'
+  run: npx cdkd deploy --all --yes
+- name: デプロイ（CloudFormation へのフォールバック）
+  if: steps.migrate.outputs.engine == 'cfn'
+  run: npx cdk deploy --all --require-approval never --app cdk.out
+```
+
+取り込みが済んでいれば、スクリプトは `cdkd state list` と4回の `describe-stacks` を打って `engine=cdkd` を返すだけで何もしない。
+
+これが効くのは順番を間違えたとき。手順7 より先に手順9 をマージしても、state が空のまま `cdkd deploy` が走って全リソースを新規作成しにいく事故にならない。スクリプトがその場で取り込むか、前検査で引っかかれば何も触らずに `engine=cfn` を返して CloudFormation 側に流す。「手順9 を先にマージしない」という約束を、約束だけに頼らない形にしてある。
+
+デプロイロールにはこの経路に必要な `cloudformation:UpdateStack` / `DeleteStack` / チェンジセット系が [cdkd-policies.ts](../infra/lib/cdkd-policies.ts) で入っている。
 
 ## 運用コマンドの対応
 

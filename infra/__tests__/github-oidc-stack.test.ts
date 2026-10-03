@@ -177,7 +177,7 @@ describe('GithubOidcStack', () => {
     });
   });
 
-  it('diff ロールは pull_request からのみで、読み取り専用の lookup ロールにしか入れない', () => {
+  it('diff ロールは pull_request からのみで、CDK bootstrap のロールには入れない', () => {
     template.hasResourceProperties('AWS::IAM::Role', {
       RoleName: 'sakekasu-github-actions-diff',
       AssumeRolePolicyDocument: {
@@ -192,9 +192,15 @@ describe('GithubOidcStack', () => {
         ]),
       },
     });
+    // cdk-diff.yml が cdkd diff に切り替わり、lookup ロールは使われなくなった。
+    // cdkd は自分の認証情報で読むので、AssumeRole 自体を持たない
     const statements = statementsFor(template, /^DiffRole/);
+    expect(statements.length).toBeGreaterThan(0);
+    expect(allows(statements, 'sts:AssumeRole'), 'diff ロールが AssumeRole を持っている').toBe(
+      false,
+    );
     const targets = statements.flatMap((s) => toArray(s.Resource));
-    expect(targets).toContain(`arn:aws:iam::${ACCOUNT}:role/cdk-hnb659fds-lookup-role-*`);
+    expect(targets).not.toContain(`arn:aws:iam::${ACCOUNT}:role/cdk-hnb659fds-lookup-role-*`);
   });
 
   it('diff ロールには書き込み権限が一切ない', () => {
