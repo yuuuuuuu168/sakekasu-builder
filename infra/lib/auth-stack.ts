@@ -17,6 +17,18 @@ export interface AuthStackProps extends cdk.StackProps {
   envName: string;
 }
 
+/**
+ * 旧ユーザープール（このアプリ専用）。
+ *
+ * ログインは共通ログイン（sakekasu-integrated_environment、lib/shared-auth.ts）へ
+ * 移った。画面も API もソムリエも、もうこのプールのトークンを受け付けない。
+ *
+ * それでも残しているのは切り戻しのため。プールを消すと sub が二度と戻らず、
+ * 旧 sub に付いた記録と画像を誰も開けなくなる。データの付け替え
+ * （infra/scripts/migrate-owner-sub.py）が済んで落ち着いたら、別 PR で外す。
+ * 中身（設定・トリガー・クライアント）も触らない。cdkd の UserPool 更新には
+ * 落とし穴がある（下の mfaMessage のコメント）ので、残す間は更新を出さない。
+ */
 export class AuthStack extends cdk.Stack {
   /** UserPool を公開し、ApiStack から参照可能にする */
   public readonly userPool: cognito.UserPool;

@@ -8,10 +8,7 @@ import { render, screen, waitFor, act, fireEvent } from '@testing-library/react'
 const USER_ID = 'cognito-sub-123';
 vi.mock('aws-amplify/auth', () => ({
   getCurrentUser: () => Promise.resolve({ userId: USER_ID }),
-  fetchUserAttributes: () => Promise.resolve({ email: 'a@example.com' }),
-  signIn: vi.fn(),
-  signUp: vi.fn(),
-  confirmSignUp: vi.fn(),
+  signInWithRedirect: vi.fn(),
   signOut: vi.fn(() => Promise.resolve()),
 }));
 

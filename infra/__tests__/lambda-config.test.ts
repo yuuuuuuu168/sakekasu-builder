@@ -18,6 +18,7 @@ import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
 import { BillingNotifierStack } from '../lib/billing-notifier-stack.js';
 import { DevOpsAgentStack } from '../lib/devops-agent-stack.js';
+import { TEST_SHARED_AUTH } from './shared-auth-fixture.js';
 
 /**
  * 全 Lambda が使うランタイム。
@@ -162,7 +163,7 @@ function synthAllTemplates(): {
   const authStack = new AuthStack(app, 'TestAuth', { envName: SYNTH_ENV_NAME, env });
   const apiStack = new ApiStack(app, 'TestApi', {
     envName: SYNTH_ENV_NAME,
-    userPool: authStack.userPool,
+    sharedAuth: TEST_SHARED_AUTH,
     env,
   });
   const monitoringStack = new MonitoringStack(app, 'TestMonitoring', {

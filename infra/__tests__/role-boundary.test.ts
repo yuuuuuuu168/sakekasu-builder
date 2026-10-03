@@ -8,6 +8,7 @@ import { HealthGlobalStack } from '../lib/health-global-stack.js';
 import { GithubOidcStack } from '../lib/github-oidc-stack.js';
 import { BillingNotifierStack } from '../lib/billing-notifier-stack.js';
 import { ROLE_BOUNDARY_NAME } from '../lib/role-boundary.js';
+import { TEST_SHARED_AUTH } from './shared-auth-fixture.js';
 
 /**
  * アプリのロールに Permissions Boundary が付いていることを見る（Issue #150）。
@@ -26,7 +27,7 @@ function buildApplicationStacks(): Array<{ name: string; template: Template }> {
   const authStack = new AuthStack(app, 'sakekasu-dev-auth', { envName: 'dev', env });
   const apiStack = new ApiStack(app, 'sakekasu-dev-api', {
     envName: 'dev',
-    userPool: authStack.userPool,
+    sharedAuth: TEST_SHARED_AUTH,
     env,
   });
   const monitoringStack = new MonitoringStack(app, 'sakekasu-dev-monitoring', {

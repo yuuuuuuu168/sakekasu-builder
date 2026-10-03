@@ -5,13 +5,9 @@ import type { SendToSommelier } from '../types';
 
 const amplifySignOut = vi.fn().mockResolvedValue(undefined);
 vi.mock('aws-amplify/auth', () => ({
-  signIn: vi.fn(),
-  confirmSignIn: vi.fn(),
-  signUp: vi.fn(),
-  confirmSignUp: vi.fn(),
+  signInWithRedirect: vi.fn(),
   signOut: () => amplifySignOut(),
   getCurrentUser: vi.fn().mockResolvedValue({ userId: 'user-a', username: 'a' }),
-  fetchUserAttributes: vi.fn().mockResolvedValue({ email: 'a@example.com' }),
 }));
 
 const { AuthProvider, useAuth } = await import('@/features/auth/AuthContext');

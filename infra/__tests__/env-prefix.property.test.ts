@@ -6,6 +6,7 @@ import { Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib';
 import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
+import { TEST_SHARED_AUTH } from './shared-auth-fixture.js';
 
 /**
  * **Validates: Requirements 1.4**
@@ -63,12 +64,9 @@ describe('Property 1: 環境名がリソース名プレフィックスに反映�
     fc.assert(
       fc.property(envNameArb, (envName) => {
         const app = new cdk.App();
-        const authStack = new AuthStack(app, `TestAuth-${envName}`, {
-          envName,
-        });
         const apiStack = new ApiStack(app, `TestApi-${envName}`, {
           envName,
-          userPool: authStack.userPool,
+          sharedAuth: TEST_SHARED_AUTH,
         });
         const template = Template.fromStack(apiStack);
 
