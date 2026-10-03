@@ -27,9 +27,51 @@ const here = path.dirname(url.fileURLToPath(import.meta.url));
  * 動かしたときに「SLO は 95% を目標にしているのにアラームは 90% で鳴る」
  * のような食い違いが黙って生まれる。
  *
- * 90% にしている理由は `addOcrServiceLevelObjectives()` の説明を参照。
+ * 90% にしている理由は `addServiceLevelObjectives()` の説明を参照。
  */
 const SLO_ATTAINMENT_GOAL = 90;
+
+/**
+ * SLO を付ける関数（Issue #86）。
+ *
+ * `idPrefix` は CloudFormation の論理 ID に入る。**既存のものは変えない。**
+ * 変えると SLO が作り直され、30日ぶんの達成率の履歴が消える。見た目には
+ * 成功するデプロイで観測が巻き戻るので、気づくのはアラームが鳴るべき
+ * ときに鳴らなかったあとになる。
+ *
+ * `latencyThresholdMs` は実測から決める。勘で置くと、鳴りっぱなしか
+ * 永久に鳴らないかのどちらかになる。根拠は下の表のとおり。
+ *
+ * | 関数 | 30日の件数 | p99 | 最大 | しきい値 |
+ * |---|---|---|---|---|
+ * | `ocr-analyzer` | — | — | — | 15,000ms（Bedrock の時間が大半） |
+ * | `presigned-url` | 172 | 476〜1,030ms | 1,041ms | 2,000ms |
+ *
+ * `presigned-url` は実測の最大に対して約2倍の余裕を取ってある。なお
+ * Application Signals の `Latency` も Lambda の `Duration` も Init Duration を
+ * 含まない（2026-10-03 実測、最大 1,041ms / 1,085ms でほぼ一致）ため、
+ * コールドスタート（計装込みで 1.1〜1.2 秒）の分を上積みする必要は無い。
+ */
+const SLO_TARGETS = [
+  {
+    idPrefix: 'Ocr',
+    functionSlug: 'ocr-analyzer',
+    alarmSlug: 'ocr',
+    subject: 'ラベル OCR の',
+    latencyThresholdMs: 15000,
+    latencyNote: '大半は Bedrock の時間',
+  },
+  {
+    idPrefix: 'PresignedUrl',
+    functionSlug: 'presigned-url',
+    alarmSlug: 'presigned-url',
+    subject: '画像アップロード URL 発行の',
+    latencyThresholdMs: 2000,
+    latencyNote: 'S3 への API 呼び出しの時間',
+  },
+] as const;
+
+type SloTarget = (typeof SLO_TARGETS)[number];
 
 export interface MonitoringStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
@@ -102,7 +144,7 @@ export class MonitoringStack extends cdk.Stack {
     //
     // SLO はここで作る。API スタックに置くと、エラーバジェットのアラームを
     // 足すときに通知先の SNS を参照して循環参照になる。
-    this.addOcrServiceLevelObjectives(props.envName);
+    this.addServiceLevelObjectives(props.envName);
 
     // --- 通知経路 ---
 
@@ -305,7 +347,7 @@ export class MonitoringStack extends cdk.Stack {
       evaluationPeriods: 1,
     });
 
-    this.addOcrSloAlarms(prefix, props.envName);
+    this.addSloAlarms(prefix, props.envName);
 
     // --- サービス正常性 ---
 
@@ -645,7 +687,7 @@ export class MonitoringStack extends cdk.Stack {
    * 意味のある値になる。
    */
   /**
-   * OCR の SLO 名を組み立てる唯一の場所（Issue #86）。
+   * SLO 名を組み立てる唯一の場所（Issue #86）。
    *
    * SLO の `name` と、アラームの `SloName` ディメンションは一致していないと
    * いけない。ずれるとアラームは `INSUFFICIENT_DATA` のまま居座り、
@@ -654,13 +696,20 @@ export class MonitoringStack extends cdk.Stack {
    *
    * 定義側とアラーム側でそれぞれ文字列を書いていると、名前を変えるときに
    * 片方だけ直して壊せる。ここを通してしか作らせない（PR #165 のレビュー指摘）。
+   *
+   * サービス名は Application Signals が実機で付けている名前（Lambda の関数名）と
+   * 一致していないといけない。ここがずれると SLO が対象を見つけられず、
+   * 達成率が空のまま出来上がる。
    */
-  private static ocrSloNames(envName: string): {
+  private static sloNames(
+    envName: string,
+    target: SloTarget,
+  ): {
     serviceName: string;
     availability: string;
     latency: string;
   } {
-    const serviceName = `${envName}-sakekasu-ocr-analyzer`;
+    const serviceName = `${envName}-sakekasu-${target.functionSlug}`;
     return {
       serviceName,
       availability: `${serviceName}-availability`,
@@ -668,8 +717,14 @@ export class MonitoringStack extends cdk.Stack {
     };
   }
 
-  private addOcrServiceLevelObjectives(envName: string): void {
-    const { serviceName, availability, latency } = MonitoringStack.ocrSloNames(envName);
+  private addServiceLevelObjectives(envName: string): void {
+    for (const target of SLO_TARGETS) {
+      this.addServiceLevelObjectivesFor(envName, target);
+    }
+  }
+
+  private addServiceLevelObjectivesFor(envName: string, target: SloTarget): void {
+    const { serviceName, availability, latency } = MonitoringStack.sloNames(envName, target);
     // Application Signals が Lambda のサービスに付ける環境名。実機の
     // メトリクスのディメンションから取っている（推測で書くと SLO が
     // 対象を見つけられず、達成率が空のまま出来上がる）
@@ -690,9 +745,11 @@ export class MonitoringStack extends cdk.Stack {
     // データ無しになる。1日窓だけにする
     const burnRateConfigurations = [{ lookBackWindowMinutes: 1440 }];
 
-    new applicationsignals.CfnServiceLevelObjective(this, 'OcrAvailabilitySlo', {
+    new applicationsignals.CfnServiceLevelObjective(this, `${target.idPrefix}AvailabilitySlo`, {
       name: availability,
-      description: 'ラベル OCR の成功率（30日で 90%）。ぽつぽつ失敗し続ける状態を見つけるためのもの',
+      description:
+        `${target.subject}成功率（30日で ${SLO_ATTAINMENT_GOAL}%）。` +
+        'ぽつぽつ失敗し続ける状態を見つけるためのもの',
       burnRateConfigurations,
       goal: goal(SLO_ATTAINMENT_GOAL),
       requestBasedSli: {
@@ -700,15 +757,17 @@ export class MonitoringStack extends cdk.Stack {
       },
     });
 
-    new applicationsignals.CfnServiceLevelObjective(this, 'OcrLatencySlo', {
+    new applicationsignals.CfnServiceLevelObjective(this, `${target.idPrefix}LatencySlo`, {
       name: latency,
-      description: 'ラベル OCR の所要時間（30日で 90% が 15 秒未満）。大半は Bedrock の時間',
+      description:
+        `${target.subject}所要時間（30日で ${SLO_ATTAINMENT_GOAL}% が ` +
+        `${target.latencyThresholdMs / 1000} 秒未満）。${target.latencyNote}`,
       burnRateConfigurations,
       goal: goal(SLO_ATTAINMENT_GOAL),
       requestBasedSli: {
         comparisonOperator: 'LessThan',
-        // ミリ秒。15 秒（単位の根拠はこのメソッドの説明を参照）
-        metricThreshold: 15000,
+        // ミリ秒（単位の根拠はこのメソッドの説明を参照）。値の根拠は SLO_TARGETS
+        metricThreshold: target.latencyThresholdMs,
         requestBasedSliMetric: { keyAttributes, metricType: 'LATENCY' },
       },
     });
@@ -740,26 +799,30 @@ export class MonitoringStack extends cdk.Stack {
    * ディメンションは `SloName` だけ。`applicationsignals.CfnServiceLevelObjective`
    * に付けた `name` と一致していないと、アラームは INSUFFICIENT_DATA のまま
    * 居座る。監視が入っているように見えて何も鳴らない状態になるので、
-   * 名前は `ocrSloNames()` からしか作らない。
+   * 名前は `sloNames()` からしか作らない。
    */
-  private addOcrSloAlarms(prefix: string, envName: string): void {
-    const { availability, latency } = MonitoringStack.ocrSloNames(envName);
-
-    const slos = [
-      {
-        id: 'OcrAvailabilitySloBreach',
-        sloName: availability,
-        alarmName: `${prefix}-ocr-slo-availability`,
-        description:
-          'OCR の成功率が30日で 90% を割りました（1回きりの失敗ではなく、失敗が積み上がっています）',
-      },
-      {
-        id: 'OcrLatencySloBreach',
-        sloName: latency,
-        alarmName: `${prefix}-ocr-slo-latency`,
-        description: 'OCR の所要時間が30日で 90% の呼び出しで 15 秒を超えています',
-      },
-    ];
+  private addSloAlarms(prefix: string, envName: string): void {
+    const slos = SLO_TARGETS.flatMap((target) => {
+      const { availability, latency } = MonitoringStack.sloNames(envName, target);
+      return [
+        {
+          id: `${target.idPrefix}AvailabilitySloBreach`,
+          sloName: availability,
+          alarmName: `${prefix}-${target.alarmSlug}-slo-availability`,
+          description:
+            `${target.subject}成功率が30日で ${SLO_ATTAINMENT_GOAL}% を割りました` +
+            '（1回きりの失敗ではなく、失敗が積み上がっています）',
+        },
+        {
+          id: `${target.idPrefix}LatencySloBreach`,
+          sloName: latency,
+          alarmName: `${prefix}-${target.alarmSlug}-slo-latency`,
+          description:
+            `${target.subject}所要時間が30日で ${SLO_ATTAINMENT_GOAL}% の呼び出しで ` +
+            `${target.latencyThresholdMs / 1000} 秒を超えています`,
+        },
+      ];
+    });
 
     for (const slo of slos) {
       this.addAlarm(slo.id, {
