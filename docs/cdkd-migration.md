@@ -18,7 +18,7 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | 4 | `cdkd bootstrap` | 済 |
 | 5 | `cdkd diff --all` で未対応リソースを洗い出す | 済 |
 | 5.5 | 取り込みを回す `migrate-to-cdkd.sh` を書く | 済 |
-| 6 | 影響の小さいスタックで CFn への戻しを確認 | これから |
+| 6 | 影響の小さいスタックで CFn への戻しを確認 | 済（要・回避策） |
 | 7 | `cdkd import` で既存スタックを取り込む | これから |
 | 8 | `cdkd drift` で state と実物の一致を確認 | これから |
 | 9 | `deploy.yml` / `cdk-diff.yml` を cdkd に差し替え | これから（別 PR） |
@@ -47,13 +47,15 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 
 **版を 0.291.16 に揃えなかった。** 他2本が踏んだ不具合のうち1件は 0.291.23 で直っている（[#3701](https://github.com/go-to-k/cdkd/issues/3701) `complete a bare CloudFormation id to the Cloud Control composite identifier`）。16 に固定すると、上流で直っているものに対して回避コードを新しく書くことになる。揃える先は「他2本がたまたま使っていた版」ではなく最新とし、他2本は後から追随して回避を1つ落とせばよい。
 
-判明している不具合は2件。どちらもこのリポジトリに当たる。
+判明している不具合は3件。どれもこのリポジトリに当たる。1件目と2件目は先行リポジトリ由来、3件目は手順6 でこちらが踏んだ。
 
 **リージョンの取り違え（未修正。回避が要る）。** `cdkd import` は CloudFormation を読むクライアントを実行時の `AWS_REGION` で作り、スタックのリージョンを見ない。us-east-1 のスタックを ap-northeast-1 から探して、全リソースが「not found」になる。0.291.31 の `cdkd import --help` を見ても `--stack-region` に当たるオプションは無いので、スタックごとに `AWS_REGION` を合わせて打つしかない。
 
 このリポジトリで当たるのは `sakekasu-dev-health-global`（us-east-1）。手順6 はそのスタックで往復を確認する手順なので、回避を入れないまま打つと最初の一手が分かりにくい形で落ちる。
 
-**Cognito UserPoolClient の物理 ID（0.291.23 で修正済み）。** Cloud Control は `<UserPoolId>|<ClientId>` の組を識別子に求めるが、CloudFormation から引ける物理 ID は ClientId だけ。他2本は `--resource <論理ID>=<pool>|<client>`（と、残りを自動解決させる `--auto`）で明示して避けている。0.291.31 では要らないはずだが、手順5 と手順6 で実際に通ることを確かめるまでは直ったものとして扱わない。このリポジトリの UserPoolClient は2つ。
+**Cognito UserPoolClient の物理 ID（0.291.23 で修正済み）。** Cloud Control は `<UserPoolId>|<ClientId>` の組を識別子に求めるが、CloudFormation から引ける物理 ID は ClientId だけ。他2本は `--resource <論理ID>=<pool>|<client>`（と、残りを自動解決させる `--auto`）で明示して避けている。0.291.31 では要らないはずで、手順5 の `cdkd diff --all` では何も言われなかった。ただし `health-global` に UserPoolClient は無いため、実物での確認は手順7 で auth を取り込むときになる。このリポジトリの UserPoolClient は2つ。
+
+**`cdkd export` のインラインポリシー削除が空振りする（未修正。回避が要る）。** `AWS::IAM::Policy` を消すときに `PolicyName` ではなく物理 ID を使うため実体が残り、戻しのフェーズ2 が必ず落ちる。2026-10-03 の手順6 で実地に踏んだ。詳細と回避は下の「`cdkd export` はインラインポリシーの手当てが要る」、上流への報告の下書きは [#228](https://github.com/yuuuuuuu168/sakekasu-builder/issues/228)。取り込み（手順7）には影響しない。
 
 ## 先に片付けること
 
@@ -220,6 +222,8 @@ retirement (UpdateStack + DeleteStack) issues real AWS calls.
 
 退役処理（UpdateStack と DeleteStack）は実際に AWS を叩くので dry-run に含められない、という趣旨。取り込み自体の下見は `--dry-run` 単独で取る。
 
+**`export` の前に、インラインポリシーを実際の名前で手動削除する。** これを省くと必ずフェーズ2 で落ちる。cdkd 側の不具合の回避で、理由は下の「`cdkd export` はインラインポリシーの手当てが要る」にある。
+
 ```bash
 cd infra
 export AWS_PROFILE=sakekasu-builder
@@ -231,16 +235,91 @@ AWS_REGION=us-east-1 npx cdkd import sakekasu-dev-health-global --dry-run
 AWS_REGION=us-east-1 npx cdkd import sakekasu-dev-health-global \
   --migrate-from-cloudformation --yes
 
-# CloudFormation へ戻す
+# 戻す計画だけ先に見る（まだ何も変えない）
 AWS_REGION=us-east-1 npx cdkd export sakekasu-dev-health-global --dry-run
+
+# 回避策。ここから次のコマンドが終わるまでロールの権限が落ちる
+aws iam delete-role-policy \
+  --role-name dev-sakekasu-health-forwarder \
+  --policy-name HealthForwarderRoleDefaultPolicy087A304B
+
+# CloudFormation へ戻す
 AWS_REGION=us-east-1 npx cdkd export sakekasu-dev-health-global
 ```
 
+`--dry-run` を削除の前に置くのは、権限の空く窓を短くするため。
+
 `migrate-to-cdkd.sh` も同じ分け方をしている（前検査は `--dry-run` 単独、本番は `--migrate-from-cloudformation --yes`）。
 
-`export` は CFn の IMPORT チェンジセットを使うので、AWS のリソースは作り直されない。成功すると cdkd 側の state は消える。
+`export` は CFn の IMPORT チェンジセットを使うので、AWS のリソースは作り直されない。成功すると cdkd 側の state は消える（`state orphan` は要らない）。
 
 `health-global` を選ぶのは、小さいことに加えて Export も ImportValue も持たないため。取り込んでも他のスタックの参照を壊さず、単独で往復できる。
+
+#### 2026-10-03 の結果
+
+往復は通った。ただし素では通らず、上の回避策が要った。
+
+1回目（回避策なし）はフェーズ2 の UPDATE が `UPDATE_ROLLBACK_COMPLETE` で落ちた。リソースは失われず、復旧は下の「戻しがフェーズ2 で落ちたとき」の3手で済んだ。2回目（回避策あり）は `✓ Phase 2: 1 IMPORT-unsupported resource(s) re-CREATEd.` まで通り、CFn スタックは4リソースで `UPDATE_COMPLETE`、cdkd state も自動で消えた。
+
+これで手順6 のゲートは通過と見なす。戻す道は塞がっていないが、素通りではなく手当てが要る。
+
+0.291.23 で直ったはずの Cognito UserPoolClient の物理 ID は、`health-global` に UserPoolClient が無いためここでは確かめられていない。実物での確認は手順7 で auth を取り込むときになる。
+
+#### `cdkd export` はインラインポリシーの手当てが要る
+
+`AWS::IAM::Policy` は CFn の IMPORT に対応していないため、`cdkd export` は「フェーズ1 で他を IMPORT → AWS 側の実体を消す → フェーズ2 の UPDATE で CFn に作り直させる」という段取りを取る。この真ん中の削除が空振りする。
+
+cdkd は削除する名前を**リソースの物理 ID から**作っていて、`PolicyName` プロパティを見ていない。インラインポリシーを IAM が識別するのは `PolicyName` のほうなので、この2つは一致しない。
+
+| | 値（`health-global` の例） |
+| --- | --- |
+| IAM 上の名前（`PolicyName`） | `HealthForwarderRoleDefaultPolicy087A304B` |
+| CloudFormation の物理 ID | `sakek-Healt-8lWbKTx3dWdM` |
+
+存在しない名前に対する削除なので IAM は `NoSuchEntityException` を返すが、cdkd がこれを「もう無いので成功」として握りつぶし、`✓ deleted <物理ID>` と出す。実体は残ったままフェーズ2 に入り、CFn の CREATE が名前の衝突で落ちる。
+
+```
+CREATE_FAILED: The policy HealthForwarderRoleDefaultPolicy087A304B already exists on the role dev-sakekasu-health-forwarder.
+```
+
+回避は、`export` の前にインラインポリシーを実際の名前で消しておくこと。cdkd の空振り削除が無害になり、フェーズ2 の CREATE が通る。
+
+**取り込み（手順7）には影響しない。** この不具合は戻す経路にしか無い。ただし4スタックには `AWS::IAM::Policy` が13個ある（api 8 / monitoring 3 / auth 1 / health-global 1）。CDK がロールに権限を与えると自動で付く `DefaultPolicy` がこれなので、戻す必要が出たら全部に同じ手当てが要る。
+
+詳細と上流への報告の下書きは [#228](https://github.com/yuuuuuuu168/sakekasu-builder/issues/228) にある。
+
+#### 戻しがフェーズ2 で落ちたとき
+
+`cdkd export` が `Phase 1 (IMPORT) succeeded; phase 2 (UPDATE) failed` で落ちたときの状態はこうなる。
+
+- AWS の実物は無事。インラインポリシーも残っている（空振り削除なので消えていない）
+- CFn スタックは `UPDATE_ROLLBACK_COMPLETE`。IMPORT 済みのリソースは入っているが、ポリシーが欠けている
+- cdkd state は手つかずで3リソースとも残る。CFn と cdkd の両方が同じリソースを持つ状態
+
+この状態で `cdkd deploy` を打たない（cdkd 自身も警告を出す）。また、直すまで `infra/**` を main に入れない。`deploy` の `cdk deploy --all` が同じ衝突で落ちる。
+
+復旧は CloudFormation 管理に戻す方向で3手。
+
+```bash
+cd infra
+export AWS_PROFILE=sakekasu-builder
+
+# 1. インラインポリシーを名前で消す。ここから 2 が終わるまで権限が落ちる
+aws iam delete-role-policy \
+  --role-name dev-sakekasu-health-forwarder \
+  --policy-name HealthForwarderRoleDefaultPolicy087A304B
+
+# 2. CFn に作り直させる
+npx cdk diff sakekasu-dev-health-global -c env=dev
+npx cdk deploy sakekasu-dev-health-global -c env=dev
+
+# 3. cdkd の古い state を片付ける
+AWS_REGION=us-east-1 npx cdkd state orphan sakekasu-dev-health-global
+```
+
+cdkd のエラーメッセージは `aws cloudformation create-change-set` を手で組む手順を案内するが、`cdk deploy` が同じテンプレートで同じことをするので、普段の道具で済ませてよい。
+
+手順2 の `cdk diff` では、cdkd が IMPORT 用に注入した `DeletionPolicy: Delete` の削除も差分に出る。これは戻って正しい。
 
 ### 7. 既存スタックの取り込み
 
@@ -338,11 +417,22 @@ state の置き場所は `s3://cdkd-state-232791540685/cdkd/<stack>/<region>/sta
 
 問題が起きたら、スタック単位で CFn へ戻せる。リソースは作り直されない。
 
+**`export` の前に、そのスタックのインラインポリシーを実際の名前で消しておく。** 省くとフェーズ2 が必ず落ちる（手順6 の「`cdkd export` はインラインポリシーの手当てが要る」を参照）。対象は api 8 / monitoring 3 / auth 1 / health-global 1 の計13個。名前は `cdkd export --dry-run` の「Phase 2 will also re-CREATE ...」に並ぶ論理 ID と同じで、`aws iam list-role-policies --role-name <ロール名>` でも引ける。
+
 ```bash
 cd infra
-AWS_PROFILE=sakekasu-builder npx cdkd export sakekasu-dev-api --dry-run
-AWS_PROFILE=sakekasu-builder npx cdkd export sakekasu-dev-api
+export AWS_PROFILE=sakekasu-builder
+
+# 戻す計画と、手当てが要るポリシーの一覧を見る
+AWS_REGION=<スタックのリージョン> npx cdkd export sakekasu-dev-api --dry-run
+
+# 一覧に出たぶんだけ、ロールから名前で消す
+aws iam delete-role-policy --role-name <ロール名> --policy-name <論理ID>
+
+AWS_REGION=<スタックのリージョン> npx cdkd export sakekasu-dev-api
 ```
+
+`AWS_REGION` をスタックのリージョンに合わせるのは `import` と同じ。落ちたときの復旧は手順6 の「戻しがフェーズ2 で落ちたとき」にある。
 
 `Custom::LogRetention` が残っているスタックは、そのままだと「CFn が IMPORT できない型がある」として中断する。その場合は2フェーズ移行を使う。dev の3スタックからは #129 で消えているので、いまは当たらない。
 
