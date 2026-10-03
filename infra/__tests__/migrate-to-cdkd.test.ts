@@ -247,3 +247,39 @@ describe('migrate-to-cdkd.sh の識別子の手当て', () => {
     }
   });
 });
+
+/**
+ * bash 3.2 で動くか。
+ *
+ * macOS に入っている bash はいまも 3.2 で、人間様が手元から打つのはそこ。
+ * mapfile で配列に読む形で書いたところ、macOS では
+ * 「mapfile: command not found」を出しながら --resource を1つも渡さずに走り、
+ * 前検査が同じ失敗を繰り返した。警告が流れるだけで止まらないので気づきにくい。
+ */
+describe('migrate-to-cdkd.sh の bash 3.2 互換', () => {
+  const script = readFileSync(SCRIPT_PATH, 'utf8');
+  const code = script
+    .split('\n')
+    .map((line, index) => ({ line, number: index + 1 }))
+    .filter(({ line }) => !/^\s*#/.test(line));
+
+  it.each([
+    ['mapfile', /\bmapfile\b/],
+    ['readarray', /\breadarray\b/],
+    ['連想配列（declare -A / local -A）', /\b(declare|local|typeset)\s+-[A-Za-z]*A\b/],
+    ['大文字小文字の展開（${x^^} / ${x,,}）', /\$\{[A-Za-z_][A-Za-z0-9_]*(\^\^|,,)/],
+    ['&> によるリダイレクト', /[^0-9&]&>[^>]/],
+  ])('%s を使っていない', (_label, pattern) => {
+    const hits = code
+      .filter(({ line }) => pattern.test(line))
+      .map(({ line, number }) => `${number}行目: ${line.trim()}`);
+
+    expect(hits, 'bash 3.2（macOS の既定）で動かない').toEqual([]);
+  });
+
+  it('--resource を組み立てられなかったら落とす', () => {
+    // 組み立てに失敗したまま素通りすると、取り込めるはずのリソースが
+    // 「識別子が不正」で落ちる。mapfile のときに実際そうなった
+    expect(script).toMatch(/--resource を組み立てられませんでした/);
+  });
+});

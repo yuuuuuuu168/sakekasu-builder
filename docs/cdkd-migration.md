@@ -362,6 +362,8 @@ Summary:  6 imported, 0 not found, 0 unsupported, 0 out of scope, 3 failed   ←
 
 落ちた5件はすべて識別子の食い違い。`identifier_overrides` を足して解決できるようにした。
 
+2回目は `mapfile` で引っかかった。**macOS の bash は 3.2 で `mapfile` が無い。** 配列が空のまま `--resource` が1つも渡されず、1回目と同じ結果になった。しかも `mapfile: command not found` が流れるだけで処理は続く。読み込みを `while read` に書き換え、組み立てた数が合わなければ落とすようにした。bash 3.2 で動かない書き方（`mapfile` / `readarray` / 連想配列 / `${x^^}` / `&>`）は検査で弾いている。
+
 **移す順は monitoring → api → auth。** CloudFormation は、他のスタックが `Fn::ImportValue` で読んでいる Export を持つスタックを消せない。合成結果で確かめた向きは次のとおり。
 
 | スタック | Export | ImportValue |
