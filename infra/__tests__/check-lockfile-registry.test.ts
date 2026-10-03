@@ -1,13 +1,15 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
   ALLOWED_HOSTS,
+  MIN_LOCKFILE_VERSION,
   checkLockfiles,
   discoverLockfiles,
   findForeignResolved,
+  findShapeProblems,
 } from '../scripts/check-lockfile-registry.mjs';
 
 /**
@@ -27,7 +29,7 @@ const INFRA = new URL('..', import.meta.url).pathname;
 const REGISTRY = 'https://registry.npmjs.org';
 
 function lockWith(packages: Record<string, unknown>) {
-  return { packages: { '': { name: 'infra' }, ...packages } };
+  return { lockfileVersion: 3, packages: { '': { name: 'infra' }, ...packages } };
 }
 
 describe('findForeignResolved', () => {
@@ -131,10 +133,11 @@ describe('checkLockfiles', () => {
     );
 
     expect(checkLockfiles([good, bad])).toEqual([
-      { lockPath: good, offenders: [] },
+      { lockPath: good, offenders: [], problems: [] },
       {
         lockPath: bad,
         offenders: [{ name: 'node_modules/b', resolved: 'https://example.invalid/b' }],
+        problems: [],
       },
     ]);
   });
@@ -161,12 +164,90 @@ describe('このリポジトリの lockfile', () => {
   });
 
   it('見つけた全部の取得元が許可したホスト', () => {
-    for (const { lockPath, offenders } of checkLockfiles(discovered)) {
+    for (const { lockPath, offenders, problems } of checkLockfiles(discovered)) {
       expect(offenders, `${lockPath} が別の取得元を指している`).toEqual([]);
+      expect(problems, `${lockPath} の形が検査に向かない`).toEqual([]);
     }
   });
 
   it('許可するホストは npm レジストリだけ', () => {
     expect(ALLOWED_HOSTS).toEqual(['registry.npmjs.org']);
+  });
+
+  it('全部が受け付ける版の lockfile', () => {
+    for (const lockPath of discovered) {
+      const version = JSON.parse(readFileSync(lockPath, 'utf8')).lockfileVersion;
+      expect(version, `${lockPath} の lockfileVersion が古い`).toBeGreaterThanOrEqual(
+        MIN_LOCKFILE_VERSION,
+      );
+    }
+  });
+});
+
+/**
+ * 旧い形式での素通り。
+ *
+ * lockfileVersion 1 には `packages` が無く、取得元は入れ子の `dependencies`
+ * にしかない。`packages` だけを見る検査は「0件」を返して緑になり、その裏で
+ * `npm ci` は v1 の `resolved` から取る（PR #230 の指摘、HIGH 2件目）。
+ */
+describe('旧い形式の lockfile', () => {
+  const v1 = {
+    lockfileVersion: 1,
+    dependencies: {
+      a: { version: '1.0.0', resolved: `${REGISTRY}/a/-/a-1.0.0.tgz` },
+      evil: {
+        version: '9.9.9',
+        resolved: 'https://evil.example.invalid/evil.tgz',
+        integrity: 'sha512-attacker',
+      },
+      parent: {
+        version: '1.0.0',
+        resolved: `${REGISTRY}/parent/-/parent-1.0.0.tgz`,
+        dependencies: {
+          nested: { version: '1.0.0', resolved: 'https://also-evil.example.invalid/n.tgz' },
+        },
+      },
+    },
+  };
+
+  it('入れ子の dependencies からも取得元を拾う', () => {
+    expect(findForeignResolved(v1)).toEqual([
+      { name: 'evil', resolved: 'https://evil.example.invalid/evil.tgz' },
+      { name: 'parent > nested', resolved: 'https://also-evil.example.invalid/n.tgz' },
+    ]);
+  });
+
+  it('版が古いこと自体を問題として挙げる', () => {
+    expect(findShapeProblems(v1)).toHaveLength(1);
+    expect(findShapeProblems(v1)[0]).toMatch(/lockfileVersion 1 は受け付けません/);
+  });
+
+  it('packages だけの v3 は問題なし', () => {
+    expect(findShapeProblems(lockWith({}))).toEqual([]);
+  });
+
+  it.each([
+    ['lockfileVersion が無い', { packages: {} }],
+    ['lockfileVersion が文字列', { lockfileVersion: '3', packages: {} }],
+  ])('%s なら問題として挙げる', (_label, lock) => {
+    expect(findShapeProblems(lock)).not.toEqual([]);
+  });
+
+  it('packages も dependencies も無ければ問題として挙げる', () => {
+    expect(findShapeProblems({ lockfileVersion: 3 })).toEqual([
+      'packages も dependencies も無く、取得元を確かめられません。',
+    ]);
+  });
+
+  it('checkLockfiles が problems を返し、CLI が落ちる材料になる', () => {
+    const root = mkdtempSync(join(tmpdir(), 'lockfiles-'));
+    const old = join(root, 'v1.json');
+    writeFileSync(old, JSON.stringify(v1));
+
+    const [result] = checkLockfiles([old]);
+
+    expect(result.offenders).toHaveLength(2);
+    expect(result.problems).toHaveLength(1);
   });
 });
