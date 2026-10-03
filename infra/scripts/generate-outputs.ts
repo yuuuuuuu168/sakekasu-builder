@@ -3,18 +3,37 @@ import {
   CloudFormationClient,
   DescribeStacksCommand,
 } from '@aws-sdk/client-cloudformation';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { parseSharedAuth, sharedAuthRegion, type SharedAuth } from '../lib/shared-auth.js';
 
 /**
- * amplify_outputs.json 互換の出力構造
+ * 共通ログインで要求する OAuth スコープ。
+ *
+ * builder のアプリクライアントに許されているのはこの3つだけ。
+ * `aws.cognito.signin.user.admin` は無いので、fetchUserAttributes や
+ * TOTP の登録など、そのスコープが要る Amplify の API は使えない
+ */
+export const SHARED_AUTH_SCOPES = ['openid', 'email', 'profile'] as const;
+
+/**
+ * amplify_outputs.json 互換の出力構造。
+ *
+ * `auth.oauth` は共通ログイン（マネージドログイン）の接続先。戻り先の URL は
+ * 開いているオリジンで決まるので、ここには入れず画面側で組み立てる
+ * （src/features/auth/amplifyConfig.ts）
  */
 export interface AmplifyOutputs {
   auth: {
     user_pool_id: string;
     user_pool_client_id: string;
     aws_region: string;
+    oauth: {
+      domain: string;
+      scopes: string[];
+      response_type: 'code';
+    };
   };
   data: {
     url: string;
@@ -25,12 +44,10 @@ export interface AmplifyOutputs {
 }
 
 /**
- * CloudFormation 出力から取得した生の値
+ * 設定ファイルの材料。認証は cdk.json の sharedAuth、API は api スタックの出力から取る
  */
 export interface RawStackOutputs {
-  userPoolId: string;
-  userPoolClientId: string;
-  authRegion: string;
+  sharedAuth: SharedAuth;
   graphqlApiUrl: string;
   apiRegion: string;
 }
@@ -42,9 +59,14 @@ export interface RawStackOutputs {
 export function buildAmplifyOutputs(raw: RawStackOutputs): AmplifyOutputs {
   return {
     auth: {
-      user_pool_id: raw.userPoolId,
-      user_pool_client_id: raw.userPoolClientId,
-      aws_region: raw.authRegion,
+      user_pool_id: raw.sharedAuth.userPoolId,
+      user_pool_client_id: raw.sharedAuth.clientId,
+      aws_region: sharedAuthRegion(raw.sharedAuth),
+      oauth: {
+        domain: raw.sharedAuth.domain,
+        scopes: [...SHARED_AUTH_SCOPES],
+        response_type: 'code',
+      },
     },
     data: {
       url: raw.graphqlApiUrl,
@@ -80,37 +102,37 @@ async function getStackOutputs(
 }
 
 /**
- * メイン処理: CloudFormation 出力を取得し amplify_outputs.json を生成する
+ * メイン処理: 共通ログインの値（cdk.json）と API スタックの出力から
+ * amplify_outputs.json を生成する。
+ *
+ * 認証は旧 auth スタックの出力を読まない。ログインは共通ログインへ移り、
+ * 旧プールは切り戻し用に残してあるだけなので
  */
 async function main(): Promise<void> {
   const env = process.argv[2] ?? 'dev';
-  const authStackName = `sakekasu-${env}-auth`;
   const apiStackName = `sakekasu-${env}-api`;
 
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const cdkJson = JSON.parse(
+    readFileSync(resolve(__dirname, '../cdk.json'), 'utf8'),
+  ) as { context?: Record<string, unknown> };
+  const sharedAuth = parseSharedAuth(cdkJson.context?.sharedAuth);
+
   console.log(`環境: ${env}`);
-  console.log(`Auth スタック: ${authStackName}`);
+  console.log(`共通ログイン: ${sharedAuth.domain}`);
   console.log(`API スタック: ${apiStackName}`);
 
   const client = new CloudFormationClient({});
-
-  const [authOutputs, apiOutputs] = await Promise.all([
-    getStackOutputs(client, authStackName),
-    getStackOutputs(client, apiStackName),
-  ]);
+  const apiOutputs = await getStackOutputs(client, apiStackName);
 
   const raw: RawStackOutputs = {
-    userPoolId: authOutputs['UserPoolId'] ?? '',
-    userPoolClientId: authOutputs['UserPoolClientId'] ?? '',
-    authRegion: authOutputs['AuthRegion'] ?? '',
+    sharedAuth,
     graphqlApiUrl: apiOutputs['GraphqlApiUrl'] ?? '',
     apiRegion: apiOutputs['ApiRegion'] ?? '',
   };
 
   // 必須値の検証
   const missing: string[] = [];
-  if (!raw.userPoolId) missing.push('UserPoolId');
-  if (!raw.userPoolClientId) missing.push('UserPoolClientId');
-  if (!raw.authRegion) missing.push('AuthRegion');
   if (!raw.graphqlApiUrl) missing.push('GraphqlApiUrl');
   if (!raw.apiRegion) missing.push('ApiRegion');
 
@@ -123,7 +145,6 @@ async function main(): Promise<void> {
   const amplifyOutputs = buildAmplifyOutputs(raw);
 
   // プロジェクトルート（infra/ の親ディレクトリ）に出力
-  const __dirname = dirname(fileURLToPath(import.meta.url));
   const outputPath = resolve(__dirname, '../../amplify_outputs.json');
 
   writeFileSync(outputPath, JSON.stringify(amplifyOutputs, null, 2) + '\n');

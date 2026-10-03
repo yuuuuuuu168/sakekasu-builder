@@ -15,6 +15,7 @@ import {
   planRepairs,
   // @ts-expect-error -- 型定義の無い .mjs を読む
 } from '../scripts/fix-monitoring-mojibake.mjs';
+import { TEST_SHARED_AUTH } from './shared-auth-fixture.js';
 
 /**
  * 監視スタックの文字化けを直すスクリプトの検査。
@@ -174,7 +175,7 @@ describe('合成結果との突き合わせ', () => {
     const auth = new AuthStack(app, 'sakekasu-dev-auth', { envName: 'dev', env });
     const api = new ApiStack(app, 'sakekasu-dev-api', {
       envName: 'dev',
-      userPool: auth.userPool,
+      sharedAuth: TEST_SHARED_AUTH,
       env,
     });
     const monitoring = new MonitoringStack(app, 'sakekasu-dev-monitoring', {

@@ -6,16 +6,11 @@ import {
   useCallback,
   type ReactNode,
 } from 'react';
+import { Hub } from 'aws-amplify/utils';
 import {
-  signIn as amplifySignIn,
-  confirmSignIn as amplifyConfirmSignIn,
-  signUp as amplifySignUp,
-  confirmSignUp as amplifyConfirmSignUp,
-  resetPassword as amplifyResetPassword,
-  confirmResetPassword as amplifyConfirmResetPassword,
+  signInWithRedirect,
   signOut as amplifySignOut,
   getCurrentUser,
-  fetchUserAttributes,
 } from 'aws-amplify/auth';
 import {
   clearMessages,
@@ -24,15 +19,16 @@ import {
 import { clearFilterState } from '@/features/records/lib/filterStorage';
 import { clearDownloadUrlCache } from '@/features/image/lib/downloadUrlCache';
 
-/** 認証済みユーザーの型 */
+/**
+ * 認証済みユーザーの型。
+ *
+ * 持つのは sub（userId）だけ。端末に残すデータのキーと、サインアウト時の
+ * 後始末に使う。メールアドレスは画面に出さない方針なので取りにいかない
+ * （共通ログインのクライアントは aws.cognito.signin.user.admin スコープを
+ * 持たず、fetchUserAttributes もそもそも使えない）
+ */
 export interface AuthUser {
   userId: string;
-  email: string;
-}
-
-/** サインインの結果。MFA 有効な利用者は TOTP コードの入力が続きに必要になる */
-export interface SignInResult {
-  requiresTotp: boolean;
 }
 
 /** 認証コンテキストの値 */
@@ -40,93 +36,96 @@ export interface AuthContextValue {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  signIn: (email: string, password: string) => Promise<SignInResult>;
-  confirmSignInWithTotp: (code: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
-  confirmSignUp: (email: string, code: string) => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
-  confirmResetPassword: (email: string, code: string, newPassword: string) => Promise<void>;
+  /** マネージドログインから戻ってきたが、サインインに失敗したときの文言 */
+  error: string | null;
+  /** 共通ログインのマネージドログインへ移る（ページごと遷移する） */
+  signIn: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-/** 現在の認証ユーザー情報を取得するヘルパー */
+/** 現在の認証ユーザー情報を取得するヘルパー（トークンのクレームから読むだけで通信しない） */
 async function fetchAuthUser(): Promise<AuthUser> {
   const currentUser = await getCurrentUser();
-  const attributes = await fetchUserAttributes();
-  return {
-    userId: currentUser.userId,
-    email: attributes.email ?? '',
-  };
+  return { userId: currentUser.userId };
 }
+
+/** リダイレクトの失敗を画面に出す文言にする。原因の詳細はコンソールに残す */
+const REDIRECT_FAILURE_MESSAGE =
+  'サインインを完了できませんでした。もう一度お試しください';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // 初回マウント時に認証状態を確認
   useEffect(() => {
+    let active = true;
+
+    // マネージドログインから ?code=... 付きで戻ってきたときは、Amplify が
+    // configure の直後にトークン交換を始める。getCurrentUser はその完了を
+    // 待ってから答えるので、戻ってきた直後でもここで拾える。
+    // Hub は、交換が後から終わった場合と失敗した場合の受け口
+    const stopListening = Hub.listen('auth', ({ payload }) => {
+      switch (payload.event) {
+        case 'signInWithRedirect':
+        case 'signedIn':
+          fetchAuthUser()
+            .then((authUser) => {
+              if (!active) return;
+              setUser(authUser);
+              setError(null);
+            })
+            .catch(() => {
+              if (active) setUser(null);
+            });
+          break;
+        case 'signInWithRedirect_failure':
+          console.error('マネージドログインからの戻りでサインインに失敗しました', payload.data);
+          if (active) {
+            setUser(null);
+            setError(REDIRECT_FAILURE_MESSAGE);
+          }
+          break;
+        case 'signedOut':
+        case 'tokenRefresh_failure':
+          // 30日でリフレッシュトークンが切れたときなど。ログイン画面へ戻す
+          if (active) setUser(null);
+          break;
+      }
+    });
+
     fetchAuthUser()
-      .then(setUser)
-      .catch(() => setUser(null))
-      .finally(() => setIsLoading(false));
-  }, []);
-
-  const signIn = useCallback(async (email: string, password: string): Promise<SignInResult> => {
-    const { isSignedIn, nextStep } = await amplifySignIn({ username: email, password });
-
-    // MFA を有効にしている利用者は、ここではまだサインインが完了していない。
-    // TOTP コードを confirmSignInWithTotp で送るまで user は立てない
-    if (nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_TOTP_CODE') {
-      return { requiresTotp: true };
-    }
-
-    if (!isSignedIn) {
-      // MFA 必須化など、想定していないチャレンジが来たときに
-      // 未サインインのまま画面へ進めてしまわないよう明示的に落とす
-      throw new Error(`未対応のサインインステップです: ${nextStep.signInStep}`);
-    }
-
-    const authUser = await fetchAuthUser();
-    setUser(authUser);
-    return { requiresTotp: false };
-  }, []);
-
-  const confirmSignInWithTotp = useCallback(async (code: string) => {
-    const { isSignedIn } = await amplifyConfirmSignIn({ challengeResponse: code });
-    if (!isSignedIn) {
-      throw new Error('TOTP コードの検証後もサインインが完了しませんでした');
-    }
-    const authUser = await fetchAuthUser();
-    setUser(authUser);
-  }, []);
-
-  const signUp = useCallback(async (email: string, password: string) => {
-    await amplifySignUp({ username: email, password });
-  }, []);
-
-  const confirmSignUp = useCallback(async (email: string, code: string) => {
-    await amplifyConfirmSignUp({ username: email, confirmationCode: code });
-  }, []);
-
-  // preventUserExistenceErrors 有効時は、存在しないメールアドレスでも
-  // Cognito が成功と同じ応答を返す。ここで戻り値を握りつぶしているのは
-  // それを画面に区別させないため（存在の有無を推測させない）
-  const resetPassword = useCallback(async (email: string) => {
-    await amplifyResetPassword({ username: email });
-  }, []);
-
-  const confirmResetPassword = useCallback(
-    async (email: string, code: string, newPassword: string) => {
-      await amplifyConfirmResetPassword({
-        username: email,
-        confirmationCode: code,
-        newPassword,
+      .then((authUser) => {
+        if (active) setUser(authUser);
+      })
+      .catch(() => {
+        if (active) setUser(null);
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
       });
-    },
-    [],
-  );
+
+    return () => {
+      active = false;
+      stopListening();
+    };
+  }, []);
+
+  const signIn = useCallback(async () => {
+    setError(null);
+    try {
+      await signInWithRedirect();
+    } catch (err) {
+      // 別タブでサインイン済みなど、すでにトークンがある場合はそのまま入る
+      if (err instanceof Error && err.name === 'UserAlreadyAuthenticatedException') {
+        setUser(await fetchAuthUser());
+        return;
+      }
+      throw err;
+    }
+  }, []);
 
   const signOut = useCallback(async () => {
     // 端末に残る利用者固有のデータを消してからサインアウトする。
@@ -144,6 +143,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearDownloadUrlCache();
 
     try {
+      // OAuth の設定があるので、トークンを捨てたあとマネージドログインの
+      // /logout へ移り、戻り先（このオリジンの /）へ帰ってくる。
+      // マネージドログイン側のセッションも切れるので、同じブラウザで開いている
+      // 他のアプリも、次にトークンを取り直すときはログインからやり直しになる
       await amplifySignOut();
     } finally {
       // 上の通信を待つ間に書き戻されたものを、画面を落とす直前にもう一度消す。
@@ -168,12 +171,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     isAuthenticated: user !== null,
     isLoading,
+    error,
     signIn,
-    confirmSignInWithTotp,
-    signUp,
-    confirmSignUp,
-    resetPassword,
-    confirmResetPassword,
     signOut,
   };
 

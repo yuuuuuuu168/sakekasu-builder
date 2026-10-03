@@ -5,12 +5,12 @@ import * as path from 'node:path';
 import * as url from 'node:url';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
-import { AuthStack } from '../lib/auth-stack.js';
 import {
   ApiStack,
   assertInferenceProfileMatchesFoundationModel,
   enableApplicationSignals,
 } from '../lib/api-stack.js';
+import { TEST_SHARED_AUTH } from './shared-auth-fixture.js';
 
 /**
  * 関数名から実行ロールのリソース定義を引く。
@@ -43,12 +43,9 @@ describe('ApiStack', () => {
 
   beforeAll(() => {
     const app = new cdk.App();
-    const authStack = new AuthStack(app, 'TestAuthStack', {
-      envName: 'dev',
-    });
     const apiStack = new ApiStack(app, 'TestApiStack', {
       envName: 'dev',
-      userPool: authStack.userPool,
+      sharedAuth: TEST_SHARED_AUTH,
     });
     template = Template.fromStack(apiStack);
   });
@@ -58,6 +55,23 @@ describe('ApiStack', () => {
     template.hasResourceProperties('AWS::AppSync::GraphQLApi', {
       AuthenticationType: 'AMAZON_COGNITO_USER_POOLS',
     });
+  });
+
+  // 共通ログインへの移行。旧プール（AuthStack）ではなく、cdk.json の sharedAuth の
+  // プールを見る。共有プールには他のアプリのクライアントもいるので、builder の
+  // クライアントに出たトークンだけを通す
+  it('AppSync は共通ログインのプールを見て、builder のクライアントのトークンだけを通す', () => {
+    template.hasResourceProperties('AWS::AppSync::GraphQLApi', {
+      UserPoolConfig: Match.objectLike({
+        UserPoolId: TEST_SHARED_AUTH.userPoolId,
+        AppIdClientRegex: `^${TEST_SHARED_AUTH.clientId}$`,
+        DefaultAction: 'ALLOW',
+      }),
+    });
+  });
+
+  it('旧プールの Export を読まない（スタック間の参照でつながない）', () => {
+    expect(JSON.stringify(template.toJSON())).not.toContain('Fn::ImportValue');
   });
 
   // Issue #142: 登録後に画像を追加できるようにしたため、更新経路にも

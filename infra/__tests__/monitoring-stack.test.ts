@@ -3,6 +3,7 @@ import * as cdk from "aws-cdk-lib";
 import { AuthStack } from "../lib/auth-stack.js";
 import { ApiStack } from "../lib/api-stack.js";
 import { MonitoringStack } from "../lib/monitoring-stack.js";
+import { TEST_SHARED_AUTH } from "./shared-auth-fixture.js";
 
 const TEST_ACCOUNT = "111122223333";
 const TEST_REGION = "ap-northeast-1";
@@ -53,14 +54,14 @@ function cloudwatchPublishStatements(
     });
 }
 
-function synth() {
+function synth(options: { canaryEnabled?: boolean } = {}) {
   const app = new cdk.App();
   const env = { account: TEST_ACCOUNT, region: TEST_REGION };
 
   const authStack = new AuthStack(app, "TestAuth", { envName: "dev", env });
   const apiStack = new ApiStack(app, "TestApi", {
     envName: "dev",
-    userPool: authStack.userPool,
+    sharedAuth: TEST_SHARED_AUTH,
     env,
   });
   const monitoringStack = new MonitoringStack(app, "TestMonitoring", {
@@ -75,6 +76,7 @@ function synth() {
     siteUrl: "https://example.com",
     userPoolId: "ap-northeast-1_TEST",
     canaryUserPoolClientId: "canaryclientid",
+    ...options,
     env,
   });
 
@@ -777,5 +779,63 @@ describe("MonitoringStack", () => {
         ).toEqual({ Duration: 30, DurationUnit: "DAY" });
       }
     });
+  });
+});
+
+// 共通ログインへ移ったあと、旧プールでサインインするカナリアは必ず落ちる。
+// リソースは消さずに、スケジュールと通知だけを止める
+describe("MonitoringStack（カナリアを止めたとき）", () => {
+  const CANARY_ALARMS = [
+    "dev-sakekasu-sommelier-canary",
+    "dev-sakekasu-watcher-failure-sommelier-canary",
+    "dev-sakekasu-watcher-silent-sommelier-canary",
+  ];
+  let template: Template;
+  let enabledTemplate: Template;
+
+  beforeAll(() => {
+    template = synth({ canaryEnabled: false }).template;
+    enabledTemplate = synth().template;
+  });
+
+  it("スケジュールは残したまま無効にする", () => {
+    template.hasResourceProperties("AWS::Events::Rule", {
+      Name: "dev-sakekasu-sommelier-canary-schedule",
+      State: "DISABLED",
+    });
+    enabledTemplate.hasResourceProperties("AWS::Events::Rule", {
+      Name: "dev-sakekasu-sommelier-canary-schedule",
+      State: "ENABLED",
+    });
+  });
+
+  it.each(CANARY_ALARMS)("%s は残したまま通知を切る", (alarmName) => {
+    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      AlarmName: alarmName,
+      ActionsEnabled: false,
+    });
+  });
+
+  // 止めたのはカナリアだけ。外形監視など他のアラームまで黙らせない
+  it("カナリア以外のアラームは通知を切らない", () => {
+    const alarms = template.findResources("AWS::CloudWatch::Alarm");
+    const silenced = Object.values(alarms)
+      .filter((a) => a.Properties?.ActionsEnabled === false)
+      .map((a) => a.Properties?.AlarmName)
+      .sort();
+    expect(silenced).toEqual([...CANARY_ALARMS].sort());
+  });
+
+  // 止めても論理 ID が変わらないこと（cdkd の state と食い違うと作り直しになる）
+  it("止めても止めなくても、リソースの論理 ID は同じ", () => {
+    const ids = (t: Template) => Object.keys(t.toJSON().Resources).sort();
+    expect(ids(template)).toEqual(ids(enabledTemplate));
+  });
+
+  it("動かしているときは ActionsEnabled を書かない（既存アラームに更新を出さない）", () => {
+    const alarms = enabledTemplate.findResources("AWS::CloudWatch::Alarm");
+    expect(
+      Object.values(alarms).some((a) => a.Properties?.ActionsEnabled !== undefined),
+    ).toBe(false);
   });
 });

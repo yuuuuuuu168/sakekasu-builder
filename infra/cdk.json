@@ -11,6 +11,11 @@
     ]
   },
   "context": {
-    "env": "dev"
+    "env": "dev",
+    "sharedAuth": {
+      "domain": "auth.sakekasu-builder.com",
+      "userPoolId": "ap-northeast-1_yw1VDKtxW",
+      "clientId": "iuv75jactiu7ffumrj71khmen"
+    }
   }
 }

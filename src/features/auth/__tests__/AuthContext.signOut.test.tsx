@@ -10,19 +10,12 @@ import type { ReactNode } from 'react';
 
 const mockSignOut = vi.fn();
 const mockGetCurrentUser = vi.fn();
-const mockFetchUserAttributes = vi.fn();
 const mockGraphql = vi.fn();
 
 vi.mock('aws-amplify/auth', () => ({
-  signIn: vi.fn(),
-  confirmSignIn: vi.fn(),
-  signUp: vi.fn(),
-  confirmSignUp: vi.fn(),
-  resetPassword: vi.fn(),
-  confirmResetPassword: vi.fn(),
+  signInWithRedirect: vi.fn(),
   signOut: (...args: unknown[]) => mockSignOut(...args),
   getCurrentUser: (...args: unknown[]) => mockGetCurrentUser(...args),
-  fetchUserAttributes: (...args: unknown[]) => mockFetchUserAttributes(...args),
 }));
 
 vi.mock('aws-amplify/api', () => ({
@@ -56,7 +49,6 @@ describe('AuthProvider の signOut', () => {
     clearDownloadUrlCache();
 
     mockGetCurrentUser.mockResolvedValue({ userId: 'user-a' });
-    mockFetchUserAttributes.mockResolvedValue({ email: 'a@example.com' });
     mockSignOut.mockResolvedValue(undefined);
     mockGraphql.mockImplementation(async (arg: { variables: { keys: string[] } }) => ({
       data: { getDownloadUrls: arg.variables.keys.map(() => 'https://example/signed') },

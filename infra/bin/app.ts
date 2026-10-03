@@ -7,6 +7,7 @@ import { HealthGlobalStack } from '../lib/health-global-stack.js';
 import { BillingNotifierStack } from '../lib/billing-notifier-stack.js';
 import { GithubOidcStack } from '../lib/github-oidc-stack.js';
 import { DevOpsAgentStack } from '../lib/devops-agent-stack.js';
+import { parseSharedAuth } from '../lib/shared-auth.js';
 
 const app = new cdk.App();
 
@@ -65,16 +66,26 @@ function buildApplicationStacks(app: cdk.App): void {
     account: process.env.CDK_DEFAULT_ACCOUNT,
   };
 
-  // AuthStack: Cognito UserPool + Client
+  // 共通ログイン（sakekasu-integrated_environment の identity スタック）。
+  // 4 アプリで共有するユーザープールと、builder 用のアプリクライアント。
+  // 値は cdk.json の context に置き、スタック間の参照ではつながない
+  const sharedAuth = parseSharedAuth(app.node.tryGetContext('sharedAuth'));
+
+  // AuthStack: 旧ユーザープール（このアプリ専用。セルフサインアップあり）。
+  //
+  // ログインは共通ログインへ移ったが、このスタックは消さない。プールは RETAIN で、
+  // 旧 sub からのデータ付け替え（docs/shared-login.md）が済んで落ち着くまでは
+  // 切り戻し先として残す。外すのはデータ移行が済んだ後の別 PR。
+  // ソムリエのカナリアもまだこのプールでサインインしている（止めてある）
   const authStack = new AuthStack(app, `${prefix}-auth`, {
     envName: env,
     env: cdkEnv,
   });
 
-  // ApiStack: AppSync + DynamoDB（AuthStack の UserPool を参照）
+  // ApiStack: AppSync + DynamoDB（認証は共通ログインのユーザープール）
   const apiStack = new ApiStack(app, `${prefix}-api`, {
     envName: env,
-    userPool: authStack.userPool,
+    sharedAuth,
     env: cdkEnv,
   });
 
@@ -103,6 +114,11 @@ function buildApplicationStacks(app: cdk.App): void {
     siteUrl,
     userPoolId: authStack.userPool.userPoolId,
     canaryUserPoolClientId: authStack.canaryUserPoolClient.userPoolClientId,
+    // 共通ログインにはパスワードで直接サインインする経路が無い（authFlows が空、
+    // MFA 必須）。ソムリエが共通プールのトークンしか受け付けなくなるので、
+    // 旧プールでサインインするカナリアは止めておく。再開の選択肢は
+    // docs/shared-login.md の「カナリア」
+    canaryEnabled: false,
     env: cdkEnv,
   });
 
@@ -148,7 +164,9 @@ function buildApplicationStacks(app: cdk.App): void {
     devopsAgentStack.addDependency(monitoringStack);
   }
 
-  // スタック間の依存関係を明示
+  // スタック間の依存関係を明示。
+  // api はもう auth を参照していないが、依存は残す。デプロイの順番を
+  // これまでと変えないため（auth → api → monitoring）
   apiStack.addDependency(authStack);
   monitoringStack.addDependency(apiStack);
   // 転送先のバスでルールが待ち構えている状態にしてから転送側を作る
