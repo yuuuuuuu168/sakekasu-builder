@@ -39,6 +39,28 @@ describe.each(['deploy.yml', 'cdk-diff.yml'])('%s', (file) => {
     ).toBeLessThan(credentials);
   });
 
+  it('合成のステップが CDK_DEFAULT_ACCOUNT を明示している', () => {
+    // 本来 CDK CLI が認証情報から入れる値。認証前に合成すると undefined に
+    // なり、bin/app.ts の env.account が未定義のスタックになって、
+    // テンプレート中のアカウント ID が Ref: AWS::AccountId に化ける。
+    // 認証ありで合成した場合と別物のテンプレートになる（Issue #131）
+    const synth = lineIndexOf(lines, SYNTH_COMMAND, '合成のステップ');
+    const credentials = lineIndexOf(lines, CREDENTIALS_ACTION, '認証情報のステップ');
+
+    // 合成のステップの範囲（直前のステップ境界から合成の行まで）を見る
+    const stepStart = lines
+      .slice(0, synth)
+      .reduce((last, line, index) => (/^ {6}- /.test(line) ? index : last), 0);
+    const step = lines.slice(stepStart, synth + 1);
+
+    expect(
+      step.some((line) => /^\s*CDK_DEFAULT_ACCOUNT:/.test(line)),
+      '合成のステップに CDK_DEFAULT_ACCOUNT が無い。' +
+        '認証前の合成でテンプレートのアカウント ID が Ref: AWS::AccountId に化ける',
+    ).toBe(true);
+    expect(synth, '合成が認証より後にある').toBeLessThan(credentials);
+  });
+
   it('CDKD_APP に合成済みのディレクトリを渡している', () => {
     // 渡さないと cdkd が cdk.json の app を読んで合成し直し、
     // 認証前に合成した意味が無くなる
