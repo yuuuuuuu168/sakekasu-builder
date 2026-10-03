@@ -560,7 +560,7 @@ cdkd は「作成時にしか指定できないプロパティ」を型ごとに
 
 ```bash
 cd infra
-AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc --require-approval never
+AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc -c github-oidc=true --require-approval never
 ```
 
 ### 9. ワークフローの差し替え
