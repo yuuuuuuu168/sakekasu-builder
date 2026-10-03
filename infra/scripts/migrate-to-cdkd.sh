@@ -21,7 +21,10 @@
 #
 # 環境変数:
 #   ENV_NAME       スタック名の接頭辞に使う環境名（既定 dev）
-#   CDKD_ROLE_ARN  cdkd が引き受けるロール。cdkd が直接読む。CI では必須
+#   CDKD_ROLE_ARN  cdkd が引き受けるロール。cdkd が直接読む。CI では必須。手元から
+#                  打つときは渡さない。sakekasu-cdkd-deploy の信頼ポリシーは
+#                  sakekasu-github-actions-deploy だけを許しているので、人間が
+#                  AdministratorAccess で渡しても sts:AssumeRole で拒否される
 #   MAPPING_DIR    論理ID と物理ID の対応表の置き場所（既定はカレント）
 set -euo pipefail
 
