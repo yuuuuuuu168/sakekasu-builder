@@ -57,12 +57,57 @@ stacks=(
   "${prefix}-auth ap-northeast-1"
 )
 
+# このスクリプトが直に打つ aws コマンドの資格情報。
+#
+# CI で渡ってくるのは sakekasu-github-actions-deploy の資格情報で、この
+# ロールは sts:AssumeRole しか持たない。実権限は cdkd 用に絞った
+# sakekasu-cdkd-deploy の側にある。cdkd は CDKD_ROLE_ARN を自分で読んで
+# 引き受けるが、それはスクリプトの aws コマンドには効かない。こちらも
+# 同じロールを引き受ける。
+#
+# 2026-10-03、手順9 をマージした直後の deploy がここで落ちた。
+# 「DescribeStacks on sakekasu-dev-health-global ... no identity-based policy
+# allows」。cfn_exists は権限の失敗を握りつぶさず落とすので、スタックの
+# 有無を取り違えたまま進むことはなかった。
+#
+# 引き受けた資格情報を環境変数として外に出さない。cdkd にまで渡ると、
+# sakekasu-cdkd-deploy から sakekasu-cdkd-deploy を引き受けようとして落ちる
+# （信頼ポリシーが許すのは sakekasu-github-actions-deploy だけ）。
+# aws_cli の呼び出しごとに env で渡す。
+cdkd_env=()
+if [ -n "${CDKD_ROLE_ARN:-}" ]; then
+  creds="$(aws sts assume-role --role-arn "$CDKD_ROLE_ARN" \
+    --role-session-name migrate-to-cdkd \
+    --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text)"
+  IFS=$'\t' read -r cdkd_key cdkd_secret cdkd_token <<<"$creds"
+  if [ -z "$cdkd_key" ] || [ -z "$cdkd_secret" ] || [ -z "$cdkd_token" ]; then
+    echo "::error::${CDKD_ROLE_ARN} を引き受けられませんでした" >&2
+    exit 1
+  fi
+  cdkd_env=(
+    env
+    "AWS_ACCESS_KEY_ID=${cdkd_key}"
+    "AWS_SECRET_ACCESS_KEY=${cdkd_secret}"
+    "AWS_SESSION_TOKEN=${cdkd_token}"
+  )
+  unset creds cdkd_key cdkd_secret cdkd_token
+fi
+
+# 権限を持っている側で aws を打つ。CDKD_ROLE_ARN が無ければ素の aws
+# （手元から打つとき。人間様の資格情報がそのまま権限を持っている）。
+#
+# ${x[@]+"${x[@]}"} は bash 3.2 で空配列を set -u の下で展開するための書き方。
+# 素直に "${cdkd_env[@]}" と書くと unbound variable で落ちる
+aws_cli() {
+  ${cdkd_env[@]+"${cdkd_env[@]}"} aws "$@"
+}
+
 # CloudFormation のスタックがあるか。無いときだけ 1 を返し、それ以外の失敗
 # （権限、スロットリング）は握りつぶさずに落とす。読めない状態を「無い」と
 # 取り違えると、移行済みのスタックをもう一度取り込みにいってしまう
 cfn_exists() {
   local name="$1" region="$2" err
-  if err="$(aws cloudformation describe-stacks --stack-name "$name" --region "$region" \
+  if err="$(aws_cli cloudformation describe-stacks --stack-name "$name" --region "$region" \
     --query 'Stacks[0].StackStatus' --output text 2>&1)"; then
     return 0
   fi
@@ -114,7 +159,7 @@ cdkd_state_exists() {
 # 標準出力に --resource の引数を1行1トークンで書く。呼ぶ側が配列に読む。
 identifier_overrides() {
   local name="$1" region="$2" resources logical phys pool pools filters log_group
-  resources="$(aws cloudformation describe-stack-resources --stack-name "$name" --region "$region" \
+  resources="$(aws_cli cloudformation describe-stack-resources --stack-name "$name" --region "$region" \
     --query 'StackResources[].[LogicalResourceId,ResourceType,PhysicalResourceId]' --output text)"
 
   local out=()
@@ -136,7 +181,7 @@ identifier_overrides() {
   # describe-metric-filters の --filter-name-prefix は --log-group-name と一緒でないと
   # 効かないため、リージョン全体を引いて名前で突き合わせる
   if grep -q $'\tAWS::Logs::MetricFilter\t' <<<"$resources"; then
-    filters="$(aws logs describe-metric-filters --region "$region" \
+    filters="$(aws_cli logs describe-metric-filters --region "$region" \
       --query 'metricFilters[].[filterName,logGroupName]' --output text)"
     while IFS=$'\t' read -r logical _ phys; do
       log_group="$(awk -F'\t' -v f="$phys" '$1 == f { print $2 }' <<<"$filters")"
