@@ -71,6 +71,20 @@ export class AuthStack extends cdk.Stack {
         sms: false,
         otp: true,
       },
+      // SMS の MFA は使わない（上のとおり）。それでもこの文面を明示するのは、
+      // cdkd が UserPool を更新できなくなるため。
+      //
+      // cdkd は provider.update に state の全体像を渡すが、state に無い任意
+      // プロパティを「省略」ではなく「空文字」として送る。Cognito は
+      // smsAuthenticationMessage の空文字を長さと {####} の両方で拒否するので、
+      // この1件のために UserPool へのあらゆる更新が落ちる。
+      // 2026-10-03、文字化けの修復（cdkd drift --revert）が実際にここで落ちた。
+      //
+      // 値が入っていれば送られる内容が妥当になり、更新が通る。SMS の MFA を
+      // 有効にするわけではない（mfaSecondFactor.sms は false のまま、
+      // SmsConfiguration も置かない）ので、この文面が使われることはない。
+      // cdkd 側が直ったら消してよい
+      mfaMessage: '認証コードは {####} です。',
       userVerification: {
         emailSubject: 'sakekasu-builder 確認コード',
         emailBody: 'あなたの確認コードは {####} です。',
