@@ -22,11 +22,13 @@ describe('Property 5: 設定ファイル生成の構造保証', () => {
   const regionArb = fc.constantFrom('us-east-1', 'us-west-2', 'ap-northeast-1');
 
   const rawStackOutputsArb: fc.Arbitrary<RawStackOutputs> = fc.record({
-    userPoolId: fc.stringMatching(/^[a-z]{2}-[a-z]+-\d_[A-Za-z0-9]{9}$/).filter(
-      (s) => s.length > 0,
-    ),
-    userPoolClientId: fc.string({ minLength: 1, maxLength: 64 }),
-    authRegion: regionArb,
+    sharedAuth: fc.record({
+      domain: fc.stringMatching(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/),
+      userPoolId: regionArb.chain((region) =>
+        fc.stringMatching(/^[A-Za-z0-9]{9}$/).map((id) => `${region}_${id}`),
+      ),
+      clientId: fc.stringMatching(/^[a-z0-9]{1,64}$/),
+    }),
     graphqlApiUrl: fc.string({ minLength: 1, maxLength: 256 }),
     apiRegion: regionArb,
   });
@@ -37,9 +39,15 @@ describe('Property 5: 設定ファイル生成の構造保証', () => {
         const result = buildAmplifyOutputs(raw);
 
         // auth セクション (Requirements 5.2)
-        expect(result.auth.user_pool_id).toBe(raw.userPoolId);
-        expect(result.auth.user_pool_client_id).toBe(raw.userPoolClientId);
-        expect(result.auth.aws_region).toBe(raw.authRegion);
+        expect(result.auth.user_pool_id).toBe(raw.sharedAuth.userPoolId);
+        expect(result.auth.user_pool_client_id).toBe(raw.sharedAuth.clientId);
+        // リージョンはユーザープール ID の先頭から取る
+        expect(raw.sharedAuth.userPoolId.startsWith(`${result.auth.aws_region}_`)).toBe(true);
+
+        // 共通ログイン（マネージドログイン）の接続先
+        expect(result.auth.oauth.domain).toBe(raw.sharedAuth.domain);
+        expect(result.auth.oauth.scopes).toEqual(['openid', 'email', 'profile']);
+        expect(result.auth.oauth.response_type).toBe('code');
 
         // data セクション (Requirements 5.3)
         expect(result.data.url).toBe(raw.graphqlApiUrl);
@@ -64,6 +72,7 @@ describe('Property 5: 設定ファイル生成の構造保証', () => {
         expect(result).toHaveProperty('auth.user_pool_id');
         expect(result).toHaveProperty('auth.user_pool_client_id');
         expect(result).toHaveProperty('auth.aws_region');
+        expect(result).toHaveProperty('auth.oauth.domain');
 
         // data セクションの必須フィールド
         expect(result).toHaveProperty('data.url');

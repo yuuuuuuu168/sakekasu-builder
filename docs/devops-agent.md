@@ -245,10 +245,10 @@ CloudFormation の `AWS::DevOpsAgent::Association` には Slack 用の設定が�
 
 エージェントは汎用の知識しか持たないので、このプロジェクト固有の勘所はカスタムスキルとして登録しておく。切り分けが速くなる。
 
-- ソムリエのカナリアが 403 を返したら、`sommelier/agentcore/agentcore.json` の2箇所（Runtime の `allowedClients` と、アプリ内 audience 検証用の環境変数 `COGNITO_APP_CLIENT_ID`）を確認する。片方だけではゲートウェイを通ってもアプリ内で弾かれる
+- （ソムリエのカナリアは共通ログインへの移行で止めてある。docs/shared-login.md）カナリアが 403 を返したら、`sommelier/agentcore/agentcore.json` の2箇所（Runtime の `allowedClients` と、アプリ内 audience 検証用の環境変数 `COGNITO_APP_CLIENT_ID`）を確認する。片方だけではゲートウェイを通ってもアプリ内で弾かれる
 - AgentCore Runtime のメトリクスは名前空間 `AWS/Bedrock-AgentCore`、ディメンションは `ResourceId`（Runtime の ARN）
 - 外形監視はソムリエ Runtime と AppSync を認証なしで叩き、401/403 が返ることを正常とみなす。200 が返る方が異常
-- 新規登録の通知 Lambda は失敗しても例外を投げない（サインアップ自体を壊さないため）。失敗はログから起こした `SignupNotifyFailCount` メトリクスにだけ現れる
+- （新規登録の通知は旧ユーザープールにだけ付いていて、共通ログインへの移行で役目を終えた）新規登録の通知 Lambda は失敗しても例外を投げない（サインアップ自体を壊さないため）。失敗はログから起こした `SignupNotifyFailCount` メトリクスにだけ現れる
 - 記録の保存は AppSync + DynamoDB、画像は S3、OCR とソムリエは Bedrock（Claude Haiku 4.5）
 
 ## 費用

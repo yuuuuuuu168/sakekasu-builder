@@ -17,6 +17,7 @@ import {
   TEMP_TAG_VALUE,
 } from './image-constants.js';
 import { applyRoleBoundary } from './role-boundary.js';
+import type { SharedAuth } from './shared-auth.js';
 
 /**
  * Application Signals 用の OpenTelemetry レイヤー（Issue #86）。
@@ -257,8 +258,13 @@ assertInferenceProfileMatchesFoundationModel(BEDROCK_MODEL_ID, BEDROCK_FOUNDATIO
 export interface ApiStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
   envName: string;
-  /** AuthStack から受け取る UserPool */
-  userPool: cognito.UserPool;
+  /**
+   * 共通ログインの接続先（cdk.json の context `sharedAuth`）。
+   *
+   * 以前は AuthStack の UserPool をオブジェクト参照で受け取っていた。共通ログインは
+   * 別リポジトリのスタックなので、ID だけを受け取ってここで参照を組み立てる
+   */
+  sharedAuth: SharedAuth;
 }
 
 export class ApiStack extends cdk.Stack {
@@ -347,7 +353,18 @@ export class ApiStack extends cdk.Stack {
         defaultAuthorization: {
           authorizationType: appsync.AuthorizationType.USER_POOL,
           userPoolConfig: {
-            userPool: props.userPool,
+            // 共通ログインのユーザープール（4 アプリで共有）。
+            // 旧プール（AuthStack）は切り戻し用に残してあるだけで、ここからは読まない
+            userPool: cognito.UserPool.fromUserPoolId(
+              this,
+              'SharedUserPool',
+              props.sharedAuth.userPoolId,
+            ),
+            // 共有プールには他のアプリのクライアントもいる。同じ利用者でも
+            // 他のアプリ向けに出たトークンでは記録を読めないよう、builder の
+            // クライアントに限る（AppSync はアクセストークンの client_id、
+            // ID トークンの aud をこの正規表現と照合する）
+            appIdClientRegex: `^${props.sharedAuth.clientId}$`,
           },
         },
       },

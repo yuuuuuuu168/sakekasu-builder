@@ -47,17 +47,16 @@
 
 | 機能 | 補足 |
 |------|------|
-| Cognito 認証 | サインアップ・サインイン。アカウント列挙対策つき |
-| MFA（TOTP） | 認証アプリによる任意加入（[#70](https://github.com/yuuuuuuu168/sakekasu-builder/issues/70)） |
-| パスワードリセット | 忘れた場合の自力復帰と、管理者リセット時の誘導（[#43](https://github.com/yuuuuuuu168/sakekasu-builder/issues/43)） |
+| 共通ログイン | 4 アプリで共有する Cognito のマネージドログインへリダイレクト（Authorization code + PKCE）。ユーザーは管理者が共通ログイン側で作る。手順と経緯は [docs/shared-login.md](docs/shared-login.md) |
+| MFA（TOTP） | 必須。登録も入力も共通ログインの画面で行う |
 | データ保護 | DynamoDB の PITR・削除保護、S3 バージョニング |
 
 ### 運用・基盤
 
 | 機能 | 補足 |
 |------|------|
-| 監視とアラート通知 | 25アラーム（AI・サービス正常性・外形監視・カナリア・SLO）と AWS Health を Slack へ。デプロイ前に手動登録あり |
-| 新規ユーザー登録の Slack 通知 | Cognito Post Confirmation → SNS（[#66](https://github.com/yuuuuuuu168/sakekasu-builder/issues/66)） |
+| 監視とアラート通知 | 25アラーム（AI・サービス正常性・外形監視・カナリア・SLO）と AWS Health を Slack へ。デプロイ前に手動登録あり。ソムリエのカナリアは共通ログインへの移行で止めてある（[docs/shared-login.md](docs/shared-login.md)） |
+| 新規ユーザー登録の Slack 通知 | 旧ユーザープールの Post Confirmation → SNS（[#66](https://github.com/yuuuuuuu168/sakekasu-builder/issues/66)）。共通ログインにはセルフサインアップが無いので役目を終え、旧プールを外すときに一緒に外す |
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuuu168/sakekasu-builder/issues/92)） |
 | DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。プライベートチャンネルではメンションで調査の開始や照会もできる。コンソール側の設定あり（[#67](https://github.com/yuuuuuuu168/sakekasu-builder/issues/67)） |
 | Application Signals による APM | OCR と画像アップロードの2関数を計装。OCR には SLO を2本置き、割ったらアラーム（[#86](https://github.com/yuuuuuuu168/sakekasu-builder/issues/86)） |
@@ -224,10 +223,10 @@ Bedrock では Anthropic のホスト型 Web 検索ツールが使えないた�
 
 ```
 React（右下チャット UI）
-  │ Cognito アクセストークンを Bearer で付与
+  │ 共通ログインのアクセストークンを Bearer で付与
   ▼
 AgentCore Runtime（PUBLIC・東京）
-  │ ① JWT Authorizer（Cognito・allowedClients で限定）
+  │ ① JWT Authorizer（共通ログインのプール・allowedClients で builder のクライアントに限定）
   │ ② アプリ内の JWKS 検証（署名・exp・iss・audience）
   ▼
 Strands Agent（Claude Haiku 4.5 / jp. CRIS）
@@ -519,6 +518,10 @@ AWS_PROFILE=sakekasu-builder aws lambda invoke \
 
 ### 新規ユーザー登録の通知（Issue #66）
 
+**共通ログインへ移ったので役目を終えた。** 共通プールにはセルフサインアップが無い。
+通知は旧ユーザープールに付けたまま残してあり、旧プールを外す別 PR で一緒に外す（[docs/shared-login.md](docs/shared-login.md)）。
+以下は旧プールでの仕組み。
+
 誰かがサインアップして確認を終えると、Cognito の Post Confirmation トリガーが通知 Lambda（`infra/lambda/signup-notifier/`）を呼び、既存のアラートトピック経由で Slack に「メールアドレス・登録時刻（JST）・ユーザープール」を流す。パスワード再設定の確認でも同じトリガーが呼ばれるため、`triggerSource` でサインアップ確認だけに絞っている。
 
 設計上の注意は2点。
@@ -531,6 +534,8 @@ AWS_PROFILE=sakekasu-builder aws lambda invoke \
 到達性の確認（5分ごと）は、**認証情報を持たずに**行う。ソムリエ Runtime と AppSync はあえて認証なしで叩き、**401/403 が返ることを正常**とみなす。これで「エンドポイントが生きている」ことと「認証が働いている」ことを、監視側に鍵を持たせずに確認できる。
 
 実際に会話できるかはカナリア（6時間ごと）が見る。こちらは監視用ユーザーでサインインして短い相談を投げ、応答が返るまでを確認する。毎回 LLM を呼ぶため頻度を抑えている。
+
+**カナリアはいま止めてある。** 共通ログインのクライアントはパスワードで直接サインインできず（MFA も必須）、ソムリエは共通プールのトークンしか受け付けなくなったため、旧プールでサインインするカナリアは必ず落ちる。スケジュールを無効にし、カナリアの3つのアラームは通知だけを切ってある。再開の選択肢は [docs/shared-login.md](docs/shared-login.md) の「カナリア」。下の手順と「カナリアを通すための2箇所」は、旧プールで動いていたときのもの。
 
 ### デプロイ前の準備
 
@@ -702,12 +707,12 @@ SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 9
 - shadcn/ui（@base-ui/react ベース）
 - Framer Motion
 - AWS CDK（AppSync + DynamoDB）
-- Amazon Cognito（UserPool）
+- Amazon Cognito（4 アプリ共通のユーザープールとマネージドログイン。[docs/shared-login.md](docs/shared-login.md)）
 - AWS S3（画像ストレージ）
 - Amplify（フロントエンドホスティング）
 - Amazon Bedrock AgentCore Runtime + AgentCore Memory + Strands Agents（Python）※ソムリエ
 - Amazon Bedrock（Claude Haiku 4.5）※OCR・テイスティングノート・ソムリエ
-- react-day-picker（カレンダー）/ qrcode.react（MFA の QR コード）
+- react-day-picker（カレンダー）
 - Vitest + Testing Library + fast-check（フロントと infra の CDK）、Jest（ソムリエの CDK）、pytest（ソムリエ本体）
 
 ## プロジェクト構成
@@ -715,7 +720,7 @@ SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 9
 ```
 src/
   features/
-    auth/        # 認証（Cognito・MFA・パスワードリセット）
+    auth/        # 認証（共通ログインへのリダイレクトとサインアウト）
     purchase/    # 購入登録
     drinking/    # 飲酒登録
     records/     # 記録一覧・検索・フィルタ
@@ -734,7 +739,8 @@ infra/
                  #              health-check, slack-notifier, sommelier-canary,
                  #              signup-notifier, billing-notifier,
                  #              devops-agent-webhook）
-  scripts/       # amplify_outputs.json 生成、サムネイルのバックフィル
+  scripts/       # amplify_outputs.json 生成、サムネイルのバックフィル、
+                 # 共通ログインへの移行に伴う持ち主（sub）の付け替え
 sommelier/       # AgentCore プロジェクト（ソムリエエージェント）
   app/sommelier/ # Strands Agent 本体（Python）
   agentcore/     # AgentCore 設定と CDK
@@ -749,6 +755,7 @@ aidlc/           # AI-DLC のルールと成果物
 
 | ドキュメント | 内容 |
 |------------|------|
+| [docs/shared-login.md](docs/shared-login.md) | 共通ログインへの切り替え（変わったこと・旧プールの扱い・カナリア・旧 sub から新 sub へのデータの付け替え手順） |
 | [docs/agentcore-phase1-design.md](docs/agentcore-phase1-design.md) | ソムリエ Phase 1 の設計（認証の二段構え・ツール設計・決定事項） |
 | [docs/devops-agent.md](docs/devops-agent.md) | DevOps Agent のセットアップ手順・Slack の双方向通信・優先度の割り当て・カスタムスキル・費用 |
 | [docs/application-signals.md](docs/application-signals.md) | Application Signals の計装対象・デプロイ後の確認手順・SLO の決め方・費用 |
@@ -772,7 +779,9 @@ npm install
 AWS_PROFILE=sakekasu-builder npx cdk diff --context env=dev
 ```
 
-デプロイ後に AppSync のエンドポイント等が変わったときは、`infra/scripts/generate-outputs.ts` を実行して `amplify_outputs.json` を作り直す。
+デプロイ後に AppSync のエンドポイント等が変わったときは、`infra/scripts/generate-outputs.ts` を実行して `amplify_outputs.json` を作り直す。認証の値（共通ログイン）は `infra/cdk.json` の `sharedAuth` から書く。
+
+ローカルの画面（`npm run dev`）も共通ログインでログインする。戻り先として登録してあるのは `http://localhost:5173/` だけなので、ポートを変えるとログインできない。
 
 ## デプロイ（CDK）
 
@@ -815,6 +824,9 @@ npx vitest run src/
 cd infra
 npm test
 
+# 運用スクリプト（pytest。AWS へは出ない）
+uv run --with boto3 --with pytest pytest infra/scripts/tests
+
 # ソムリエ本体（pytest。AWS へは出ない）
 cd sommelier/app/sommelier
 uv run pytest
@@ -824,7 +836,7 @@ cd sommelier/agentcore/cdk
 npm ci && npm test
 ```
 
-同じものを PR とマージのたびに GitHub Actions が走らせる（`.github/workflows/test.yml`）。フロントは lint と型検査も込みで、3系統を別のジョブに分けてある。片方が落ちても、もう片方の結果が残るようにするため。
+同じものを PR とマージのたびに GitHub Actions が走らせる（`.github/workflows/test.yml`）。フロントは lint と型検査も込みで、系統ごとに別のジョブに分けてある。片方が落ちても、もう片方の結果が残るようにするため。
 
 ## デザイン
 

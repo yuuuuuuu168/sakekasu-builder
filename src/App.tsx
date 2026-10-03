@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react';
 import { Amplify } from 'aws-amplify';
-import { ShieldCheck } from 'lucide-react';
 import outputs from '../amplify_outputs.json';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { Toaster } from '@/components/ui/sonner';
@@ -12,11 +11,13 @@ import { CalendarPage } from '@/features/calendar/components/CalendarPage';
 import { SommelierChat } from '@/features/sommelier/components/SommelierChat';
 import { AuthProvider, useAuth } from '@/features/auth/AuthContext';
 import { AuthGuard } from '@/features/auth/components/AuthGuard';
-import { MfaSettingsDialog } from '@/features/auth/components/MfaSettingsDialog';
+import { buildAmplifyConfig, type AppOutputs } from '@/features/auth/amplifyConfig';
 import type { StockDrinkDraft } from '@/features/drinking/types';
 import type { UnifiedRecord } from '@/features/records/types';
 
-Amplify.configure(outputs);
+// ログインは共通ログイン（マネージドログインへのリダイレクト）。戻り先は
+// いま開いているオリジンの / なので、設定はここで組み立てる
+Amplify.configure(buildAmplifyConfig(outputs as AppOutputs, window.location.origin));
 
 type Page = 'purchase' | 'drinking' | 'records' | 'calendar' | 'stats';
 
@@ -29,22 +30,13 @@ function NavigationBar({
   onPageChange: (page: Page) => void;
 }) {
   const { signOut } = useAuth();
-  const [isMfaDialogOpen, setIsMfaDialogOpen] = useState(false);
 
   return (
     <nav className="sticky top-0 z-50 border-b border-gray-200 bg-white/80 backdrop-blur-md dark:border-white/10 dark:bg-dark-bg/80">
-      {/* MFA設定 + サインアウト（誰がログインしているかは出さない） */}
+      {/* サインアウトだけ（誰がログインしているかは出さない）。
+          MFA の登録と入力は共通ログインの画面が受け持つので、ここには置かない */}
       <div className="mx-auto flex max-w-md items-center justify-end px-4 py-2 text-xs">
         <div className="flex shrink-0 items-center gap-1">
-          <button
-            onClick={() => setIsMfaDialogOpen(true)}
-            className="flex items-center gap-1 rounded px-2 py-1 text-gray-500 transition-colors hover:bg-gray-500/10 dark:text-gray-400"
-            data-testid="mfa-settings-button"
-            aria-label="二段階認証の設定"
-          >
-            <ShieldCheck className="size-3.5" />
-            MFA
-          </button>
           <button
             onClick={() => void signOut()}
             className="rounded px-2 py-1 text-sake-red transition-colors hover:bg-sake-red/10"
@@ -54,8 +46,6 @@ function NavigationBar({
           </button>
         </div>
       </div>
-
-      <MfaSettingsDialog open={isMfaDialogOpen} onClose={() => setIsMfaDialogOpen(false)} />
 
       {/* ページ切り替えタブ。5タブを1行に並べると iPhone の幅（390〜402px）では
           最後の「統計」が画面からはみ出るので、狭い画面では絵文字を上・ラベルを下に

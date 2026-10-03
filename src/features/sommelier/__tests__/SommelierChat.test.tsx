@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 vi.mock('@/features/auth/AuthContext', () => ({
-  useAuth: () => ({ user: { userId: 'test-user', email: 'a@example.com' } }),
+  useAuth: () => ({ user: { userId: 'test-user' } }),
 }));
 
 import { SommelierChat } from '../components/SommelierChat';

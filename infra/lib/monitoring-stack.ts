@@ -92,10 +92,27 @@ export interface MonitoringStackProps extends cdk.StackProps {
   sommelierRuntimeArn: string;
   /** フロントの公開 URL（外形監視の対象） */
   siteUrl: string;
-  /** カナリアが使う Cognito */
+  /**
+   * カナリアが使う Cognito。共通ログインへ移ったあとも旧プール（AuthStack）を指す。
+   * 共通ログインのクライアントはパスワードで直接サインインできない（authFlows が空で、
+   * MFA も必須）ため、カナリアの行き先がまだ無い。下の canaryEnabled を参照
+   */
   userPoolId: string;
   /** カナリア専用のクライアント ID（ブラウザ向けとは分ける） */
   canaryUserPoolClientId: string;
+  /**
+   * ソムリエのカナリア（6時間ごとの実会話）を動かすか。既定は true。
+   *
+   * false のときはリソースを消さずに止める。スケジュールを無効にし、カナリアに
+   * 関わる3つのアラーム（失敗・実行失敗・沈黙）の通知を切る。消さないのは、
+   * cdkd で管理しているリソースを減らすと戻すときに作り直しになるのと、
+   * 再開がこのフラグを戻すだけで済むようにするため。
+   *
+   * 共通ログインへ移った時点で false にしている。ソムリエの Runtime は
+   * 共通プールのトークンしか受け付けなくなり、旧プールでサインインする
+   * カナリアは必ず 401/403 で落ちる（docs/shared-login.md の「カナリア」）
+   */
+  canaryEnabled?: boolean;
 }
 
 /**
@@ -550,11 +567,15 @@ export class MonitoringStack extends cdk.Stack {
       }),
     );
 
+    const canaryEnabled = props.canaryEnabled ?? true;
+
     new events.Rule(this, 'SommelierCanarySchedule', {
       ruleName: `${prefix}-sommelier-canary-schedule`,
       // 毎回 LLM を呼ぶため、頻度を抑えて費用を小さくする
       schedule: events.Schedule.rate(cdk.Duration.hours(6)),
       targets: [new targets.LambdaFunction(canary)],
+      // 止めている間はルールごと無効にする（消さない。理由は props の説明）
+      enabled: canaryEnabled,
     });
 
     this.addAlarm('SommelierCanaryFailed', {
@@ -574,6 +595,7 @@ export class MonitoringStack extends cdk.Stack {
       // 6時間に1度しか計測しないため、次の計測までの空白を「異常なし」と
       // みなすと、直っていないのに復旧扱いになってしまう。状態を保たせる
       treatMissingData: cloudwatch.TreatMissingData.MISSING,
+      actionsEnabled: canaryEnabled,
     });
 
     // 監視そのものが動かなくなると異常に気づけないため、実行側も監視する。
@@ -586,6 +608,7 @@ export class MonitoringStack extends cdk.Stack {
         label: '外形監視',
         // 5分ごとに動くので、1時間あれば必ず実行されている
         silenceWindow: cdk.Duration.hours(1),
+        actionsEnabled: true,
       },
       {
         fn: canary,
@@ -593,6 +616,8 @@ export class MonitoringStack extends cdk.Stack {
         label: 'ソムリエのカナリア',
         // 6時間ごとなので、12時間あれば必ず実行されている
         silenceWindow: cdk.Duration.hours(12),
+        // カナリアを止めている間は、沈黙のアラームが必ず鳴る。通知だけ切る
+        actionsEnabled: canaryEnabled,
       },
     ]) {
       this.addAlarm(`WatcherFailure-${watcher.key}`, {
@@ -604,6 +629,7 @@ export class MonitoringStack extends cdk.Stack {
         }),
         threshold: 1,
         evaluationPeriods: 1,
+        actionsEnabled: watcher.actionsEnabled,
       });
 
       this.addAlarm(`WatcherSilent-${watcher.key}`, {
@@ -622,6 +648,7 @@ export class MonitoringStack extends cdk.Stack {
         comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
         // 記録が無い＝一度も動いていない、とみなして異常にする
         treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+        actionsEnabled: watcher.actionsEnabled,
       });
     }
 
@@ -865,6 +892,11 @@ export class MonitoringStack extends cdk.Stack {
       treatMissingData?: cloudwatch.TreatMissingData;
       /** 既定は「しきい値以上で異常」。下回ったら異常にしたい指標で使う */
       comparisonOperator?: cloudwatch.ComparisonOperator;
+      /**
+       * 通知を出すか。既定は true。監視対象を一時的に止めている間に、
+       * アラームを消さずに黙らせるためだけに使う
+       */
+      actionsEnabled?: boolean;
     },
   ): cloudwatch.Alarm {
     // 通知先を作る前に呼ばれると undefined を読んで落ちる。TypeScript は
@@ -889,6 +921,9 @@ export class MonitoringStack extends cdk.Stack {
         cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       // 呼び出しが無い時間帯にデータ欠損で鳴らさない
       treatMissingData: options.treatMissingData ?? cloudwatch.TreatMissingData.NOT_BREACHING,
+      // 止めるときだけ明示する。true を書き込むと、既存の全アラームの定義に
+      // ActionsEnabled が増えて、意味の無い更新がデプロイのたびに出る
+      ...(options.actionsEnabled === false && { actionsEnabled: false }),
     });
 
     alarm.addAlarmAction(new actions.SnsAction(this.alertTopic));

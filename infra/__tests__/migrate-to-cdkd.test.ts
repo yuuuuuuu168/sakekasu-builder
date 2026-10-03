@@ -7,6 +7,7 @@ import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
 import { HealthGlobalStack } from '../lib/health-global-stack.js';
+import { TEST_SHARED_AUTH } from './shared-auth-fixture.js';
 
 /**
  * scripts/migrate-to-cdkd.sh が並べている移行順を、実際の Export と ImportValue の
@@ -82,7 +83,7 @@ function synth() {
   const authStack = new AuthStack(app, 'sakekasu-dev-auth', { envName: 'dev', env });
   const apiStack = new ApiStack(app, 'sakekasu-dev-api', {
     envName: 'dev',
-    userPool: authStack.userPool,
+    sharedAuth: TEST_SHARED_AUTH,
     env,
   });
   const monitoringStack = new MonitoringStack(app, 'sakekasu-dev-monitoring', {
@@ -177,7 +178,18 @@ describe('migrate-to-cdkd.sh の移行順', () => {
   it('検査の前提として、スタック間の Export と ImportValue が実在する', () => {
     expect(exportedNames(templates.auth).size).toBeGreaterThan(0);
     expect(importedNames(templates.monitoring).size).toBeGreaterThan(0);
-    expect(importedNames(templates.api).size).toBeGreaterThan(0);
+  });
+
+  /**
+   * 共通ログインへ移ったので、api は auth の UserPool を読まなくなった。
+   * それでも auth は monitoring（カナリア）に UserPool の Export を出し続けるので、
+   * デプロイ中に「読まれている Export を消す」形にはならない
+   */
+  it('api は auth の Export を読まず、auth の UserPool の Export は monitoring が読み続ける', () => {
+    const authExports = exportedNames(templates.auth);
+    expect([...importedNames(templates.api)].filter((name) => authExports.has(name))).toEqual([]);
+    expect([...importedNames(templates.monitoring)].filter((name) => authExports.has(name)).length)
+      .toBeGreaterThan(0);
   });
 });
 
