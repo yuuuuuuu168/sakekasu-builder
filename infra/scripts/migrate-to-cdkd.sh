@@ -92,16 +92,91 @@ cdkd_state_exists() {
 # 状態を置くバケットが別のリージョンにあっても cdkd が向き先を直すので、
 # こちらは気にしなくてよい。
 #
-# なお 0.291.16 では Cognito の UserPoolClient も取り込めず、物理 ID を
-# "<UserPoolId>|<ClientId>" の形で --resource に渡す回避が要った。これは
-# 0.291.23 で直っている（go-to-k/cdkd#3701）ので、こちらでは書いていない。
-# UserPoolClient の取り込みで落ちたら、まずここを疑う。
+# Cloud Control の識別子が CloudFormation の物理 ID と違う型の対応表を作る。
+#
+# cdkd は取り込むリソースの識別子に CloudFormation の物理 ID を使うが、Cloud
+# Control 側が別の形を求める型がある。そのままだと
+# 「Identifier ... is not valid for identifier [...]」で落ちる。
+# --resource で明示すれば通る（--resource を1つでも渡すと指定したものしか
+# 取り込まなくなるので、残りを自動解決させる --auto も付ける）。
+#
+# 2026-10-03 に手順7 の前検査で当たったのは3型。どれも物理 ID と識別子の
+# 食い違いという同じ根で、issue #228 の AWS::IAM::Policy と同じ家族。
+#
+#   AWS::Cognito::UserPoolClient  要 "<UserPoolId>|<ClientId>"  物理 ID は ClientId だけ
+#   AWS::Logs::MetricFilter       要 "<LogGroupName>|<FilterName>"  物理 ID は FilterName だけ
+#   AWS::AppSync::GraphQLApi      要 "<ApiId>"  物理 ID は ARN
+#
+# UserPoolClient の件は 0.291.16 で先行リポジトリが踏んでおり、
+# go-to-k/cdkd#3701 で 0.291.23 修正済みと読んで一度この回避を外したが、
+# 0.291.31 でも現に落ちた。手順5 の cdkd diff では出ず、取り込みで初めて出る。
+#
+# 標準出力に --resource の引数を1行1トークンで書く。呼ぶ側が配列に読む。
+identifier_overrides() {
+  local name="$1" region="$2" resources logical phys pool pools filters log_group
+  resources="$(aws cloudformation describe-stack-resources --stack-name "$name" --region "$region" \
+    --query 'StackResources[].[LogicalResourceId,ResourceType,PhysicalResourceId]' --output text)"
+
+  local out=()
+
+  # Cognito の UserPoolClient。同じスタックの User Pool と組にする
+  if grep -q $'\tAWS::Cognito::UserPoolClient\t' <<<"$resources"; then
+    pools="$(awk -F'\t' '$2 == "AWS::Cognito::UserPool" { print $3 }' <<<"$resources")"
+    if [ -z "$pools" ] || [ "$(grep -c . <<<"$pools")" -ne 1 ]; then
+      echo "::error::${name} の UserPoolClient に対応する User Pool を1つに決められません" >&2
+      return 1
+    fi
+    pool="$pools"
+    while IFS=$'\t' read -r logical _ phys; do
+      out+=("--resource" "${logical}=${pool}|${phys}")
+    done < <(awk -F'\t' '$2 == "AWS::Cognito::UserPoolClient"' <<<"$resources")
+  fi
+
+  # Logs の MetricFilter。物理 ID が FilterName なので、そこから LogGroupName を引く。
+  # describe-metric-filters の --filter-name-prefix は --log-group-name と一緒でないと
+  # 効かないため、リージョン全体を引いて名前で突き合わせる
+  if grep -q $'\tAWS::Logs::MetricFilter\t' <<<"$resources"; then
+    filters="$(aws logs describe-metric-filters --region "$region" \
+      --query 'metricFilters[].[filterName,logGroupName]' --output text)"
+    while IFS=$'\t' read -r logical _ phys; do
+      log_group="$(awk -F'\t' -v f="$phys" '$1 == f { print $2 }' <<<"$filters")"
+      if [ -z "$log_group" ] || [ "$(grep -c . <<<"$log_group")" -ne 1 ]; then
+        echo "::error::${name} の ${logical}（${phys}）のロググループを1つに決められません" >&2
+        return 1
+      fi
+      out+=("--resource" "${logical}=${log_group}|${phys}")
+    done < <(awk -F'\t' '$2 == "AWS::Logs::MetricFilter"' <<<"$resources")
+  fi
+
+  # AppSync の GraphQLApi。物理 ID が ARN なので ApiId だけを渡す
+  while IFS=$'\t' read -r logical _ phys; do
+    [ -n "$logical" ] || continue
+    out+=("--resource" "${logical}=${phys##*/}")
+  done < <(awk -F'\t' '$2 == "AWS::AppSync::GraphQLApi"' <<<"$resources")
+
+  if [ "${#out[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  printf '%s\n' "${out[@]}" --auto
+}
+
 cdkd_import() {
   local name="$1" region="$2"
   shift 2
+
+  local raw overrides=()
+  if ! raw="$(identifier_overrides "$name" "$region")"; then
+    exit 1
+  fi
+  if [ -n "$raw" ]; then
+    mapfile -t overrides <<<"$raw"
+  fi
+
   AWS_REGION="$region" AWS_DEFAULT_REGION="$region" \
     npx cdkd import "$name" \
       --record-resource-mapping "${mapping_dir}/mapping-${name}.json" \
+      ${overrides[@]+"${overrides[@]}"} \
       "$@" -c "env=${env_name}"
 }
 

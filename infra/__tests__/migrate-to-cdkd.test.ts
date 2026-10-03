@@ -180,3 +180,70 @@ describe('migrate-to-cdkd.sh の移行順', () => {
     expect(importedNames(templates.api).size).toBeGreaterThan(0);
   });
 });
+
+/**
+ * Cloud Control の識別子が CloudFormation の物理 ID と違う型への手当て。
+ *
+ * cdkd は取り込むリソースの識別子に CloudFormation の物理 ID を使うが、Cloud
+ * Control 側が別の形を求める型がある。そのままだと
+ * 「Identifier ... is not valid for identifier [...]」で落ちる。
+ *
+ * 2026-10-03 の手順7 の前検査で5件当たった（auth の UserPoolClient 2つと
+ * MetricFilter 1つ、api の MetricFilter 1つと GraphQLApi 1つ）。スクリプトが
+ * --resource で明示して回避するので、その対象が落ちていないかを見る。
+ *
+ * UserPoolClient の件は go-to-k/cdkd#3701 で 0.291.23 修正済みと読んで一度
+ * 回避を外したが、0.291.31 でも落ちた。手順5 の cdkd diff では出ず、
+ * 取り込みで初めて出るため、この検査が唯一の歯止めになる。
+ */
+describe('migrate-to-cdkd.sh の識別子の手当て', () => {
+  const script = readFileSync(SCRIPT_PATH, 'utf8');
+
+  /** 物理 ID と Cloud Control の識別子が食い違う型と、スタックごとの個数 */
+  const NEEDS_OVERRIDE = [
+    { type: 'AWS::Cognito::UserPoolClient', counts: { auth: 2 } },
+    { type: 'AWS::Logs::MetricFilter', counts: { auth: 1, api: 1 } },
+    { type: 'AWS::AppSync::GraphQLApi', counts: { api: 1 } },
+  ] as const;
+
+  it.each(NEEDS_OVERRIDE.map((e) => e.type))('%s を手当てしている', (type) => {
+    expect(
+      script.includes(type),
+      `${type} の識別子の解決がスクリプトから消えている。取り込みが` +
+        ' 「Identifier ... is not valid for identifier」で落ちる',
+    ).toBe(true);
+  });
+
+  it('--resource を渡すときは --auto も渡す', () => {
+    // --resource を1つでも渡すと、指定したものしか取り込まなくなる。
+    //
+    // 見るのはコメントを除いたコード側。スクリプトの解説にも --auto と
+    // 書いてあるので、素朴に全文を探すと引数から消えても気づけない
+    const code = script
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+
+    expect(code, '--resource を組み立てていない').toMatch(/--resource/);
+    expect(code, '--auto が無いと指定した数件だけが取り込まれる').toMatch(/--auto/);
+  });
+
+  it('手当てが要るリソースの数が変わっていない', () => {
+    // 増えていたら、その新顔でも識別子の解決が効くかを実物で確かめてから
+    // ここの数を直す。黙って増やすと取り込みの途中で落ちる
+    const templates = synth();
+
+    for (const { type, counts } of NEEDS_OVERRIDE) {
+      for (const [stack, expected] of Object.entries(counts)) {
+        const found = Object.keys(
+          templates[stack as keyof typeof templates].findResources(type),
+        ).length;
+        expect(
+          found,
+          `${stack} の ${type} が ${expected} 件から ${found} 件に変わった。` +
+            ' identifier_overrides で解決できるか確かめてから数を直すこと',
+        ).toBe(expected);
+      }
+    }
+  });
+});
