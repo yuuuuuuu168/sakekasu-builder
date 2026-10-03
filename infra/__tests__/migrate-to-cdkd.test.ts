@@ -317,6 +317,70 @@ describe('migrate-to-cdkd.sh の aws 呼び出し', () => {
   });
 });
 
+/**
+ * CloudFormation への戻しは、どのスタックもまだ移っていないときだけ。
+ *
+ * `pending` は「CloudFormation のスタックが残っているもの」しか集めない。
+ * 移行済みのスタック（cdkd の状態があり CloudFormation のスタックは無い）は
+ * そこに入らない。前検査が失敗したときにそのまま `engine=cfn` を返すと、
+ * deploy が `cdk deploy --all` を打って移行済みのぶんまで対象にする。
+ * CloudFormation から見ればスタックが存在しないので、ゼロから作りに行く。
+ *
+ * スクリプト冒頭が警告しているのと同じ事故になる。同じ名前の DynamoDB
+ * テーブルや S3 バケットで落ちるか、Cognito の UserPool のように名前が
+ * 重複できるものは2つ目を黙って作る（利用者のアカウントが空の新しい
+ * プールに切り替わる）。
+ */
+describe('migrate-to-cdkd.sh の混在時の歯止め', () => {
+  const script = readFileSync(SCRIPT_PATH, 'utf8');
+  const code = script
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+
+  it('engine=cfn を返す前に移行済みのスタックを調べている', () => {
+    const fallback = code.indexOf("engine=cfn");
+    expect(fallback, 'engine=cfn を返す箇所が無い').toBeGreaterThan(0);
+
+    // 直前のブロックで state を見ていること
+    const before = code.slice(0, fallback);
+    expect(before, '移行済みを集めていない').toMatch(/migrated\+=\(/);
+    expect(before, 'cdkd の状態を見ていない').toMatch(/cdkd_state_exists/);
+  });
+
+  it('移行済みがあれば止める', () => {
+    expect(code, '止める判定が無い').toMatch(/\$\{#migrated\[@\]\}.*-ne 0/);
+    expect(script, '理由を出していない').toMatch(/CloudFormation へは戻しません/);
+  });
+
+  it('止めるときは engine= を書かない', () => {
+    // engine= を書いてから exit すると、deploy 側がそれを読んで走ってしまう。
+    // 歯止めから engine=cfn の行までに exit が挟まっていること
+    const guard = code.indexOf('migrated+=(');
+    const fallback = code.indexOf('engine=cfn');
+    expect(guard).toBeGreaterThan(0);
+    expect(fallback).toBeGreaterThan(guard);
+
+    const between = code.slice(guard, fallback);
+    expect(between, '歯止めと engine=cfn のあいだに exit が無い').toMatch(/exit 1/);
+  });
+
+  it('空配列の展開が bash 3.2 の set -u で落ちない', () => {
+    // migrated が空のとき "${migrated[@]}" を素で展開すると unbound variable。
+    // 数を見るだけの ${#migrated[@]} は空でも安全なので、そちらを使う
+    const bare = code
+      .split('\n')
+      .map((line, index) => ({ line, number: index + 1 }))
+      .filter(({ line }) => /"\$\{migrated\[@\]\}"/.test(line))
+      .filter(({ line }) => !/\$\{migrated\[@\]\+/.test(line))
+      // echo の中で中身を並べるのは、その時点で空でないことが確かめてある
+      .filter(({ line }) => !/::error::/.test(line))
+      .map(({ line, number }) => `${number}行目: ${line.trim()}`);
+
+    expect(bare, 'bash 3.2 の set -u で落ちる展開').toEqual([]);
+  });
+});
+
 describe('migrate-to-cdkd.sh の bash 3.2 互換', () => {
   const script = readFileSync(SCRIPT_PATH, 'utf8');
   const code = script
