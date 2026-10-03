@@ -1,19 +1,29 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
   ALLOWED_HOSTS,
+  checkLockfiles,
+  discoverLockfiles,
   findForeignResolved,
-  checkLockfile,
 } from '../scripts/check-lockfile-registry.mjs';
 
 /**
  * lockfile の取得元の検査。
  *
- * cdk-diff.yml は認証情報を入れたあとに PR 由来の cdkd を実行する。lockfile の
- * `resolved` を自前のターゲットへ向けられると、そこが任意コードの実行点になる
- * （PR #230 で aws-security-agent が指摘、MEDIUM）。
+ * ワークフローは AWS の認証情報を入れる前に依存を取り、テストを走らせる。
+ * lockfile の `resolved` を自前のターゲットへ向けられると、そこが任意コードの
+ * 実行点になる。ジョブには id-token: write があるので、動いたコードは自分で
+ * OIDC トークンを取って AWS のロールに入れる（PR #230 の指摘）。
+ *
+ * 見落としの歴史があるので、どの lockfile を見ているかも検査する。最初の版は
+ * infra 本体しか見ておらず、`npm test` が import する lambda の9本が素通り
+ * していた（HIGH の指摘）。
  */
 
+const INFRA = new URL('..', import.meta.url).pathname;
 const REGISTRY = 'https://registry.npmjs.org';
 
 function lockWith(packages: Record<string, unknown>) {
@@ -73,9 +83,87 @@ describe('findForeignResolved', () => {
   });
 });
 
+describe('discoverLockfiles', () => {
+  it('infra 本体と lambda ごとの lockfile を集める', () => {
+    const root = mkdtempSync(join(tmpdir(), 'lockfiles-'));
+    writeFileSync(join(root, 'package-lock.json'), '{}');
+    for (const name of ['alpha', 'beta']) {
+      mkdirSync(join(root, 'lambda', name), { recursive: true });
+      writeFileSync(join(root, 'lambda', name, 'package-lock.json'), '{}');
+    }
+    // lockfile を持たない lambda と、ディレクトリでないものは拾わない
+    mkdirSync(join(root, 'lambda', 'no-lock'), { recursive: true });
+    writeFileSync(join(root, 'lambda', 'README.md'), '');
+
+    expect(discoverLockfiles(root).map((p) => p.slice(root.length + 1)).sort()).toEqual([
+      'lambda/alpha/package-lock.json',
+      'lambda/beta/package-lock.json',
+      'package-lock.json',
+    ]);
+  });
+
+  it('lambda ディレクトリが無くても落ちない', () => {
+    const root = mkdtempSync(join(tmpdir(), 'lockfiles-'));
+    writeFileSync(join(root, 'package-lock.json'), '{}');
+
+    expect(discoverLockfiles(root)).toHaveLength(1);
+  });
+
+  it('何も無ければ空', () => {
+    expect(discoverLockfiles(mkdtempSync(join(tmpdir(), 'lockfiles-')))).toEqual([]);
+  });
+});
+
+describe('checkLockfiles', () => {
+  it('1本も見つからないのは異常として落とす', () => {
+    // 黙って何も検査しない状態が緑になるのを避ける
+    expect(() => checkLockfiles([])).toThrow(/1本も見つかりませんでした/);
+  });
+
+  it('lockfile ごとに結果を返す', () => {
+    const root = mkdtempSync(join(tmpdir(), 'lockfiles-'));
+    const good = join(root, 'good.json');
+    const bad = join(root, 'bad.json');
+    writeFileSync(good, JSON.stringify(lockWith({ 'node_modules/a': { resolved: `${REGISTRY}/a` } })));
+    writeFileSync(
+      bad,
+      JSON.stringify(lockWith({ 'node_modules/b': { resolved: 'https://example.invalid/b' } })),
+    );
+
+    expect(checkLockfiles([good, bad])).toEqual([
+      { lockPath: good, offenders: [] },
+      {
+        lockPath: bad,
+        offenders: [{ name: 'node_modules/b', resolved: 'https://example.invalid/b' }],
+      },
+    ]);
+  });
+});
+
 describe('このリポジトリの lockfile', () => {
-  it('infra/package-lock.json の取得元はすべて許可したホスト', () => {
-    expect(checkLockfile(new URL('../package-lock.json', import.meta.url).pathname)).toEqual([]);
+  const discovered = discoverLockfiles(INFRA);
+
+  it('infra 本体と lambda の全部を見ている', () => {
+    // 最初の版は infra 本体しか見ておらず、lambda の9本が素通りしていた。
+    // deploy.yml は lambda ごとに npm ci し、npm test が
+    // lambda/**/__tests__ を拾ってそれらのモジュールを import する
+    const relative = discovered.map((p) => p.slice(INFRA.length)).sort();
+
+    expect(relative).toContain('package-lock.json');
+    expect(
+      relative.filter((p) => p.startsWith('lambda/')).length,
+      'lambda の lockfile を拾えていない',
+    ).toBeGreaterThan(0);
+
+    // lambda/*/package-lock.json の実数と一致するか
+    const onDisk = discoverLockfiles(INFRA).filter((p) => p.includes('/lambda/'));
+    expect(relative.filter((p) => p.startsWith('lambda/'))).toHaveLength(onDisk.length);
+  });
+
+  it('見つけた全部の取得元が許可したホスト', () => {
+    for (const { lockPath, offenders } of checkLockfiles(discovered)) {
+      expect(offenders, `${lockPath} が別の取得元を指している`).toEqual([]);
+    }
   });
 
   it('許可するホストは npm レジストリだけ', () => {
