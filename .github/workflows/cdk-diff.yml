@@ -86,7 +86,18 @@ jobs:
             if (body.length > limit) {
               body = body.slice(0, limit) + '\n...（長すぎるため省略。全文は Actions のログを参照）';
             }
-            const full = `${marker}\n## cdkd diff\n\n\`\`\`\n${body}\n\`\`\``;
+            // 囲みは本文に合わせて伸ばす。
+            //
+            // cdkd diff の出力には PR 側が決められる値（コンストラクト ID、
+            // プロパティ、タグ）が入る。そこにバッククォート3つが混ざると
+            // 囲みが途中で閉じ、以降が生きた Markdown として描画される。
+            // このコメントは pull-requests: write を持つ CI ボット名義なので、
+            // 「差分なし」のような偽の表示を信頼される見た目で出せてしまう
+            // （aws-security-agent の指摘）。本文中の最長連続より1つ長い
+            // 囲みを使えば、本文を書き換えずに閉じられなくできる
+            const longest = (body.match(/`+/g) ?? []).reduce((max, run) => Math.max(max, run.length), 0);
+            const fence = '`'.repeat(Math.max(3, longest + 1));
+            const full = `${marker}\n## cdkd diff\n\n${fence}\n${body}\n${fence}`;
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,

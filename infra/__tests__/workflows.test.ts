@@ -91,6 +91,39 @@ describe('パイプの失敗検知', () => {
     }
   });
 
+  it('コメントの囲みが本文のバッククォートで閉じられない', () => {
+    // cdkd diff の出力には PR 側が決められる値が入る。そこにバッククォート
+    // 3つが混ざると囲みが途中で閉じ、以降が CI ボット名義のコメントで
+    // 生きた Markdown として描画される（aws-security-agent の指摘）。
+    //
+    // 固定の ``` を使っていないことを確かめるだけでは弱いので、
+    // ワークフローから囲みを決める2行を取り出して実際に動かす
+    const longestLine = source.split('\n').find((l) => l.includes('const longest'));
+    const fenceLine = source.split('\n').find((l) => l.includes('const fence'));
+    expect(longestLine, '囲みの長さを決める行が無い').toBeDefined();
+    expect(fenceLine, '囲みを組む行が無い').toBeDefined();
+
+    const computeFence = new Function(
+      'body',
+      `${longestLine}\n${fenceLine}\nreturn fence;`,
+    ) as (body: string) => string;
+
+    const backtick = '`';
+    for (const [label, body] of [
+      ['バッククォート無し', 'Stack foo\n  [+] Bar'],
+      ['囲みと同じ3つ', `description: ${backtick.repeat(3)}\n## 差分なし`],
+      ['それより長い5つ', `tag: ${backtick.repeat(5)}x`],
+      ['単体のバッククォート', `name: ${backtick}foo${backtick}`],
+    ] as const) {
+      const fence = computeFence(body);
+      expect(fence.length, `${label}: 囲みが3文字未満`).toBeGreaterThanOrEqual(3);
+      expect(
+        body.includes(fence),
+        `${label}: 本文が囲みと同じ並びを含んでいる。コメントが途中で閉じる`,
+      ).toBe(false);
+    }
+  });
+
   it('diff の出力を投稿するステップが失敗時にも走る', () => {
     // pipefail で diff ステップが落ちたとき、既定だと後続が飛ばされて
     // エラー内容が PR に出ない。
