@@ -113,37 +113,26 @@ describe('パイプの失敗検知', () => {
     }
   });
 
-  it('コメントの囲みが本文のバッククォートで閉じられない', () => {
-    // cdkd diff の出力には PR 側が決められる値が入る。そこにバッククォート
-    // 3つが混ざると囲みが途中で閉じ、以降が CI ボット名義のコメントで
-    // 生きた Markdown として描画される（aws-security-agent の指摘）。
-    //
-    // 固定の ``` を使っていないことを確かめるだけでは弱いので、
-    // ワークフローから囲みを決める2行を取り出して実際に動かす
-    const longestLine = source.split('\n').find((l) => l.includes('const longest'));
-    const fenceLine = source.split('\n').find((l) => l.includes('const fence'));
-    expect(longestLine, '囲みの長さを決める行が無い').toBeDefined();
-    expect(fenceLine, '囲みを組む行が無い').toBeDefined();
+  it('コメントの組み立てを検査済みのモジュールに任せている', () => {
+    // 本文は PR 側が中身を決められる。ワークフローに直書きすると単体で
+    // 試せないので、diff-comment.cjs に出して検査してある
+    // （infra/__tests__/diff-comment.test.ts）。
+    // ここでは、ワークフローがそれを使っていること、組み立てを手元で
+    // やり直していないことを見る
+    expect(source, 'diff-comment.cjs を使っていない').toContain(
+      'infra/scripts/diff-comment.cjs',
+    );
+    expect(source, 'buildComment を呼んでいない').toContain('buildComment(');
 
-    const computeFence = new Function(
-      'body',
-      `${longestLine}\n${fenceLine}\nreturn fence;`,
-    ) as (body: string) => string;
+    // 囲みを直書きする形に戻っていないか
+    const inlineFence = source
+      .split('\n')
+      .map((line, index) => ({ line: line.trim(), number: index + 1 }))
+      .filter(({ line }) => !line.startsWith('#') && !line.startsWith('//'))
+      .filter(({ line }) => /\\`\\`\\`|'`'\.repeat|`{3}\\n\$\{body\}/.test(line))
+      .map(({ line, number }) => `${number}行目: ${line}`);
 
-    const backtick = '`';
-    for (const [label, body] of [
-      ['バッククォート無し', 'Stack foo\n  [+] Bar'],
-      ['囲みと同じ3つ', `description: ${backtick.repeat(3)}\n## 差分なし`],
-      ['それより長い5つ', `tag: ${backtick.repeat(5)}x`],
-      ['単体のバッククォート', `name: ${backtick}foo${backtick}`],
-    ] as const) {
-      const fence = computeFence(body);
-      expect(fence.length, `${label}: 囲みが3文字未満`).toBeGreaterThanOrEqual(3);
-      expect(
-        body.includes(fence),
-        `${label}: 本文が囲みと同じ並びを含んでいる。コメントが途中で閉じる`,
-      ).toBe(false);
-    }
+    expect(inlineFence, '囲みをワークフローに直書きしている').toEqual([]);
   });
 
   it('diff の出力を投稿するステップが失敗時にも走る', () => {
