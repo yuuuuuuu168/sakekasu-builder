@@ -404,7 +404,13 @@ account 232791540685 (or access is denied). Refusing to use it.
 
 あわせて、セキュリティレビュー（PR #151）で挙がった2件をここで入れる。
 
-**合成と差分を分ける。** いまの `cdk-diff.yml` は認証情報を入れたあとに `cdk diff` を走らせている。`--ignore-scripts` は npm のインストール時スクリプトを止めるが、CDK アプリのコードは合成時に実行されるため、PR に AWS SDK の呼び出しを仕込めば認証情報付きで動く。認証情報を入れる前に `npx cdk synth --all -q` を済ませ、そのあとは合成済みのアセンブリだけを読ませる。これで PR のコードが認証情報に触れる経路が消える（[#131](https://github.com/yuuuuuuu168/sakekasu-builder/issues/131) にも効く）。
+**合成と差分を分ける。** いまの `cdk-diff.yml` は認証情報を入れたあとに `cdk diff` を走らせている。`--ignore-scripts` は npm のインストール時スクリプトを止めるが、CDK アプリのコードは合成時に実行されるため、PR に AWS SDK の呼び出しを仕込めば認証情報付きで動く。認証情報を入れる前に `npx cdk synth --all -q` を済ませ、そのあとは合成済みのアセンブリだけを読ませる（[#131](https://github.com/yuuuuuuu168/sakekasu-builder/issues/131) の1番）。
+
+**これは部分的な対処。** 消えるのは「合成時にアプリのコードが走る」経路だけ。`infra/package-lock.json` は PR が書き換えられるので、`@go-to-k/cdkd` を自前のターゲットに差し替えれば、認証後に動く `cdkd` 自体が PR のコードになる。`--ignore-scripts` が止めるのはインストール時スクリプトで、意図して実行する本体には効かない。差し替え前の `cdk diff` も `aws-cdk` について同じ形だった。
+
+`pull_request` ではワークフローの定義自体が PR のブランチから読まれるため、ワークフロー内の対策では閉じない。塞ぐには `pull_request_target` に移して信頼できる ref を checkout するか、PR のワークフローから OIDC を外すことになる。#131 の前提（private・fork 無し・PR を開けるのは admin 本人だけ）が変わる前にやる作業として、そちらに記録してある。
+
+**合成のステップで `CDK_DEFAULT_ACCOUNT` を明示する。** この値は本来 CDK CLI が認証情報から入れる。認証前に合成すると undefined になり、`bin/app.ts` の `env.account` が未定義のスタックになって、テンプレート中のアカウント ID が `Ref: AWS::AccountId` に化ける。デプロイ時には同じ値に解決されるが、認証ありで合成した場合と別物のテンプレートになる。手元で測ると4スタックすべてで差が出た（auth 36行 / api 78行 / monitoring 79行 / health-global 62行）。#131 にも「PR #130 の作業中に実際に踏んだ」と記録がある。
 
 渡し方は `CDKD_APP` 環境変数が楽。cdkd は `-a, --app` の値として「合成済みのクラウドアセンブリのディレクトリ」を受け取り、省略時は `CDKD_APP`、次に `cdk.json` の `app` を見る。ジョブの `env` に `CDKD_APP: cdk.out` を置けば、`migrate-to-cdkd.sh` の中から呼ばれる `cdkd import` まで含めて、どの呼び出しも合成し直さない。コマンドごとに `--app` を書き足すより漏れにくい。
 
