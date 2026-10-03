@@ -543,6 +543,37 @@ Failed to read state for stack sakekasu-kakeibo-dev-api: Unsupported state schem
 
 state バケット `cdkd-state-232791540685` は3リポジトリの共用で、先行の2本（と ReinventPlanner）はより新しい cdkd で書いている。こちらの 0.291.31 は 1〜8 までしか読めない。自分のスタックの処理には影響しないが、出力の大半がこれで埋まる。**窓を閉じたあとに cdkd を上げる。**
 
+### スクリプト自身が打つ aws の資格情報
+
+手順9 をマージした直後の deploy がここで落ちた。
+
+```
+aws: [ERROR]: An error occurred (AccessDenied) when calling the DescribeStacks operation:
+  User: .../sakekasu-github-actions-deploy/GitHubActions is not authorized to perform:
+  cloudformation:DescribeStacks on resource: .../sakekasu-dev-health-global/*
+```
+
+CI でワークフローが引き受けるのは `sakekasu-github-actions-deploy`。このロールは
+`sts:AssumeRole` しか持たず、実権限は `sakekasu-cdkd-deploy` の側にある。cdkd は
+`CDKD_ROLE_ARN` を自分で読んで引き受けるが、**`migrate-to-cdkd.sh` が直に打つ
+`aws` コマンドには効かない**。手元から打つときは人間様の資格情報がそのまま権限を
+持っているので、ここまで一度も出なかった。
+
+スクリプトの側でも同じロールを引き受けるようにした。`aws_cli` を通して打ち、
+`CDKD_ROLE_ARN` が無ければ素の `aws` に落ちる（手元から打つ経路）。
+
+**引き受けた資格情報を環境変数として外に出さない。** cdkd にまで渡ると、
+`sakekasu-cdkd-deploy` から `sakekasu-cdkd-deploy` を引き受けようとして落ちる
+（信頼ポリシーが許すのは `sakekasu-github-actions-deploy` だけ）。呼び出しごとに
+`env` で渡している。
+
+`cfn_exists` は権限の失敗を握りつぶさず落とす作りだったので、スタックの有無を
+取り違えたまま先へ進むことはなかった。`cdkd deploy` にも到達していない。
+
+検査を4件足した。素の `aws` を打っていないこと、引き受けと失敗時の停止が
+残っていること、資格情報を `export` していないこと、空配列の展開が bash 3.2 の
+`set -u` で落ちない書き方であること。
+
 ### 型スキーマの読み取り権限
 
 PR #230 の `cdkd diff` が毎回これを出していた。

@@ -256,6 +256,67 @@ describe('migrate-to-cdkd.sh の識別子の手当て', () => {
  * 「mapfile: command not found」を出しながら --resource を1つも渡さずに走り、
  * 前検査が同じ失敗を繰り返した。警告が流れるだけで止まらないので気づきにくい。
  */
+/**
+ * スクリプト自身が打つ aws コマンドの資格情報。
+ *
+ * CI で渡ってくるのは `sakekasu-github-actions-deploy` の資格情報で、この
+ * ロールは `sts:AssumeRole` しか持たない。実権限は `sakekasu-cdkd-deploy` に
+ * ある。cdkd は CDKD_ROLE_ARN を自分で読んで引き受けるが、それはスクリプトの
+ * aws コマンドには効かない。
+ *
+ * 2026-10-03、手順9 をマージした直後の deploy がここで落ちた
+ * （DescribeStacks の AccessDenied）。素の `aws` を1つでも足すと同じ形で
+ * 再発する。
+ */
+describe('migrate-to-cdkd.sh の aws 呼び出し', () => {
+  const script = readFileSync(SCRIPT_PATH, 'utf8');
+  const codeLines = script
+    .split('\n')
+    .map((line, index) => ({ line, number: index + 1 }))
+    .filter(({ line }) => !/^\s*#/.test(line));
+
+  it('aws は aws_cli 経由で打つ（ロールを引き受ける sts だけが例外）', () => {
+    // 素の `aws` は権限を持たないロールで走る。見逃すと AccessDenied で
+    // deploy が止まる
+    const bare = codeLines
+      // `aws_cli` は「aws」の後ろが空白でないので \baws\s+ には当たらない
+      .filter(({ line }) => /\baws\s+[a-z]/.test(line))
+      .filter(({ line }) => !/\baws\s+sts\s+assume-role\b/.test(line))
+      .map(({ line, number }) => `${number}行目: ${line.trim()}`);
+
+    expect(bare, '素の aws を打っている。aws_cli を使うこと').toEqual([]);
+  });
+
+  it('aws_cli と引き受けの両方が残っている', () => {
+    const code = codeLines.map(({ line }) => line).join('\n');
+
+    expect(code, 'aws_cli が無い').toMatch(/aws_cli\(\)\s*\{/);
+    expect(code, 'ロールを引き受けていない').toMatch(/aws sts assume-role/);
+    expect(code, '引き受けに失敗したときに止めていない').toMatch(/を引き受けられませんでした/);
+  });
+
+  it('引き受けた資格情報を環境変数として外に出さない', () => {
+    // export すると cdkd にも渡る。sakekasu-cdkd-deploy の信頼ポリシーは
+    // sakekasu-github-actions-deploy だけを許しているので、そこから自分自身を
+    // 引き受けようとして落ちる
+    const exported = codeLines
+      .filter(({ line }) => /^\s*export\s+AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)/.test(line))
+      .map(({ line, number }) => `${number}行目: ${line.trim()}`);
+
+    expect(exported, '資格情報を export すると cdkd の引き受けが壊れる').toEqual([]);
+  });
+
+  it('空配列の展開が bash 3.2 の set -u で落ちない書き方になっている', () => {
+    // "${cdkd_env[@]}" と素直に書くと、CDKD_ROLE_ARN が無いとき
+    // unbound variable で落ちる。手元から打つ経路が死ぬ
+    const code = codeLines.map(({ line }) => line).join('\n');
+
+    expect(code, 'cdkd_env の展開が素のまま').toMatch(
+      /\$\{cdkd_env\[@\]\+"\$\{cdkd_env\[@\]\}"\}/,
+    );
+  });
+});
+
 describe('migrate-to-cdkd.sh の bash 3.2 互換', () => {
   const script = readFileSync(SCRIPT_PATH, 'utf8');
   const code = script
