@@ -683,6 +683,28 @@ pathToFileURL(argv[1])          : .../com%7Eapple%7ECloudDocs/probe.mjs
 パスに置いて実行したとき本体が走る（何かを出して非ゼロで終わる）ことを見ている。
 どちらかのファイルを元の書き方に戻すと2件落ちる。
 
+### 混在したまま CloudFormation へ戻さない
+
+宿題の「取り込み中に `infra/**` を main に入れさせない仕掛け」を考えていて、もっと手前に穴があるのを見つけた。
+
+`migrate-to-cdkd.sh` の `pending` は「CloudFormation のスタックが残っているもの」しか集めない。移行済みのスタック（cdkd の状態があり CloudFormation のスタックは無い）はそこに入らない。前検査が失敗したときにそのまま `engine=cfn` を返すと、deploy が `cdk deploy --all` を打って**移行済みのぶんまで対象にする**。CloudFormation から見ればスタックが存在しないので、ゼロから作りに行く。
+
+スクリプト冒頭が警告しているのと同じ事故になる。同じ名前の DynamoDB テーブルや S3 バケットで落ちるか、Cognito の UserPool のように名前が重複できるものは2つ目を黙って作る（利用者のアカウントが空の新しいプールに切り替わる）。
+
+`engine=cfn` を返す前に、移行済みのスタックが1つでもあれば止めるようにした。混在したまま進むくらいなら止まる。残りを人の手で移すか戻すかを決めるのは人間の仕事。
+
+`aws` と `npx` を偽物に差し替えて3経路を実地に確かめた。
+
+| state の状況 | CloudFormation の状況 | 前検査 | 結果 |
+| --- | --- | --- | --- |
+| 2本に state あり | 2本は退役、2本は残存 | 失敗 | **`exit 1`。`engine=` を書かない** |
+| state 無し | 4本すべて残存 | 失敗 | `engine=cfn`（従来どおり。戻して安全） |
+| 4本すべて state あり | 4本すべて退役 | 通さない | `engine=cdkd` |
+
+**`infra/**` を main に入れさせない仕掛けより、こちらが先。** 窓を守りたかった理由は「その状態でデプロイが走ると壊れる」ことだった。デプロイの側で止まるなら、何が main に入ったかに依らず守られる。PR の側で止める仕掛けは、このリポジトリがブランチ保護を使えない（無料プラン）ので赤いチェックを出すところまでしかできず、目印の置き忘れでも効かなくなる。
+
+検査を4件足した（`infra/__tests__/migrate-to-cdkd.test.ts`）。`engine=cfn` の前で state を調べていること、移行済みがあれば止めること、止めるときに `engine=` を書かないこと、`migrated` の展開が bash 3.2 の `set -u` で落ちない書き方であること。歯止めを外す変異・`exit 1` を外す変異・素の配列展開に変える変異のどれでも落ちる。
+
 ### 残っている宿題
 
 | やること | なぜ |
@@ -690,7 +712,7 @@ pathToFileURL(argv[1])          : .../com%7Eapple%7ECloudDocs/probe.mjs
 | `monitoring` の文字化けを直す | `scripts/fix-monitoring-mojibake.mjs` を打つ。`auth` と `api` は済 |
 | `cdkd drift` の見落としを上流に報告する | 0.291.31 が CloudWatch Alarm / SNS Topic / Events Rule / SLO の差分を検出しない |
 | 手元で `npm ci` を打つ | `node_modules` が lockfile より古いとスキーマ10 の state が読めない |
-| 取り込み中に `infra/**` を main に入れさせない仕掛け | 今回は約束だけで、たまたま順序に救われた |
+| `infra/**` を main に入れさせない仕掛け | 上の歯止めでデプロイ側は守られた。PR 側で止めるかは未決 |
 
 ### state バケットのスキーマ版
 
