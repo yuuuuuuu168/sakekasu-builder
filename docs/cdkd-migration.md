@@ -13,17 +13,19 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | 1 | infra に `@go-to-k/cdkd` を追加 | 済 |
 | 1.5 | cdkd を 0.291.31 に上げる | 済 |
 | 2 | cdkd 用のデプロイロールと Permissions Boundary を `GithubOidcStack` に追加 | 済（コード） |
-| 3 | OIDC スタックを手動デプロイしてロールと境界を作る | 要・再実行 |
-| 3.5 | `cdk deploy --all` でアプリの全ロールに境界を付ける | これから |
+| 3 | OIDC スタックを手動デプロイしてロールと境界を作る | 済 |
+| 3.5 | `cdk deploy --all` でアプリの全ロールに境界を付ける | 済 |
 | 4 | `cdkd bootstrap` | 済 |
-| 5 | `cdkd diff --all` で未対応リソースを洗い出す | 要・再実行 |
+| 5 | `cdkd diff --all` で未対応リソースを洗い出す | 済 |
 | 5.5 | 取り込みを回す `migrate-to-cdkd.sh` を書く | 済 |
 | 6 | 影響の小さいスタックで CFn への戻しを確認 | これから |
 | 7 | `cdkd import` で既存スタックを取り込む | これから |
 | 8 | `cdkd drift` で state と実物の一致を確認 | これから |
 | 9 | `deploy.yml` / `cdk-diff.yml` を cdkd に差し替え | これから（別 PR） |
 
-手順3は一度実行済みだが、セキュリティレビューを受けて Permissions Boundary を足したため、もう一度流す必要がある。
+手順3と3.5 は 2026-10-03 に完了を確認した。`sakekasu-cdkd-deploy` ロールと `sakekasu-role-boundary` ポリシーはどちらも 2026-08-16 付で実在し、境界の `PermissionsBoundaryUsageCount` は 13。合成した4スタックの IAM ロール数（api 8 / auth 1 / monitoring 3 / health-global 1 = 13）と一致するので、全ロールに境界が付いている。
+
+境界を適用するコード（`0490e66`）が main に入ったあと、`deploy` ワークフローの `cdk deploy --all` は 9/15・9/26・10/2 と3回成功している。境界ポリシーが無ければ IAM 側で落ちるため、これも傍証になる。
 
 ### 順番を外すと止まるところ
 
@@ -150,6 +152,8 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc -c github-oidc=
 
 アプリのスタックより先にこれを流す。境界が存在しない状態でアプリをデプロイすると、存在しないポリシーを参照しているとして落ちる。
 
+**`sakekasu-cdkd-deploy` に入れるのは `sakekasu-github-actions-deploy` だけ。** 人間が `AdministratorAccess` で入ろうとしても `sts:AssumeRole` が拒否される。CI 用に絞ったロールなので、手元から cdkd を打つときは `CDKD_ROLE_ARN` を渡さず、自分の権限で直接実行する（手順6・手順7 を参照）。state バケット `cdkd-state-232791540685` のバケットポリシーはアカウント外からのアクセスを拒否するだけなので、同一アカウントの管理者なら読み書きできる。
+
 ### 3.5. アプリの全ロールに境界を付ける
 
 ```bash
@@ -157,9 +161,9 @@ AWS_PROFILE=sakekasu-builder npx cdk diff --all -c env=dev
 AWS_PROFILE=sakekasu-builder npx cdk deploy --all -c env=dev
 ```
 
-14個のロールに `PermissionsBoundary` が付くだけの差分になるはず。ロールの作り直しは発生しない。
+13個のロールに `PermissionsBoundary` が付くだけの差分になる。ロールの作り直しは発生しない。
 
-PR をマージすると `deploy.yml` が同じことをするので、手順3を先に済ませてあれば、この手順はマージで自動的に済む。
+PR をマージすると `deploy.yml` が同じことをするので、手順3を先に済ませてあれば、この手順はマージで自動的に済む。実際そうなった（「現在どこまで進んでいるか」を参照）。
 
 ### 4. cdkd bootstrap
 
@@ -186,9 +190,18 @@ AWS_PROFILE=sakekasu-builder npx cdkd diff --all
 
 エラーが出た場合、`--allow-unsupported-properties` という逃げ道はあるが、そのプロパティは AWS に書かれないまま無視される。安易に付けない。
 
-2026-08-16 に一度実行し、4スタックすべてが処理され、未対応の型もプロパティも出なかった。件数は auth 12 / api 49 / monitoring 46 / health-global 3 で、合成したリソース数から `AWS::CDK::Metadata` を引いた数と一致していた。Cloud Control にフォールバックする3種類も一覧に出たうえで何も言われていない。
+2026-10-03 に cdkd 0.291.31 で実行し、4スタックすべてが処理され、未対応の型もプロパティも出なかった。件数は合成結果と一致している。
 
-ただしこれは cdkd 0.283.25 で取った結果で、手順1.5 で 0.291.31 に上げたため取り直しになる。8 マイナー分の差があり、対応リソースの一覧も Cloud Control への振り分けも動いている可能性がある。取り直すまで「前提は満たされている」とは言えない。
+| スタック | `cdkd diff` | 合成結果（`AWS::CDK::Metadata` を除く） |
+| --- | --- | --- |
+| auth | 9 | 9 |
+| api | 54 | 54 |
+| monitoring | 48 | 48 |
+| health-global | 3 | 3 |
+
+Cloud Control にフォールバックする3種類（UserPoolClient 2、FunctionConfiguration 4、MetricFilter 2）も一覧に出たうえで何も言われていない。0.291.23 で直ったはずの UserPoolClient の物理 ID は、実物での確認は手順6 待ち。
+
+8/16 に 0.283.25 で取った値（auth 12 / api 49 / monitoring 46 / health-global 3）とは件数が違うが、原因は cdkd ではなく CDK 側のコードの変化。auth が 12 → 9 と減ったのは [#129](https://github.com/yuuuuuuu168/sakekasu-builder/issues/129) の `logRetention` → `logGroup`（8/18 反映）で `Custom::LogRetention` と provider 一式が消え、明示の LogGroup が1つ増えた差。api と monitoring は同じ分を引いたうえで機能追加で増えている。
 
 ### 6. CloudFormation へ戻せることを先に確認する
 
@@ -196,14 +209,25 @@ AWS_PROFILE=sakekasu-builder npx cdkd diff --all
 
 **このスタックは us-east-1 にあるので `AWS_REGION` を合わせて打つ。** 合わせないと `cdkd import` が ap-northeast-1 で CloudFormation を探し、全リソースが「not found」になる（上の「cdkd の版と、先行リポジトリで判明している不具合」を参照）。ここが移行の最初の一手なので、知らないと不具合を仕様と取り違えやすい。
 
+**`CDKD_ROLE_ARN` は渡さない。** 手元から打つときは自分の権限で直接実行する（手順3 の末尾を参照）。渡すと `sts:AssumeRole` で拒否される。
+
+**前検査の `--dry-run` に `--migrate-from-cloudformation` を付けない。** 0.291.31 は両方を渡すと次のエラーで止まる。
+
+```
+Error: --migrate-from-cloudformation is not compatible with --dry-run: the post-state-write
+retirement (UpdateStack + DeleteStack) issues real AWS calls.
+```
+
+退役処理（UpdateStack と DeleteStack）は実際に AWS を叩くので dry-run に含められない、という趣旨。取り込み自体の下見は `--dry-run` 単独で取る。
+
 ```bash
 cd infra
 export AWS_PROFILE=sakekasu-builder
-export CDKD_ROLE_ARN=arn:aws:iam::232791540685:role/sakekasu-cdkd-deploy
+
+# 取り込みの下見。全リソースが imported で、not found / unsupported が 0 であること
+AWS_REGION=us-east-1 npx cdkd import sakekasu-dev-health-global --dry-run
 
 # 取り込む
-AWS_REGION=us-east-1 npx cdkd import sakekasu-dev-health-global \
-  --migrate-from-cloudformation --dry-run
 AWS_REGION=us-east-1 npx cdkd import sakekasu-dev-health-global \
   --migrate-from-cloudformation --yes
 
@@ -211,6 +235,8 @@ AWS_REGION=us-east-1 npx cdkd import sakekasu-dev-health-global \
 AWS_REGION=us-east-1 npx cdkd export sakekasu-dev-health-global --dry-run
 AWS_REGION=us-east-1 npx cdkd export sakekasu-dev-health-global
 ```
+
+`migrate-to-cdkd.sh` も同じ分け方をしている（前検査は `--dry-run` 単独、本番は `--migrate-from-cloudformation --yes`）。
 
 `export` は CFn の IMPORT チェンジセットを使うので、AWS のリソースは作り直されない。成功すると cdkd 側の state は消える。
 
@@ -222,9 +248,10 @@ AWS_REGION=us-east-1 npx cdkd export sakekasu-dev-health-global
 
 ```bash
 cd infra
-AWS_PROFILE=sakekasu-builder CDKD_ROLE_ARN=arn:aws:iam::232791540685:role/sakekasu-cdkd-deploy \
-  bash scripts/migrate-to-cdkd.sh
+AWS_PROFILE=sakekasu-builder bash scripts/migrate-to-cdkd.sh
 ```
+
+手元から打つときは `CDKD_ROLE_ARN` を渡さない（手順3 の末尾を参照）。ワークフローに組み込む手順9 では渡す。
 
 スクリプトは全スタックを `--dry-run` で調べ、全リソースが取り込めると分かったときだけ移す。1つでも引っかかれば、どのスタックにも手を付けずに `engine=cfn` を返して抜ける。移し終えた後に打っても何もしない。
 
