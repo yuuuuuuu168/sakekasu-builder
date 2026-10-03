@@ -57,8 +57,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   };
 
   // effect の役割は DOM（React の外）への反映だけに絞る
+  // .dark は Tailwind の dark: 用、data-theme は共通テーマ（theme/sakekasu-theme.css）用。
+  // 共通テーマは data-theme が無いと OS の設定に従うので、ライトを選んだときも明示する
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', resolvedTheme === 'dark');
+    const root = document.documentElement;
+    root.classList.toggle('dark', resolvedTheme === 'dark');
+    root.dataset.theme = resolvedTheme;
   }, [resolvedTheme]);
 
   return (
