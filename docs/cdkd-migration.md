@@ -650,6 +650,39 @@ AWS_PROFILE=sakekasu-builder node scripts/fix-monitoring-mojibake.mjs
 
 cdkd 側が drift を検出できるようになれば `cdkd drift <スタック> --revert` で済むので、このファイルは消してよい。
 
+### スクリプトが黙って終わった（`~` を含むパス）
+
+`fix-monitoring-mojibake.mjs` を手元から打ったら、**何も出さず exit 0 で終わった**。
+
+原因は「直に実行されたときだけ本体を走らせる」判定。`import.meta.url` を
+`new URL("file://" + process.argv[1]).href` と比べていた。
+
+`import.meta.url` は `~` を `%7E` に符号化するが、`new URL` はそのまま残す。
+
+```
+import.meta.url                 : .../com%7Eapple%7ECloudDocs/probe.mjs
+new URL("file://" + argv[1])    : .../com~apple~CloudDocs/probe.mjs
+pathToFileURL(argv[1])          : .../com%7Eapple%7ECloudDocs/probe.mjs
+```
+
+**iCloud Drive のパスには `com~apple~CloudDocs` が必ず入る。** 手元のチェックアウトが
+そこにあるため、判定が常に偽になっていた。空白（`Mobile Documents`）はどちらも同じく
+符号化するので無関係。
+
+`pathToFileURL` に直した。これが正しい逆変換。
+
+**`check-lockfile-registry.mjs` も同じ書き方だった。** CI でしか走らずランナーのパスに
+`~` が無いため表に出ていなかったが、依存の取得元を確かめる関門が黙って素通りする形
+なので、性質はこちらのほうが悪い。あわせて直した。
+
+**失敗が見えないことが問題。** エラーも非ゼロ終了も無いので、打った側は通ったと思う。
+文字化けが直らないまま「直した」ことになりかけた。
+
+検査を5件足した（`infra/__tests__/script-entrypoint.test.ts`）。`scripts/*.mjs` の全部に
+ついて、パスの符号化に依らない判定になっていることと、`com~apple~CloudDocs` を含む
+パスに置いて実行したとき本体が走る（何かを出して非ゼロで終わる）ことを見ている。
+どちらかのファイルを元の書き方に戻すと2件落ちる。
+
 ### 残っている宿題
 
 | やること | なぜ |
