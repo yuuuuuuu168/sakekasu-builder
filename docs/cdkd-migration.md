@@ -603,11 +603,59 @@ mfaMessage: '認証コードは {####} です。',
 
 上流への報告の下書きは [#235](https://github.com/yuuuuuuu168/sakekasu-builder/issues/235)。
 
+### 文字化けの直し方はスタックごとに違った
+
+3スタックとも「state は正しい日本語、実物は `?`」という同じ形なのに、通った手立てが違う。
+
+| スタック | 件数 | 通った手立て |
+| --- | --- | --- |
+| `auth` | 1（UserPool の4パス） | `mfaMessage` を足して `cdkd deploy`。`--revert` は cdkd の不具合で落ちた（[#235](https://github.com/yuuuuuuu168/sakekasu-builder/issues/235)） |
+| `api` | 4（AppSync の Code） | `cdkd drift --revert`。`4 reverted` でそのまま通った |
+| `monitoring` | 31 | `scripts/fix-monitoring-mojibake.mjs`。drift が検出しないので `--revert` が動かない |
+
+確認は実物を読んで行った。`auth` は Cognito の確認メールが `sakekasu-builder ?????` から `sakekasu-builder 確認コード` に戻り、`api` は AppSync のリゾルバのコメントが戻っている。
+
+**`?` は表示の問題ではなく実データ。** 読み取り専用プロファイルの AWS CLI でも、`PYTHONUTF8=1` を付けて UTF-8 が通るパイプに流しても `?`（1文字が1バイトの `0x3f`）。同じ CLI が修復後は日本語を返すので、これで区別できる。
+
+### `cdkd drift` の見落とし（0.291.31）
+
+`monitoring` で、state と実物が違うのに「差なし」と出る。
+
+| | 値 |
+| --- | --- |
+| cdkd の state | 日本語（`cdkd diff` が `No changes detected`） |
+| AWS の実物 | `?`（`DescribeAlarms` と `cloudcontrol get-resource` の両方） |
+| `cdkd drift` | `no drift detected (49 resources checked, 3 unsupported)` |
+
+**より古い版では検出できていた。** 取り込み直後（手元の `node_modules` が lockfile より古かった時点）の手順8 では、同じ29件を drift として出していた。`npm ci` で 0.291.31 に揃えたあと出なくなった。`auth`（Cognito）と `api`（AppSync）は 0.291.31 でも検出できたので、型ごとの話。
+
+見落としは危ない向きの誤り。「drift が無い」を信じると、実物がずれていることに気づけない。`cdkd diff`（テンプレートと state）と `cdkd drift`（state と実物）の両方を見る必要がある。
+
+### monitoring の修復スクリプト
+
+[`infra/scripts/fix-monitoring-mojibake.mjs`](../infra/scripts/fix-monitoring-mojibake.mjs)。
+
+```bash
+cd infra
+npx cdk synth sakekasu-dev-monitoring -c env=dev
+AWS_PROFILE=sakekasu-builder node scripts/fix-monitoring-mojibake.mjs --dry-run
+AWS_PROFILE=sakekasu-builder node scripts/fix-monitoring-mojibake.mjs
+```
+
+- **直す値は合成結果から引く。** スクリプトに文面を写し取ると `lib/monitoring-stack.ts` と二重管理になる。検査が、拾った文面がスクリプトに直書きされていないことを見ている
+- **パッチは1プロパティの `replace` だけ。** Cloud Control は実物を読んでからパッチを当てるので、触っていない項目・アラームの履歴・SNS の購読には影響しない
+- **冪等。** すでに一致しているものは飛ばす
+- 物理名が `Fn::` などで解決できないリソースは対象から外し、理由を出す。黙って飛ばすと「直したつもりで直っていない」になる
+- 対象は非ASCII を含む説明文だけ（ASCII だけの文面は壊されようがない）。2026-10-03 時点で33件のうち31件が修復対象、2件は手順9 のデプロイで既に直っていた
+
+cdkd 側が drift を検出できるようになれば `cdkd drift <スタック> --revert` で済むので、このファイルは消してよい。
+
 ### 残っている宿題
 
 | やること | なぜ |
 | --- | --- |
-| `cdkd drift <スタック> --revert` で文字化けを直す | 実物の日本語が `?` のまま。確認メールが利用者に届いている |
+| `monitoring` の文字化けを直す | `scripts/fix-monitoring-mojibake.mjs` を打つ。`auth` と `api` は済 |
+| `cdkd drift` の見落としを上流に報告する | 0.291.31 が CloudWatch Alarm / SNS Topic / Events Rule / SLO の差分を検出しない |
 | 手元で `npm ci` を打つ | `node_modules` が lockfile より古いとスキーマ10 の state が読めない |
 | 取り込み中に `infra/**` を main に入れさせない仕掛け | 今回は約束だけで、たまたま順序に救われた |
 
