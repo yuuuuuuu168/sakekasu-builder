@@ -1,6 +1,10 @@
-# PR で cdk diff を実行し、結果を PR コメントに出す（Issue #94）。
+# PR で差分を取り、結果を PR コメントに出す（Issue #94）。
 # iPhone だけでレビューするための仕組み。使うのは読み取り専用の diff ロール
-# （lookup ロールにしか入れない）なので、PR からリソースは変更できない。
+# なので、PR からリソースは変更できない。
+#
+# 差分は cdkd で取る（Issue #150）。cdkd は CDK bootstrap の lookup ロールに
+# 入らず、自分の認証情報で各リソースを読む。diff ロールにはその読み取り権限
+# だけが入っていて、書き込みは無い。
 name: cdk-diff
 
 on:
@@ -17,6 +21,10 @@ permissions:
 concurrency:
   group: cdk-diff-${{ github.event.pull_request.number }}
   cancel-in-progress: true
+
+env:
+  # 認証情報を入れる前に済ませた合成結果を使わせる（下の「合成」を参照）
+  CDKD_APP: cdk.out
 
 jobs:
   diff:
@@ -36,16 +44,27 @@ jobs:
       # 差し替えた PR を出せばインストール時スクリプトを走らせられる。認証後だと
       # そのスクリプトが diff ロールのセッショントークンを読める
       - run: npm ci --ignore-scripts
+      # 合成も認証情報を入れる前に済ませる（PR #151 のセキュリティレビュー）。
+      #
+      # --ignore-scripts が止めるのは npm のインストール時スクリプトだけで、
+      # CDK アプリのコードは合成時に実行される。認証後に合成すると、PR に
+      # 仕込んだ AWS SDK の呼び出しが diff ロールの認証情報付きで動いてしまう。
+      # 合成を先に済ませ、以降は CDKD_APP=cdk.out でこの成果物だけを読ませる
+      # ことで、PR のコードが認証情報に触れる経路が消える（Issue #131）
+      - name: 合成
+        run: npx cdk synth --all -q
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::<アプリのアカウント ID>:role/sakekasu-github-actions-diff
           aws-region: ap-northeast-1
-      - name: cdk diff
+      - name: cdkd diff
         id: diff
-        # diff があっても exit 0 のままにし、出力だけをコメントに回す。
-        # --no-color はコメントにエスケープシーケンスを混ぜないため
+        # diff があっても exit 0 のままにし、出力だけをコメントに回す
+        # （--fail を付けると差分があるだけで落ちてしまう）。
+        # cdkd に --no-color は無く NO_COLOR も読まないが、TTY でないときは
+        # 色を付けない作りなので、パイプに流す限りエスケープシーケンスは混ざらない
         run: |
-          npx cdk diff --all --no-color 2>&1 | tee diff.txt
+          npx cdkd diff --all 2>&1 | tee diff.txt
       - name: PRコメントに diff を投稿（既存コメントは更新）
         uses: actions/github-script@v9
         with:
@@ -58,7 +77,7 @@ jobs:
             if (body.length > limit) {
               body = body.slice(0, limit) + '\n...（長すぎるため省略。全文は Actions のログを参照）';
             }
-            const full = `${marker}\n## cdk diff\n\n\`\`\`\n${body}\n\`\`\``;
+            const full = `${marker}\n## cdkd diff\n\n\`\`\`\n${body}\n\`\`\``;
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
