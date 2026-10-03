@@ -20,8 +20,8 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | 5.5 | 取り込みを回す `migrate-to-cdkd.sh` を書く | 済 |
 | 6 | 影響の小さいスタックで CFn への戻しを確認 | 済（要・回避策） |
 | 7 | `cdkd import` で既存スタックを取り込む | 済（2026-10-03。4スタックとも失敗0） |
-| 8 | `cdkd drift` で state と実物の一致を確認 | これから |
-| 9 | `deploy.yml` / `cdk-diff.yml` を cdkd に差し替え | PR 用意済み（マージは手順8 のあと） |
+| 8 | `cdkd drift` で state と実物の一致を確認 | 済（2026-10-03。差分は文字化けのみ） |
+| 9 | `deploy.yml` / `cdk-diff.yml` を cdkd に差し替え | PR 用意済み（マージ前に下の「取りこぼした4リソース」を取り込む） |
 
 手順3と3.5 は 2026-10-03 に完了を確認した。`sakekasu-cdkd-deploy` ロールと `sakekasu-role-boundary` ポリシーはどちらも 2026-08-16 付で実在し、境界の `PermissionsBoundaryUsageCount` は 13。合成した4スタックの IAM ロール数（api 8 / auth 1 / monitoring 3 / health-global 1 = 13）と一致するので、全ロールに境界が付いている。
 
@@ -435,6 +435,93 @@ AWS_REGION=us-east-1 npx cdkd drift sakekasu-dev-health-global
 差分がなければ終了コード 0。出た場合は `cdkd drift <stack> --json` で中身を見る。state を実物に合わせるなら `--accept`、実物を state に合わせるなら `--revert`。
 
 **ここがクリーンになったら、手順9 の PR をすぐマージする。** 取り込みが終わった時点で CloudFormation のスタックは消えているので、main の `deploy.yml`（`cdk deploy --all`）が走ると全部を新規作成しにいく。drift の確認は窓を開けたままやっていることになる。
+
+### 2026-10-03 の drift の結果
+
+| スタック | drift | 判定不能（provider 未対応） |
+| --- | --- | --- |
+| `auth` | 1 | 1 |
+| `api` | 4 | 31 |
+| `monitoring` | 29 | 3 |
+| `health-global` | 0 | 1 |
+
+**出た差分は1つ残らず「日本語が `?` に置き換わっている」だけ。** 構造の違いは無い。
+
+```
+~ AlertTopic2720D535 (AWS::SNS::Topic)
+  - DisplayName: 酒カス 監視アラート     ← cdkd の state（テンプレートの値）
+  + DisplayName: ??? ??????              ← AWS の実物
+```
+
+`-` が state、`+` が AWS の実物。**実物のほうが壊れている。** 表示の問題ではない。
+
+- 手元の `cdkd drift` は同じ画面で state 側の日本語を正しく出しながら実物側だけ `?` にしている
+- クラウドから `aws cloudwatch describe-alarms` / `cognito-idp describe-user-pool` / `sns get-topic-attributes` を引いても `?` が返る。`PYTHONUTF8=1` を付けても、UTF-8 が通るパイプに流しても変わらない（1文字が1バイトの `0x3f`）
+
+書いたのは CloudFormation。これらのリソースは全部 `cdk deploy` が最後に書いており、cdkd の state はテンプレートの値（正しい日本語）を持っている。`cdk diff` はテンプレート同士を比べるだけで実物を見ないので、これまで誰も気づかなかった。cdkd が実物と比べる仕組みを持っていて初めて見えた。
+
+**`--accept` を打たない。** 打つと壊れたほうを state に焼き付けてしまう。何もしなくてよい。最初の `cdkd deploy` が Cloud Control / SDK で直接書くので、正しい日本語に戻る。**これは退行ではなく修復。** いま利用者に届いている確認メールは次のようになっている。
+
+```
+件名: sakekasu-builder ?????
+本文: ?????????? {####} ???
+```
+
+残りの差分2件は `OcrAvailabilitySlo` / `OcrLatencySlo` の `LastUpdatedTime`（2026-08-17 → 2026-10-03T04:06:34Z）。AWS が勝手に付ける読み取り専用の項目で、cdkd がこれを比較対象に入れているぶん、今後も毎回 drift として出続ける。
+
+「判定不能」は全部 `AWS::IAM::Policy`。Cloud Control の provider が drift 検出に対応していない。
+
+### 取りこぼした4リソース（手順9 のマージ前に取り込む）
+
+**窓を開けている間に `infra/**` の PR が main に入った。** [#231](https://github.com/yuuuuuuu168/sakekasu-builder/pull/231)（presigned-url の SLO）が 03:03 にマージされ、`deploy` が 03:03〜03:07 に走っている。このときはまだ CloudFormation のスタックが生きていたので成功し、monitoring に4リソースが増えた。
+
+取り込み（手順7）はそのあと、**#231 を含まないブランチで合成した `cdk.out`** を使って走った。cdkd import は合成結果に載っている論理 ID しか取り込まないので、CloudFormation 側の52個のうち48個だけが state に入り、残り4つは Retain で実物だけが残った。
+
+| 論理 ID | 型 | 物理名 |
+| --- | --- | --- |
+| `PresignedUrlAvailabilitySlo` | `AWS::ApplicationSignals::ServiceLevelObjective` | `dev-sakekasu-presigned-url-availability` |
+| `PresignedUrlLatencySlo` | `AWS::ApplicationSignals::ServiceLevelObjective` | `dev-sakekasu-presigned-url-latency` |
+| `PresignedUrlAvailabilitySloBreachF3AD5564` | `AWS::CloudWatch::Alarm` | `dev-sakekasu-presigned-url-slo-availability` |
+| `PresignedUrlLatencySloBreachC7C7585E` | `AWS::CloudWatch::Alarm` | `dev-sakekasu-presigned-url-slo-latency` |
+
+PR #230 の `cdkd diff` はこの4つを `[+]`（新規作成）と出している。このままマージすると `cdkd deploy` が既存の SLO を作りにいって衝突する。`cdkd drift` では見つからない（state に無いものは見に行かないため）。
+
+マージの前に state へ入れる。CloudFormation のスタックはもう無いので `--migrate-from-cloudformation` は付けない。既存を触らない追加なので `--force` も要らない。
+
+```bash
+cd infra
+git pull
+export AWS_PROFILE=sakekasu-builder
+npx cdkd import sakekasu-dev-monitoring -c env=dev --dry-run \
+  --resource PresignedUrlAvailabilitySlo=dev-sakekasu-presigned-url-availability \
+  --resource PresignedUrlLatencySlo=dev-sakekasu-presigned-url-latency \
+  --resource PresignedUrlAvailabilitySloBreachF3AD5564=dev-sakekasu-presigned-url-slo-availability \
+  --resource PresignedUrlLatencySloBreachC7C7585E=dev-sakekasu-presigned-url-slo-latency
+```
+
+`4 imported, 0 not found, 0 failed` を確かめてから `--dry-run` を外して打つ。`--auto` は付けない。付けると残り48個も解決し直そうとするが、CloudFormation のスタックが無いので物理 ID を引けない型（UserPoolClient / GraphQLApi など）で落ちる。
+
+**教訓として、窓の約束は約束のままだった。** ブランチ保護にも CI にも、取り込み中に `infra/**` を main に入れさせない仕掛けは無い。次に同じことをするなら、取り込みの直前に `infra/**` を触る PR を止める手立てを先に用意する。
+
+### 型スキーマの読み取り権限
+
+PR #230 の `cdkd diff` が毎回これを出していた。
+
+```
+Failed to resolve create-only properties for AWS::IAM::Policy via cloudformation:DescribeType
+  (... is not authorized to perform: cloudformation:DescribeType ...).
+  Falling back to cdkd's bundled schema snapshot for this resource — it can lag AWS's current
+  schema, so a property AWS has since made updatable may be classified as a replacement.
+```
+
+cdkd は「作成時にしか指定できないプロパティ」を型ごとに `cloudformation:DescribeType` で引き、更新で済むか差し替えが要るかを判定する。引けないと同梱のスキーマ写しに落ちる。写しは AWS の現物より古くなりうるので、AWS 側で更新可能になったプロパティを差し替えと誤判定する余地が残る。DynamoDB テーブルのような作り直しの効かないものに当たると取り返しがつかない。
+
+デプロイロールと diff ロールの両方に足した。公開された型のスキーマを読むだけなので、リソースは `arn:aws:cloudformation:*::type/resource/*` に絞ってある。**反映には OIDC スタックの手動デプロイが要る**（手順3 と同じ）。
+
+```bash
+cd infra
+AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc --require-approval never
+```
 
 ### 9. ワークフローの差し替え
 

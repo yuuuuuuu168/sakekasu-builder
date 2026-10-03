@@ -510,6 +510,43 @@ describe('GithubOidcStack', () => {
     }
   });
 
+  // cdkd は「作成時にしか指定できないプロパティ」を cloudformation:DescribeType で
+  // 型ごとに引く。読めないと同梱のスキーマ写しに落ち、AWS 側で更新可能になった
+  // プロパティを差し替えと誤判定しうる。PR #230 の cdkd diff が実際に
+  // 「Grant cloudformation:DescribeType to use the live schema」を出した
+  it.each([
+    ['cdkd のデプロイロール', /^CdkdDeployRole/],
+    ['diff ロール', /^DiffRole/],
+  ])('%s は型スキーマを引ける', (_label, logicalId) => {
+    const statements = statementsFor(template, logicalId);
+    expect(statements.length).toBeGreaterThan(0);
+
+    expect(
+      allows(statements, 'cloudformation:DescribeType'),
+      'DescribeType が無いと同梱のスキーマ写しに落ちる',
+    ).toBe(true);
+  });
+
+  it.each([
+    ['cdkd のデプロイロール', /^CdkdDeployRole/],
+    ['diff ロール', /^DiffRole/],
+  ])('%s の型スキーマ参照は型だけに絞ってある', (_label, logicalId) => {
+    // DescribeType は公開された型のスキーマを読むだけ。リソースの中身には
+    // 関係しないので、ワイルドカードを広げる理由がない
+    const statements = statementsFor(template, logicalId).filter(
+      (st) => st.Effect !== 'Deny' && toArray(st.Action).includes('cloudformation:DescribeType'),
+    );
+    expect(statements.length, 'DescribeType を許可する文が無い').toBeGreaterThan(0);
+
+    for (const statement of statements) {
+      for (const resource of toArray(statement.Resource)) {
+        expect(resource, 'DescribeType のリソースが絞られていない').toMatch(
+          /^arn:aws:cloudformation:[^:]*::type\/resource\//,
+        );
+      }
+    }
+  });
+
   it('OIDC プロバイダーは GitHub Actions のトークン発行元を指す', () => {
     // OpenIdConnectProvider はカスタムリソースとして合成される
     const providers = template.findResources('Custom::AWSCDKOpenIdConnectProvider');

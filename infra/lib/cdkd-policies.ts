@@ -393,6 +393,20 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
       ],
       resources: ['*'],
     }),
+
+    // cdkd は型ごとの「作成時にしか指定できないプロパティ」を
+    // cloudformation:DescribeType で引き、差し替えが要る変更かどうかを判定する。
+    // 読めないと同梱のスキーマ写しに落ちる。写しは AWS の現物より古くなりうるので、
+    // AWS 側で更新可能になったプロパティを差し替えと誤判定する余地が残る。
+    // DynamoDB テーブルのような作り直しの効かないものに当たると取り返しがつかない。
+    //
+    // 対象は公開されている型のスキーマだけ（リソースの中身ではない）なので、
+    // リソースは type/resource/* に絞って渡す
+    new iam.PolicyStatement({
+      sid: 'ReadResourceTypeSchemas',
+      actions: ['cloudformation:DescribeType'],
+      resources: ['arn:aws:cloudformation:*::type/resource/*'],
+    }),
   ];
 }
 
@@ -525,6 +539,20 @@ export function cdkdDiffStatements(account: string): iam.PolicyStatement[] {
         'cloudformation:GetTemplate',
       ],
       resources: ['*'],
+    }),
+
+    // cdkd は型ごとの「作成時にしか指定できないプロパティ」を
+    // cloudformation:DescribeType で引き、差し替えが要る変更かどうかを判定する。
+    // 読めないと同梱のスキーマ写しに落ちる。写しは AWS の現物より古くなりうるので、
+    // AWS 側で更新可能になったプロパティを差し替えと誤判定する余地が残る。
+    // DynamoDB テーブルのような作り直しの効かないものに当たると取り返しがつかない。
+    //
+    // 対象は公開されている型のスキーマだけ（リソースの中身ではない）なので、
+    // リソースは type/resource/* に絞って渡す
+    new iam.PolicyStatement({
+      sid: 'ReadResourceTypeSchemas',
+      actions: ['cloudformation:DescribeType'],
+      resources: ['arn:aws:cloudformation:*::type/resource/*'],
     }),
   ];
 }
