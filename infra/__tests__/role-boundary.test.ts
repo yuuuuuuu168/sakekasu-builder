@@ -4,7 +4,6 @@ import * as cdk from 'aws-cdk-lib';
 import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
-import { HealthGlobalStack } from '../lib/health-global-stack.js';
 import { GithubOidcStack } from '../lib/github-oidc-stack.js';
 import { BillingNotifierStack } from '../lib/billing-notifier-stack.js';
 import { ROLE_BOUNDARY_NAME } from '../lib/role-boundary.js';
@@ -45,17 +44,11 @@ function buildApplicationStacks(): Array<{ name: string; template: Template }> {
     canaryUserPoolClientId: authStack.canaryUserPoolClient.userPoolClientId,
     env,
   });
-  const healthGlobalStack = new HealthGlobalStack(app, 'sakekasu-dev-health-global', {
-    envName: 'dev',
-    targetRegion: 'ap-northeast-1',
-    env: { account: ACCOUNT, region: 'us-east-1' },
-  });
 
   return [
     { name: 'auth', template: Template.fromStack(authStack) },
     { name: 'api', template: Template.fromStack(apiStack) },
     { name: 'monitoring', template: Template.fromStack(monitoringStack) },
-    { name: 'health-global', template: Template.fromStack(healthGlobalStack) },
   ];
 }
 

@@ -43,7 +43,8 @@ export class GithubOidcStack extends cdk.Stack {
     });
 
     // CDK bootstrap のロール名にはリージョンが含まれるため、ワイルドカードで
-    // ap-northeast-1 と us-east-1（health-global スタック用）の両方を許可する
+    // ap-northeast-1 と us-east-1 の両方を許可する（us-east-1 は以前 health-global
+    // スタックに使っていた。いまは無いが、境界を狭める理由も無いので残す）
     const bootstrapRoleArns = `arn:aws:iam::${this.account}:role/cdk-hnb659fds-*`;
 
     const deployRole = new iam.Role(this, 'DeployRole', {
