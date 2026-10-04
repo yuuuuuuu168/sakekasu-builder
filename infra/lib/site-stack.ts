@@ -16,6 +16,11 @@ export interface SiteStackProps extends cdk.StackProps {
   hostedZoneId: string;
   zoneName: string;
   /**
+   * us-east-1 の証明書の ARN。コンソールで作って cdk.json の context で渡す（cdkd では作らない）。
+   * 理由はこのクラスの説明にある
+   */
+  certificateArn: string;
+  /**
    * 画面が叩く AppSync の URL。amplify_outputs.json（画面が実際に読む設定）から渡す。
    * CSP の connect-src に入れる
    */
@@ -46,8 +51,14 @@ export function siteBucketName(envName: string, account: string): string {
  * （docs/amplify-exit.md）。サブドメイン（sake.）へ移るのに合わせて CDK に載せる。
  *
  * CloudFront の証明書は us-east-1 にしか置けないので、このスタックごと us-east-1 に置く。
- * 証明書を別スタックにすると、ARN をスタック間の参照（crossRegionReferences）で
- * 渡すことになり、cdkd の state に Export の依存が増える。同じスタックなら要らない。
+ *
+ * 証明書そのものは cdkd では作らない。コンソールで作り、ARN を context（siteCertificateArn）で
+ * 渡す。cdkd は ACM の API を直に叩くが、CDK の `CertificateValidation.fromDns` が付ける
+ * 検証設定（DomainValidationOptions の HostedZoneId）を ACM に渡せず、ValidationDomain が
+ * null だとして弾かれる（2026-10-04 のデプロイで実際に落ちた）。CloudFormation なら
+ * 検証レコードまで書いてくれるが、cdkd はそこも持っていない。共通基盤の auth の証明書と
+ * 同じ扱い（sakekasu-integrated_environment の infra/bin/app.ts）。証明書は一度作れば
+ * ACM が自動で更新する。
  *
  * 配信物は GitHub Actions（deploy-site.yml）から `aws s3 sync` で置く。CDK の
  * BucketDeployment は使わない。Lambda 製のカスタムリソースが増え、CloudFormation へ
@@ -74,10 +85,11 @@ export class SiteStack extends cdk.Stack {
       zoneName: props.zoneName,
     });
 
-    const certificate = new acm.Certificate(this, 'Certificate', {
-      domainName: props.domainName,
-      validation: acm.CertificateValidation.fromDns(zone),
-    });
+    const certificate = acm.Certificate.fromCertificateArn(
+      this,
+      'Certificate',
+      props.certificateArn,
+    );
 
     this.bucket = new s3.Bucket(this, 'SiteBucket', {
       bucketName: siteBucketName(props.envName, this.account),

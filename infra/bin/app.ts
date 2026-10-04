@@ -163,11 +163,12 @@ function buildApplicationStacks(app: cdk.App): void {
 /**
  * フロントの配信（docs/sake-subdomain.md）。Amplify Hosting から移す先。
  *
- * 2 段階で合成する。鍵を分けてあるのは、ゾーンを作ってから親に NS を入れるまでの
- * 間に配信スタックが合成されると、証明書の DNS 検証が通らずデプロイが終わらないため。
+ * 段階を分けて合成する。ゾーンを親から委任してもらい、その後で証明書をコンソールで作る
+ * （cdkd は ACM の証明書を作れない。理由は site-stack.ts の冒頭）。
  *
- *   siteZone だけ:             ゾーン（sakekasu-<env>-site-dns）だけを作る
- *   siteZone + siteHostedZoneId: 委任が済んだ後。証明書と配信（sakekasu-<env>-site）も作る
+ *   siteZone だけ:              ゾーン（sakekasu-<env>-site-dns）だけを作る
+ *   + siteHostedZoneId と
+ *     siteCertificateArn:       委任と証明書が済んだ後。配信（sakekasu-<env>-site）も作る
  */
 function buildSiteStacks(
   app: cdk.App,
@@ -185,7 +186,8 @@ function buildSiteStacks(
   });
 
   const siteHostedZoneId = app.node.tryGetContext('siteHostedZoneId') as string | undefined;
-  if (!siteHostedZoneId) return;
+  const siteCertificateArn = app.node.tryGetContext('siteCertificateArn') as string | undefined;
+  if (!siteHostedZoneId || !siteCertificateArn) return;
 
   // CSP に入れる AppSync の URL は、画面が実際に読む設定ファイルから取る。
   // api スタックの出力を参照でつなぐと us-east-1 から ap-northeast-1 への
@@ -199,6 +201,7 @@ function buildSiteStacks(
     domainName: siteZone,
     hostedZoneId: siteHostedZoneId,
     zoneName: siteZone,
+    certificateArn: siteCertificateArn,
     graphqlUrl: outputs.data.url,
     // 署名付き URL は Lambda の S3Client（ap-northeast-1、仮想ホスト形式）が作る
     imageBucketDomain: `${envName}-sakekasu-images.s3.ap-northeast-1.amazonaws.com`,
