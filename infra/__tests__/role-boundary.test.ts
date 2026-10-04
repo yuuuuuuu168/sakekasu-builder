@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib';
-import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
 import { GithubOidcStack } from '../lib/github-oidc-stack.js';
@@ -23,7 +22,6 @@ const env = { account: ACCOUNT, region: 'ap-northeast-1' };
 
 function buildApplicationStacks(): Array<{ name: string; template: Template }> {
   const app = new cdk.App();
-  const authStack = new AuthStack(app, 'sakekasu-dev-auth', { envName: 'dev', env });
   const apiStack = new ApiStack(app, 'sakekasu-dev-api', {
     envName: 'dev',
     sharedAuth: TEST_SHARED_AUTH,
@@ -43,7 +41,6 @@ function buildApplicationStacks(): Array<{ name: string; template: Template }> {
   });
 
   return [
-    { name: 'auth', template: Template.fromStack(authStack) },
     { name: 'api', template: Template.fromStack(apiStack) },
     { name: 'monitoring', template: Template.fromStack(monitoringStack) },
   ];

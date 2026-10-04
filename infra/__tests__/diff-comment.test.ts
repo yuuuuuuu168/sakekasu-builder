@@ -65,7 +65,7 @@ describe('囲みの上限', () => {
 
 describe('buildComment', () => {
   it('目印と見出しを先頭に置き、本文を囲む', () => {
-    const full = build('Stack sakekasu-dev-auth\nThere were no differences');
+    const full = build('Stack sakekasu-dev-api\nThere were no differences');
 
     expect(full.startsWith(MARKER)).toBe(true);
     expect(full).toContain('## cdkd diff');

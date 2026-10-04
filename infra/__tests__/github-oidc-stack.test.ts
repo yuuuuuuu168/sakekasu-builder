@@ -453,6 +453,26 @@ describe('GithubOidcStack', () => {
     expect(allows(statements, 'logs:PutMetricFilter')).toBe(true);
   });
 
+  // Cognito のリソースを持っていたのは旧ユーザープール（sakekasu-dev-auth）だけで、
+  // アプリから外した。main への push から届く権限に、ユーザープールを作り替えたり
+  // 消したりできる権限を残さない
+  it('cdkd のデプロイロールは Cognito を読むだけで、作り替えも削除もできない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+    expect(statements.length).toBeGreaterThan(0);
+
+    for (const action of [
+      'cognito-idp:CreateUserPool',
+      'cognito-idp:UpdateUserPool',
+      'cognito-idp:DeleteUserPool',
+      'cognito-idp:CreateUserPoolClient',
+      'cognito-idp:UpdateUserPoolClient',
+      'cognito-idp:DeleteUserPoolClient',
+    ]) {
+      expect(allows(statements, action), `${action} が許可されている`).toBe(false);
+    }
+    expect(allows(statements, 'cognito-idp:DescribeUserPool')).toBe(true);
+  });
+
   it('cdkd のデプロイロールは利用者のデータを読めない', () => {
     const statements = statementsFor(template, /^CdkdDeployRole/);
     expect(statements.length).toBeGreaterThan(0);

@@ -3,7 +3,6 @@ import * as cdk from 'aws-cdk-lib';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import * as url from 'node:url';
-import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
 import { TEST_SHARED_AUTH } from './shared-auth-fixture.js';
@@ -79,7 +78,6 @@ function synth() {
   const app = new cdk.App();
   const env = { account: TEST_ACCOUNT, region: TEST_REGION };
 
-  const authStack = new AuthStack(app, 'sakekasu-dev-auth', { envName: 'dev', env });
   const apiStack = new ApiStack(app, 'sakekasu-dev-api', {
     envName: 'dev',
     sharedAuth: TEST_SHARED_AUTH,
@@ -102,7 +100,6 @@ function synth() {
   });
 
   return {
-    auth: Template.fromStack(authStack),
     api: Template.fromStack(apiStack),
     monitoring: Template.fromStack(monitoringStack),
   } as const;
@@ -117,15 +114,16 @@ describe('migrate-to-cdkd.sh の移行順', () => {
     order = scriptOrder();
   });
 
-  it('cdk deploy --all が出す3スタックを過不足なく並べている', () => {
+  // auth（旧ユーザープール）はアプリから外した。並べたままにすると、
+  // CloudFormation にも合成結果にも無いスタックを毎回調べることになる
+  it('アプリ本体の2スタックを過不足なく並べている', () => {
     expect(order.map((s) => s.suffix).sort()).toEqual(
-      ['api', 'auth', 'monitoring'],
+      ['api', 'monitoring'],
     );
   });
 
   it('リージョンが CDK 側の指定と一致する', () => {
     const expected: Record<string, string> = {
-      auth: 'ap-northeast-1',
       api: 'ap-northeast-1',
       monitoring: 'ap-northeast-1',
     };
@@ -168,19 +166,6 @@ describe('migrate-to-cdkd.sh の移行順', () => {
     expect(exportedNames(templates.api).size).toBeGreaterThan(0);
     expect(importedNames(templates.monitoring).size).toBeGreaterThan(0);
   });
-
-  /**
-   * 旧プールを外す 1 段目。api に続いて monitoring も auth を読まなくなった。
-   * これで auth はどのスタックからも読まれず、アプリから外せる
-   * （docs/shared-login.md の「旧プールを外す」）
-   */
-  it('api も monitoring も auth の Export を読まない', () => {
-    const authExports = exportedNames(templates.auth);
-    expect([...importedNames(templates.api)].filter((name) => authExports.has(name))).toEqual([]);
-    expect(
-      [...importedNames(templates.monitoring)].filter((name) => name.startsWith('sakekasu-dev-auth:')),
-    ).toEqual([]);
-  });
 });
 
 /**
@@ -194,17 +179,15 @@ describe('migrate-to-cdkd.sh の移行順', () => {
  * MetricFilter 1つ、api の MetricFilter 1つと GraphQLApi 1つ）。スクリプトが
  * --resource で明示して回避するので、その対象が落ちていないかを見る。
  *
- * UserPoolClient の件は go-to-k/cdkd#3701 で 0.291.23 修正済みと読んで一度
- * 回避を外したが、0.291.31 でも落ちた。手順5 の cdkd diff では出ず、
- * 取り込みで初めて出るため、この検査が唯一の歯止めになる。
+ * auth（旧ユーザープール）はアプリから外したので、UserPoolClient の手当ても外した。
+ * 手順5 の cdkd diff では出ず、取り込みで初めて出るため、この検査が唯一の歯止めになる。
  */
 describe('migrate-to-cdkd.sh の識別子の手当て', () => {
   const script = readFileSync(SCRIPT_PATH, 'utf8');
 
   /** 物理 ID と Cloud Control の識別子が食い違う型と、スタックごとの個数 */
   const NEEDS_OVERRIDE = [
-    { type: 'AWS::Cognito::UserPoolClient', counts: { auth: 2 } },
-    { type: 'AWS::Logs::MetricFilter', counts: { auth: 1, api: 1 } },
+    { type: 'AWS::Logs::MetricFilter', counts: { api: 1 } },
     { type: 'AWS::AppSync::GraphQLApi', counts: { api: 1 } },
   ] as const;
 
@@ -228,6 +211,18 @@ describe('migrate-to-cdkd.sh の識別子の手当て', () => {
 
     expect(code, '--resource を組み立てていない').toMatch(/--resource/);
     expect(code, '--auto が無いと指定した数件だけが取り込まれる').toMatch(/--auto/);
+  });
+
+  // UserPoolClient の手当ては auth と一緒に外した。どこかのスタックに
+  // UserPoolClient が戻ってきたら、手当てを戻してから取り込むこと
+  it('UserPoolClient を持つスタックが無い（手当てを外したため）', () => {
+    const templates = synth();
+    for (const [stack, template] of Object.entries(templates)) {
+      expect(
+        Object.keys(template.findResources('AWS::Cognito::UserPoolClient')),
+        `${stack} に UserPoolClient がある`,
+      ).toEqual([]);
+    }
   });
 
   it('手当てが要るリソースの数が変わっていない', () => {
