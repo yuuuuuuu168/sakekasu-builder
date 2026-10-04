@@ -12,6 +12,7 @@
   },
   "context": {
     "env": "dev",
+    "agentSpaceArn": "arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/<Agent Space ID>",
     "sharedAuth": {
       "domain": "auth.sakekasu-builder.com",
       "userPoolId": "ap-northeast-1_yw1VDKtxW",
