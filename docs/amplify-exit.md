@@ -137,7 +137,7 @@ cdkd 側の対応状況は、おおむね問題ない。[supported-resources.md]
 
 順番だけ整理しておく。着手は cdkd の手順9が終わってから。
 
-1. CDK に配信スタックを足す。S3 バケットはパブリックアクセスを閉じたまま、CloudFront から OAC で読む。証明書は CloudFront の制約で us-east-1 に置く（`sakekasu-dev-health-global` と同じリージョンなので、置き場所の前例はある）
+1. CDK に配信スタックを足す。S3 バケットはパブリックアクセスを閉じたまま、CloudFront から OAC で読む。証明書は CloudFront の制約で us-east-1 に置く（以前 `sakekasu-dev-health-global` を置いていたリージョンで、cdkd の us-east-1 のアセット置き場は [cdkd-migration.md](cdkd-migration.md) の手順4 で作ってある）
 2. セキュリティヘッダをレスポンスヘッダポリシーへ移す。上の表と一字一句突き合わせる。CSP を取りこぼしても画面は普通に出るので、抜けても気づけない
 3. SPA のリライトを、403 と 404 を `/index.html` の 200 に読み替えるカスタムエラーレスポンスで置き換える
 4. GitHub Actions にフロントのデプロイを足す。`paths` は `src/**` と設定ファイル
