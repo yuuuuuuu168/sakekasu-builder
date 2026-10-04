@@ -5,11 +5,13 @@ import { GithubOidcStack } from '../lib/github-oidc-stack.js';
 
 const REPOSITORY = 'yuuuuuuu168/sakekasu-builder';
 const ACCOUNT = '111111111111';
+const SITE_ZONE = 'sake.sakekasu-builder.com';
 
 function synth(): Template {
   const app = new cdk.App();
   const stack = new GithubOidcStack(app, 'TestGithubOidc', {
     repository: REPOSITORY,
+    siteZone: SITE_ZONE,
     env: { account: ACCOUNT, region: 'ap-northeast-1' },
   });
   return Template.fromStack(stack);
@@ -247,6 +249,11 @@ describe('GithubOidcStack', () => {
       'cloudformation:CreateResource',
       'cloudformation:UpdateResource',
       'cloudformation:DeleteStack',
+      'route53:ChangeResourceRecordSets',
+      'route53:CreateHostedZone',
+      'acm:RequestCertificate',
+      'cloudfront:UpdateDistribution',
+      'cloudfront:CreateInvalidation',
     ]) {
       expect(allows(statements, action), `${action} が許可されている`).toBe(false);
     }
@@ -508,6 +515,64 @@ describe('GithubOidcStack', () => {
       (r) => (r as { Properties: { ManagedPolicyArns?: unknown[] } }).Properties.ManagedPolicyArns ?? [],
     );
     expect(managed).toEqual([]);
+  });
+
+  it('配信用ロールは main ブランチの push からしか引き受けられない', () => {
+    template.hasResourceProperties('AWS::IAM::Role', {
+      RoleName: 'sakekasu-github-actions-site',
+      AssumeRolePolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: 'sts:AssumeRoleWithWebIdentity',
+            Condition: {
+              StringEquals: Match.objectLike({
+                'token.actions.githubusercontent.com:sub':
+                  `repo:${REPOSITORY}:ref:refs/heads/main`,
+              }),
+            },
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('配信用ロールは配信バケットの中身を置き換えるだけ', () => {
+    const statements = statementsFor(template, /^SiteDeployRole/);
+    expect(statements.length).toBeGreaterThan(0);
+
+    for (const statement of statements) {
+      expect(statement.Effect).toBe('Allow');
+      for (const action of toArray(statement.Action)) {
+        expect(['s3:ListBucket', 's3:PutObject', 's3:DeleteObject']).toContain(action);
+      }
+      for (const resource of toArray(statement.Resource)) {
+        expect(resource).toMatch(new RegExp(`^arn:aws:s3:::\\*-sakekasu-site-${ACCOUNT}(/\\*)?$`));
+      }
+    }
+    // cdkd のロールにも bootstrap のロールにも入れない
+    expect(allows(statements, 'sts:AssumeRole')).toBe(false);
+  });
+
+  it('cdkd のデプロイロールは配信用サブドメインの DNS レコードしか書き換えられない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+    const writers = statements.filter((s) => matches(s, 'Allow', 'route53:ChangeResourceRecordSets'));
+    expect(writers.length).toBeGreaterThan(0);
+
+    for (const statement of writers) {
+      // 同じアカウントに kakeibo・learning・reinvent のゾーンもある。名前で絞らないと
+      // 他のアプリのサブドメインを書き換えられる
+      expect(statement.Condition).toEqual({
+        'ForAllValues:StringLike': {
+          'route53:ChangeResourceRecordSetsNormalizedRecordNames': [SITE_ZONE, `*.${SITE_ZONE}`],
+        },
+      });
+    }
+  });
+
+  it('cdkd のデプロイロールはゾーンを消せず、キャッシュの無効化も打てない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+    expect(allows(statements, 'route53:DeleteHostedZone')).toBe(false);
+    expect(allows(statements, 'cloudfront:CreateInvalidation')).toBe(false);
   });
 
   it('OIDC 連携のロールは1つ残らず Deny の対象になっている', () => {
