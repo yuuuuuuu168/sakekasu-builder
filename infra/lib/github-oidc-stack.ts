@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import type { Construct } from 'constructs';
 import { cdkdDeployStatements, cdkdDiffStatements } from './cdkd-policies.js';
+import { deployGuardrailStatements } from './deploy-guardrail.js';
 import { createRoleBoundary } from './role-boundary.js';
 
 export interface GithubOidcStackProps extends cdk.StackProps {
@@ -92,6 +93,27 @@ export class GithubOidcStack extends cdk.Stack {
     for (const statement of cdkdDeployStatements(this.account, props.siteZone)) {
       cdkdDeployRole.addToPolicy(statement);
     }
+
+    // 同じアカウントにいる他のアプリのリソースに触れないためのガードレール（deploy-guardrail.ts）。
+    // インラインのポリシーはロールあたり合計 10,240 文字までで、上の許可だけで 7.8KB あるため、
+    // 管理ポリシーに分けて付ける。名前は builder の接頭辞（sakekasu-dev-* など）の外にあるので、
+    // cdkd 用ロールからは中身を書き換えられない（DenyRolesOutsideApp）
+    new iam.ManagedPolicy(this, 'CdkdDeployGuardrail', {
+      managedPolicyName: 'sakekasu-cdkd-deploy-guardrail',
+      description: 'Deny-only guardrail that keeps cdkd deploys of sakekasu-builder inside the builder app',
+      roles: [cdkdDeployRole],
+      statements: deployGuardrailStatements({
+        account: this.account,
+        app: 'builder',
+        resourceNamePrefixes: ['sakekasu-dev-', 'sakekasu-staging-', 'sakekasu-prod-'],
+        protectedRoleNames: [
+          'sakekasu-cdkd-deploy',
+          'sakekasu-github-actions-deploy',
+          'sakekasu-github-actions-diff',
+          'sakekasu-github-actions-site',
+        ],
+      }),
+    });
 
     // deploy ロールから cdkd ロールへ入れるようにする。
     // cdk-hnb659fds-* への AssumeRole は、移行が終わって CDK CLI を使わなく
