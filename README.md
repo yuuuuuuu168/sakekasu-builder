@@ -741,6 +741,7 @@ aidlc/           # AI-DLC のルールと成果物
 | [docs/amplify-exit.md](docs/amplify-exit.md) | Amplify Hosting をやめて CDK 側へ寄せるかの検討（実測・速度・コスト・着手の順番） |
 | [docs/log-group-import.md](docs/log-group-import.md) | 既存ロググループのスタック取り込み（`logRetention` からの移行） |
 | [docs/agent-verify-permission-set.md](docs/agent-verify-permission-set.md) | クラウドセッションから AWS を見るための読み取り専用 Permission Set |
+| [docs/npm-audit.md](docs/npm-audit.md) | npm の脆弱性の対応状況（本番に入る依存の見分け方・残しているものとその理由） |
 | [CLAUDE.md](CLAUDE.md) | 開発の進め方（ブランチ運用・AI-DLC・AWS 確認の認証フロー） |
 
 ## セットアップ
