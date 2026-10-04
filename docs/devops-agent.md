@@ -85,7 +85,7 @@ Security Agent の Agent Space（Issue #107 で同じ `ops-tooling` に移して
 
 認可のときに Enterprise Grid を選ばない。ワークスペース単位でインストールする。またインストールした Slack アプリはアンインストールしない。再インストールできなくなる可能性があると公式に注意書きがある。
 
-プライベートチャンネルに投げるなら、東京リージョンのアプリを `/invite @AWS DevOps Agent - Asia Pacific (Tokyo)` で招待しておく。アプリはリージョンごとに別物で、名前の後ろのリージョン表記まで一致していないと紐付かない。
+プライベートチャンネルに投げるなら、東京リージョンのアプリを `/invite @AWS DevOps Agent - AP (Tokyo)` で招待しておく。アプリはリージョンごとに別物で、名前の後ろのリージョン表記まで一致していないと紐付かない。入力中に候補が出るので、そこから選ぶのが確実。
 
 ここまでは一方向の通知。Slack からエージェントに話しかける側は [Slack の双方向通信](#slack-の双方向通信) にまとめてある。
 
@@ -183,12 +183,12 @@ HTTP 200 が返るのに調査が始まらないときは、本文の形式か�
 
 Slack ワークスペースのアカウントレベル登録は済んでいる前提（手順2）。追加で要るのは、DevOps Agent のコンソールから IAM ロールを作れる権限。
 
-1. Slack でプライベートチャンネルを作る。メンバーは運用に関わる人だけに絞る。作ったらチャンネル ID（`C` 始まり）を控える
-2. そのチャンネルに東京リージョンのアプリを招待する。`/invite @AWS DevOps Agent - Asia Pacific (Tokyo)`。リージョンごとにアプリが別なので、名前の後ろのリージョン表記まで一致していないと紐付かない
+1. Slack でプライベートチャンネルを作る。メンバーは運用に関わる人だけに絞る。作ったらチャンネル ID（`C` 始まり）を控える。パブリックチャンネルの ID を入れると、Add した時点で `Bidirectional Slack communication is only supported in private channels` で弾かれる
+2. そのチャンネルに東京リージョンのアプリを招待する。`/invite @AWS DevOps Agent - AP (Tokyo)`。リージョンごとにアプリが別なので、名前の後ろのリージョン表記まで一致していないと紐付かない
 3. コンソール（`ops-tooling`）で Agent Space → Capabilities → Communications → Add。登録済みのワークスペースを選び、チャンネル ID を入れる
 4. Bidirectional mode を ON にし、IAM ロールは「Auto-create a new DevOps Agent role」を選ぶ。コンソールが `AIDevOpsChannelAccessPolicy` を付けたロールを作る
 5. Add で関連付けを作り、Integrations の表で Bidirectional が Enabled、Bidirectional role にロール ARN が出ることを確認する
-6. Slack に戻り、そのチャンネルでトップレベルのメッセージとして `@AWS DevOps Agent - Asia Pacific (Tokyo) setup` を送る。確認の投稿が返れば紐付け完了
+6. Slack に戻り、そのチャンネルでトップレベルのメッセージとして `@AWS DevOps Agent - AP (Tokyo) setup` を送る。チャンネルを Agent Space に紐付けた旨の投稿が返れば完了
 
 `setup` は紐付けが壊れたときの直し方も兼ねている。反応しなくなったらもう一度送る。`/setup` というスラッシュコマンドは無い。
 
@@ -215,7 +215,7 @@ Slack ワークスペースのアカウントレベル登録は済んでいる�
 会話はトップレベルのメンションで始める。返答は元メッセージのスレッドに付く。
 
 ```
-@AWS DevOps Agent - Asia Pacific (Tokyo) 直近の appsync-5xx の調査状況を教えて
+@AWS DevOps Agent - AP (Tokyo) 直近の appsync-5xx の調査状況を教えて
 ```
 
 スレッドの中で続けるときも毎回メンションが要る。落とすと無視される。別の話を始めたいときは、スレッドではなく新しいトップレベルのメッセージにする。
