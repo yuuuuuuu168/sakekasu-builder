@@ -377,15 +377,33 @@ export class MonitoringStack extends cdk.Stack {
       });
     }
 
+    /*
+     * DynamoDB のスロットリングは、テーブル単位で出る ReadThrottleEvents と WriteThrottleEvents の和で見る。
+     *
+     * 以前は ThrottledRequests を TableName だけで見ていたが、この指標は TableName と Operation の
+     * 組でしか出ない。次元が一致しない指標はデータが無い扱いになり、NOT_BREACHING なので
+     * 一度も鳴らない状態だった。アラーム名と論理 ID は変えず、見る指標だけを差し替える。
+     * 片方だけ出ている期間に式全体が欠損にならないよう、FILL で 0 を埋めてから足す。
+     */
+    const throttleEvents = (tableName: string, metricName: string) =>
+      new cloudwatch.Metric({
+        namespace: 'AWS/DynamoDB',
+        metricName,
+        dimensionsMap: { TableName: tableName },
+        statistic: 'Sum',
+        period: cdk.Duration.minutes(5),
+      });
     for (const table of props.tables) {
       this.addAlarm(`DynamoThrottle${table.node.id}`, {
         alarmName: `${prefix}-dynamodb-throttle-${table.node.id.toLowerCase()}`,
         description: `${table.node.id} が読み書きをスロットリングされています`,
-        metric: new cloudwatch.Metric({
-          namespace: 'AWS/DynamoDB',
-          metricName: 'ThrottledRequests',
-          dimensionsMap: { TableName: table.tableName },
-          statistic: 'Sum',
+        metric: new cloudwatch.MathExpression({
+          expression: 'FILL(r, 0) + FILL(w, 0)',
+          usingMetrics: {
+            r: throttleEvents(table.tableName, 'ReadThrottleEvents'),
+            w: throttleEvents(table.tableName, 'WriteThrottleEvents'),
+          },
+          label: 'ThrottleEvents',
           period: cdk.Duration.minutes(5),
         }),
         threshold: 1,
