@@ -12,6 +12,11 @@ import { readFileSync } from 'node:fs';
 
 const app = new cdk.App();
 
+// 全リソースに App タグを付ける。アプリごとのコストを Cost Explorer で分けるためと、
+// デプロイ用ロールの「他のアプリのリソースには触れない」ガードレール（タグで判定する）のため。
+// 4 アプリと共通基盤が同じアカウントに同居しているので、名前の接頭辞では分けきれない
+cdk.Tags.of(app).add('App', 'builder');
+
 // GitHub Actions からの CDK デプロイ用 OIDC 連携（Issue #94）。
 // Actions 自身にこのスタックを触らせると、ロールの更新ミスで自分を
 // 締め出す恐れがあるため、billing と同様にフラグ付きの手動デプロイ専用。
