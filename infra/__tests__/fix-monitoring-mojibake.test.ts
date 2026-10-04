@@ -164,8 +164,11 @@ describe('planRepairs', () => {
  *
  * `cdk.out` は読まない。CI の `npm test` は合成より前に走るので、ファイルの
  * 有無に頼ると検査ごと素通りする。他のテストと同じくその場で合成する。
+ *
+ * 3 スタックを合成し、そのたびに Lambda ごとに esbuild が走るため 1 件で 3〜4 秒かかる。
+ * 全体を並列で回すと既定の 5 秒を超えて落ちたので、env-prefix のテストと同じく延ばしてある
  */
-describe('合成結果との突き合わせ', () => {
+describe('合成結果との突き合わせ', { timeout: 60_000 }, () => {
   const script = readFileSync(SCRIPT_PATH, 'utf8');
 
   function monitoringTemplate() {
