@@ -1,6 +1,5 @@
 import { Template, Match } from "aws-cdk-lib/assertions";
 import * as cdk from "aws-cdk-lib";
-import { AuthStack } from "../lib/auth-stack.js";
 import { ApiStack } from "../lib/api-stack.js";
 import { MonitoringStack } from "../lib/monitoring-stack.js";
 import { TEST_SHARED_AUTH } from "./shared-auth-fixture.js";
@@ -54,11 +53,10 @@ function cloudwatchPublishStatements(
     });
 }
 
-function synth(options: { canaryEnabled?: boolean } = {}) {
+function synth() {
   const app = new cdk.App();
   const env = { account: TEST_ACCOUNT, region: TEST_REGION };
 
-  const authStack = new AuthStack(app, "TestAuth", { envName: "dev", env });
   const apiStack = new ApiStack(app, "TestApi", {
     envName: "dev",
     sharedAuth: TEST_SHARED_AUTH,
@@ -71,29 +69,21 @@ function synth(options: { canaryEnabled?: boolean } = {}) {
     functions: [apiStack.presignedUrlFunction, apiStack.ocrAnalyzerFunction],
     ocrFunction: apiStack.ocrAnalyzerFunction,
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
-    signupNotifyFailMetricFilter: authStack.signupNotifyFailMetricFilter,
     sommelierRuntimeArn: RUNTIME_ARN,
     siteUrl: "https://example.com",
-    userPoolId: "ap-northeast-1_TEST",
-    canaryUserPoolClientId: "canaryclientid",
-    ...options,
     env,
   });
 
   return {
     template: Template.fromStack(monitoringStack),
-    authTemplate: Template.fromStack(authStack),
   };
 }
 
 describe("MonitoringStack", () => {
   let template: Template;
-  let authTemplate: Template;
 
   beforeAll(() => {
-    const result = synth();
-    template = result.template;
-    authTemplate = result.authTemplate;
+    template = synth().template;
   });
 
   it("アラートを流す SNS トピックがある", () => {
@@ -290,14 +280,6 @@ describe("MonitoringStack", () => {
     });
   });
 
-  // Issue #66: 通知 Lambda は throw しないため、失敗ログから起こしたメトリクスで見る
-  it("新規登録通知の失敗を監視する", () => {
-    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      AlarmName: "dev-sakekasu-signup-notify-fail",
-      MetricName: "SignupNotifyFailCount",
-    });
-  });
-
   it("すべてのアラームが発報と復旧の両方を通知する", () => {
     const alarms = template.findResources("AWS::CloudWatch::Alarm");
     expect(Object.keys(alarms).length).toBeGreaterThan(0);
@@ -316,14 +298,11 @@ describe("MonitoringStack", () => {
 
   it("利用が無い時間帯に鳴らさない（欠損を異常扱いするのは意図したものだけ）", () => {
     // 欠損に意味がある指標は個別に扱う。
-    // - カナリア: 間隔が長く、空白を「異常なし」と扱うと復旧を誤検知する
     // - 実行回数: 記録が無い＝動いていないので、欠損そのものが異常
     // - SLO の達成率: 30日の rolling で動きが遅い。値が出なくなったときに
-    //   「異常なし」と扱うと、未達のまま復旧したことになってしまう（カナリアと同じ理由）
+    //   「異常なし」と扱うと、未達のまま復旧したことになってしまう
     const exceptions = new Set([
-      "dev-sakekasu-sommelier-canary",
       "dev-sakekasu-watcher-silent-health-check",
-      "dev-sakekasu-watcher-silent-sommelier-canary",
       "dev-sakekasu-ocr-slo-availability",
       "dev-sakekasu-ocr-slo-latency",
       "dev-sakekasu-presigned-url-slo-availability",
@@ -343,10 +322,9 @@ describe("MonitoringStack", () => {
   // スケジュールが止まると Lambda は動かず、エラーすら記録されないまま監視が消える。
   // Lambda の Invocations は呼び出しが無いと 0 ではなく「記録なし」になるため、
   // 実際に発報させているのは欠損の扱い（breaching）のほう
-  it("外形監視とカナリアが「動いていないこと」自体を検知する", () => {
+  it("外形監視が「動いていないこと」自体を検知する", () => {
     for (const [name, window] of [
       ["dev-sakekasu-watcher-silent-health-check", 3600],
-      ["dev-sakekasu-watcher-silent-sommelier-canary", 43200],
     ] as const) {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: name,
@@ -362,34 +340,10 @@ describe("MonitoringStack", () => {
     }
   });
 
-  // 6時間に1度しか計測しないため、空白を異常なしと扱うと
-  // 直っていないのに復旧通知が飛んでしまう
-  it("カナリアは計測の空白で復旧扱いにしない", () => {
-    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      AlarmName: "dev-sakekasu-sommelier-canary",
-      TreatMissingData: "missing",
-    });
-  });
-
-  // 認証が二段構えのため、登録漏れだと必ず403になる。Slack だけで原因に辿り着けるようにする
-  it("カナリアのアラート本文にクライアント登録漏れの確認を促す案内を入れる", () => {
-    const alarms = template.findResources("AWS::CloudWatch::Alarm");
-    const canaryAlarm = Object.values(alarms).find(
-      (alarm) =>
-        alarm.Properties?.AlarmName === "dev-sakekasu-sommelier-canary",
-    );
-    expect(canaryAlarm).toBeDefined();
-
-    const description = canaryAlarm!.Properties.AlarmDescription as string;
-    expect(description).toContain("allowedClients");
-    expect(description).toContain("COGNITO_APP_CLIENT_ID");
-  });
-
   // 監視が動かなくなると異常に気づけない
-  it("外形監視とカナリアの実行失敗そのものを監視する", () => {
+  it("外形監視の実行失敗そのものを監視する", () => {
     for (const alarmName of [
       "dev-sakekasu-watcher-failure-health-check",
-      "dev-sakekasu-watcher-failure-sommelier-canary",
     ]) {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: alarmName,
@@ -434,38 +388,6 @@ describe("MonitoringStack", () => {
     });
   });
 
-  it("ソムリエのカナリアは費用を抑えるため6時間ごとに回す", () => {
-    template.hasResourceProperties("AWS::Events::Rule", {
-      Name: "dev-sakekasu-sommelier-canary-schedule",
-      ScheduleExpression: "rate(6 hours)",
-    });
-  });
-
-  it("カナリアの認証情報は Secrets Manager 名だけを渡す", () => {
-    template.hasResourceProperties("AWS::Lambda::Function", {
-      FunctionName: "dev-sakekasu-sommelier-canary",
-      Environment: {
-        Variables: Match.objectLike({
-          CREDENTIALS_SECRET_ID: "dev-sakekasu/monitoring/canary-user",
-        }),
-      },
-    });
-  });
-
-  it("カナリアの Cognito 権限は対象ユーザープールだけに絞る", () => {
-    template.hasResourceProperties("AWS::IAM::Policy", {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Action: "cognito-idp:AdminInitiateAuth",
-            Resource:
-              "arn:aws:cognito-idp:ap-northeast-1:111122223333:userpool/ap-northeast-1_TEST",
-          }),
-        ]),
-      },
-    });
-  });
-
   it("メトリクス書き込みは自分の名前空間だけに限定する", () => {
     template.hasResourceProperties("AWS::IAM::Policy", {
       PolicyDocument: {
@@ -483,39 +405,19 @@ describe("MonitoringStack", () => {
     });
   });
 
-  // ブラウザ向けクライアントにパスワード認証を持たせない（SRP のみ）
-  it("ブラウザ向けクライアントは SRP のみを許可する", () => {
-    authTemplate.hasResourceProperties("AWS::Cognito::UserPoolClient", {
-      ClientName: "dev-sakekasu-client",
-      ExplicitAuthFlows: Match.not(
-        Match.arrayWith(["ALLOW_ADMIN_USER_PASSWORD_AUTH"]),
-      ),
-    });
-  });
+  // ソムリエのカナリアは旧プール（sakekasu-dev-auth）でサインインしていた。
+  // 共通ログインにはパスワードで直接サインインする経路が無いので、コードごと消した。
+  // 旧プールを外すには、まずこのスタックが旧プールを読まなくなっている必要がある
+  // （docs/shared-login.md の「旧プールを外す」）
+  it("カナリアを持たず、Cognito に触れない", () => {
+    const functionNames = Object.values(
+      template.findResources("AWS::Lambda::Function"),
+    ).map((fn) => fn.Properties?.FunctionName);
+    expect(functionNames).not.toContain("dev-sakekasu-sommelier-canary");
 
-  // カナリアは専用クライアントでサインインする
-  it("カナリア専用クライアントだけが管理者パスワード認証を持つ", () => {
-    authTemplate.hasResourceProperties("AWS::Cognito::UserPoolClient", {
-      ClientName: "dev-sakekasu-canary-client",
-      ExplicitAuthFlows: Match.arrayWith(["ALLOW_ADMIN_USER_PASSWORD_AUTH"]),
-    });
-  });
-
-  // 存在しない利用者と誤ったパスワードの応答を揃え、登録済みアドレスを割り出せなくする
-  it("カナリア専用クライアントは利用者の存在を隠す", () => {
-    authTemplate.hasResourceProperties("AWS::Cognito::UserPoolClient", {
-      ClientName: "dev-sakekasu-canary-client",
-      PreventUserExistenceErrors: "ENABLED",
-    });
-  });
-
-  it("カナリアはブラウザ向けではなく専用クライアントを使う", () => {
-    template.hasResourceProperties("AWS::Lambda::Function", {
-      FunctionName: "dev-sakekasu-sommelier-canary",
-      Environment: {
-        Variables: Match.objectLike({ USER_POOL_CLIENT_ID: "canaryclientid" }),
-      },
-    });
+    const json = JSON.stringify(template.toJSON());
+    expect(json).not.toContain("cognito-idp");
+    expect(json).not.toContain("canary");
   });
 
   // AWS Health の通知は共通基盤（sakekasu-integrated_environment）だけが持つ。
@@ -792,63 +694,5 @@ describe("MonitoringStack", () => {
         ).toEqual({ Duration: 30, DurationUnit: "DAY" });
       }
     });
-  });
-});
-
-// 共通ログインへ移ったあと、旧プールでサインインするカナリアは必ず落ちる。
-// リソースは消さずに、スケジュールと通知だけを止める
-describe("MonitoringStack（カナリアを止めたとき）", () => {
-  const CANARY_ALARMS = [
-    "dev-sakekasu-sommelier-canary",
-    "dev-sakekasu-watcher-failure-sommelier-canary",
-    "dev-sakekasu-watcher-silent-sommelier-canary",
-  ];
-  let template: Template;
-  let enabledTemplate: Template;
-
-  beforeAll(() => {
-    template = synth({ canaryEnabled: false }).template;
-    enabledTemplate = synth().template;
-  });
-
-  it("スケジュールは残したまま無効にする", () => {
-    template.hasResourceProperties("AWS::Events::Rule", {
-      Name: "dev-sakekasu-sommelier-canary-schedule",
-      State: "DISABLED",
-    });
-    enabledTemplate.hasResourceProperties("AWS::Events::Rule", {
-      Name: "dev-sakekasu-sommelier-canary-schedule",
-      State: "ENABLED",
-    });
-  });
-
-  it.each(CANARY_ALARMS)("%s は残したまま通知を切る", (alarmName) => {
-    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      AlarmName: alarmName,
-      ActionsEnabled: false,
-    });
-  });
-
-  // 止めたのはカナリアだけ。外形監視など他のアラームまで黙らせない
-  it("カナリア以外のアラームは通知を切らない", () => {
-    const alarms = template.findResources("AWS::CloudWatch::Alarm");
-    const silenced = Object.values(alarms)
-      .filter((a) => a.Properties?.ActionsEnabled === false)
-      .map((a) => a.Properties?.AlarmName)
-      .sort();
-    expect(silenced).toEqual([...CANARY_ALARMS].sort());
-  });
-
-  // 止めても論理 ID が変わらないこと（cdkd の state と食い違うと作り直しになる）
-  it("止めても止めなくても、リソースの論理 ID は同じ", () => {
-    const ids = (t: Template) => Object.keys(t.toJSON().Resources).sort();
-    expect(ids(template)).toEqual(ids(enabledTemplate));
-  });
-
-  it("動かしているときは ActionsEnabled を書かない（既存アラームに更新を出さない）", () => {
-    const alarms = enabledTemplate.findResources("AWS::CloudWatch::Alarm");
-    expect(
-      Object.values(alarms).some((a) => a.Properties?.ActionsEnabled !== undefined),
-    ).toBe(false);
   });
 });

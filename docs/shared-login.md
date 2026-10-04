@@ -17,7 +17,7 @@
 | MFA | 任意（アプリの「MFA」ダイアログで登録） | 必須（TOTP）。登録も入力もマネージドログインの画面で行う |
 | パスワード | 8 文字以上 | 16 文字以上 |
 | ユーザーの作り方 | 画面からセルフサインアップ | 共通ログイン側で管理者が作る（そちらの `docs/identity.md`） |
-| 新規登録の Slack 通知 | 旧プールの Post Confirmation トリガー | 役目を終えた（共通プールにセルフサインアップが無い）。旧プールに付けたまま残す |
+| 新規登録の Slack 通知 | 旧プールの Post Confirmation トリガー | 役目を終えた（共通プールにセルフサインアップが無い）。旧プールを外すときに一緒に外す |
 | トークンの有効期限 | アクセス 1 時間 / リフレッシュ 30 日 | 同じ |
 
 接続先の値は `infra/cdk.json` の context `sharedAuth` に `{ domain, userPoolId, clientId }` で置いてある。
@@ -47,52 +47,60 @@ Amplify Hosting のプレビュー URL（`*.amplifyapp.com`）は登録してい
 | ソムリエの Runtime（`sommelier/agentcore/agentcore.json`） | JWT Authorizer の `discoveryUrl` を共通プールに、`allowedClients` を builder のクライアントだけに。アプリ内検証の `COGNITO_USER_POOL_ID` / `COGNITO_APP_CLIENT_ID` も同じ値に |
 | 画面（`src/features/auth/`） | マネージドログインへのリダイレクトに置き換え。独自のサインイン・サインアップ・パスワード再設定・TOTP 入力・MFA 設定ダイアログは消した |
 
-## 旧ユーザープール（`sakekasu-dev-auth`）は残してある
+## 旧ユーザープール（`sakekasu-dev-auth`）を外す（2 段）
 
-消さない。プールは RETAIN で、スタックもそのまま cdkd の管理下に置いてある。理由は切り戻しのため。
+データの付け替え（下の「データの付け替え」）が済み、利用者（本人）が旧プールを消してよいと判断したので外す。
+プールは RETAIN で、スタックは cdkd の管理下にある。プールを消すと旧 sub は二度と戻らないので、
+共通ログインへの切り替えを revert して旧プールへ戻す道はここで閉じる。
 
-- プールを消すと旧 sub は二度と戻らない。データの付け替え（下の手順）が済む前に消すと、
-  旧 sub に付いた記録と画像を誰も開けなくなる
-- 中身（設定・トリガー・クライアント）にも手を付けていない。cdkd で UserPool を更新すると
-  落ちる不具合があり（`auth-stack.ts` の `mfaMessage` のコメント）、残しておくだけのものに
-  更新を出す理由が無い
+外す順番は「読む側から参照を外す → 次のデプロイで読まれる側を外す」の 2 段。
+監視スタック（`sakekasu-dev-monitoring`）が auth の Export（ユーザープール ID とカナリア用クライアント ID）を
+`Fn::ImportValue` で読んでいたため。cdkd も CloudFormation と同じく、ほかのスタックの state に Import が
+記録されているスタックは destroy させない（`StackHasActiveImportsError`）。
 
-**データの付け替えが済んで落ち着いたら、別の PR で `AuthStack` を外す。** そのときに一緒に片付けるもの:
+### 1 段目: 監視スタックから旧プールへの参照を外す
 
-- 新規登録の通知（`infra/lambda/signup-notifier`、旧プールの Post Confirmation トリガー、
-  `SignupNotifyFailCount` のメトリクスフィルターと監視スタックのアラーム）。
-  旧プールはセルフサインアップが開いたままなので、残している間は「旧プールに誰かが登録した」
-  ことの知らせとして働く（そのトークンはもうどの API も受け付けない）
-- カナリア用クライアント（`dev-sakekasu-canary-client`）と、カナリアの行き先（下の「カナリア」）
-- 監視スタックが読んでいる旧プールの Export（カナリアの `USER_POOL_ID` など）。
-  外す順番は「読む側（monitoring）から参照を外す → 次のデプロイで auth を外す」の 2 段
+外したもの（どれも監視スタック。main へのマージで deploy が消す）:
 
-切り戻しは、この変更を入れた PR を revert してデプロイする。画面は旧プール用の画面に戻り、
-AppSync とソムリエも旧プールを見るようになる。データの付け替えを済ませていた場合は、
-下のスクリプトを旧 sub と新 sub を入れ替えて流す。
+| 何を | 名前 |
+| --- | --- |
+| カナリアの Lambda とロール、インラインポリシー | `dev-sakekasu-sommelier-canary` |
+| カナリアのスケジュール | `dev-sakekasu-sommelier-canary-schedule` |
+| カナリアのアラーム 3 件 | `dev-sakekasu-sommelier-canary`・`dev-sakekasu-watcher-failure-sommelier-canary`・`dev-sakekasu-watcher-silent-sommelier-canary` |
+| 新規登録通知の失敗アラーム | `dev-sakekasu-signup-notify-fail` |
+| 出力 | `CanaryCredentialsSecretName` |
 
-## カナリア（ソムリエとの実会話の監視）は止めてある
+カナリアのロググループ（`/aws/lambda/dev-sakekasu-sommelier-canary`）は RETAIN なので、deploy では消えずに残る。
+2 段目の手順で手で消す。カナリアのロールは自動生成名（`sakekasu-dev-monitoring-SommelierCanary…`）で
+`role/sakekasu-*` に入るので、CI の cdkd ロールで消せる。
+
+auth スタックのテンプレートは 1 文字も変えていない。`infra/bin/app.ts` で `exportValue` を使い、
+監視スタックが読んでいた 2 つの Export を同じ名前のまま出し続けている。deploy は auth → api → monitoring の順に
+走るので、auth のほうで先に Export を消すと、デプロイ済みの監視スタックがまだ読んでいる Export を消す形になる。
+Export を消すのは auth をアプリから外す 2 段目に回した。
+
+### 2 段目: auth スタックをアプリから外す
+
+1 段目のマージと deploy が済んでから。手順は 2 段目の PR で書く。
+
+## カナリア（ソムリエとの実会話の監視）は消した
 
 カナリアは監視用ユーザーでパスワードを使って直接サインインし（`ADMIN_USER_PASSWORD_AUTH`）、
-ソムリエに短い相談を投げる。共通ログインではこれができない。
+ソムリエに短い相談を投げていた。共通ログインではこれができない。
 
 - builder 用クライアントは `authFlows` が空で、パスワードによる直接の認証を受け付けない
 - 共通プールは MFA 必須なので、パスワードだけではトークンが出ない
 - ソムリエの Runtime の JWT Authorizer が見られるプールは 1 つだけ（`discoveryUrl`）。
   共通プールに切り替えると、旧プールでサインインしたカナリアのトークンは必ず 401/403 になる
 
-そこで、カナリアは**消さずに止めた**（`infra/bin/app.ts` の `canaryEnabled: false`）。
+共通ログインへ移ったときはいったん止め（スケジュールを無効にし、アラームの通知を切る）、
+旧プールを外す 1 段目でコード（`infra/lambda/sommelier-canary`）ごと消した。止めたまま残すと、
+旧プールのユーザーと Export を読み続けるので、旧プールを外せない。
 
-- スケジュール（`dev-sakekasu-sommelier-canary-schedule`）を無効にする
-- カナリアに関わる 3 つのアラーム（`dev-sakekasu-sommelier-canary`・`dev-sakekasu-watcher-failure-sommelier-canary`・
-  `dev-sakekasu-watcher-silent-sommelier-canary`）は残したまま、通知（ActionsEnabled）だけを切る。
-  沈黙のアラームは欠損を異常とみなすので ALARM になるが、Slack には流れない
-- Lambda・ロール・環境変数（旧プールを指したまま）はそのまま残す
+ソムリエの外形監視（認証なしで叩いて 401/403 が返ることを見る）と、認証拒否・システムエラーの
+アラームは残っている。無くなったのは「実際に会話できるか」の確認だけ。
 
-その間もソムリエの外形監視（認証なしで叩いて 401/403 が返ることを見る）と、
-認証拒否・システムエラーのアラームは動いている。止まっているのは「実際に会話できるか」の確認だけ。
-
-再開するには、共通ログイン側（sakekasu-integrated_environment）の変更が要る。このリポジトリだけでは直せない。選択肢:
+作り直すなら、共通ログイン側（sakekasu-integrated_environment）の変更が要る。このリポジトリだけでは直せない。選択肢:
 
 1. **共通プールにカナリア用のクライアントを足す**（`ADMIN_USER_PASSWORD_AUTH` のみ。ブラウザ向けとは分ける）。
    MFA 必須なので、カナリアは `SOFTWARE_TOKEN_MFA` のチャレンジに TOTP コードで答える必要がある。
@@ -101,10 +109,9 @@ AppSync とソムリエも旧プールを見るようになる。データの付
 2. **M2M（client credentials）のクライアントを足す**。ユーザーも MFA も要らないが、トークンに利用者の sub が無い
    （sub がクライアント ID になる）。ソムリエ側で「記録を持たない利用者」として扱えるか確かめる必要があり、
    M2M のトークン発行は課金対象。リソースサーバーとカスタムスコープも要る
-3. **止めたままにする**。外形監視と認証拒否のアラームで、Runtime が生きていることと認証が働いていることは見えている
 
-どれかを選んで共通ログイン側を直したら、`canaryEnabled` を戻し、カナリアの `USER_POOL_ID` と
-クライアント ID を共通プール側へ向ける。
+以前の実装（Lambda、アラーム、テスト）は git の履歴にある。1 段目の PR を revert するのではなく、
+選んだ方式に合わせて書き直す。
 
 ## データの付け替え（旧 sub → 新 sub）
 

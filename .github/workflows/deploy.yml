@@ -65,7 +65,7 @@ jobs:
       - run: npm ci --ignore-scripts
       # AWS SDK は Lambda ごとの package.json 側にある。テストが import するので
       # 入れておく（詳細は test.yml のコメント）。
-      # --ignore-scripts なのは、8つの lock を調べていずれも
+      # --ignore-scripts なのは、Lambda ごとの lock を調べていずれも
       # hasInstallScript を持たないため。付けても壊れるものが無い
       - name: Lambda ごとの依存を入れる
         run: |
