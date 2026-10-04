@@ -42,16 +42,18 @@ prefix="sakekasu-${env_name}"
 #   auth           export 2 / import 0   ← 誰からも読まれなくなるまで消せない
 #   api            export 7 / import 1（auth から）
 #   monitoring     export 0 / import 9（api から7、auth から2）
-#   health-global  export 0 / import 0   ← 独立。us-east-1
 #
 # したがって monitoring → api → auth の順でなければ DeleteStack が
 # 「Export ... cannot be deleted as it is in use by ...」で落ちる。
-# health-global は誰とも Export をやり取りしないのでどこでもよいが、
-# いちばん小さく戻しやすいので先頭に置き、往復の確認にも使う。
+#
+# 以前は us-east-1 の health-global（AWS Health の転送）も先頭に並べていたが、
+# AWS Health の通知を共通基盤へ移したのでアプリから外した。cdkd の状態に
+# 残っているぶんは手で cdkd state destroy する（docs/cdkd-migration.md の
+# 「health-global を外した」）。ここに残すと、CloudFormation にも cdkd にも
+# 無いスタックを毎回調べることになるだけなので並べない。
 #
 # スタック名とリージョンの組
 stacks=(
-  "${prefix}-health-global us-east-1"
   "${prefix}-monitoring ap-northeast-1"
   "${prefix}-api ap-northeast-1"
   "${prefix}-auth ap-northeast-1"
@@ -129,9 +131,9 @@ cdkd_state_exists() {
 # cdkd import をスタックのリージョンで動かす。
 #
 # cdkd（0.291.31 時点）の import は、CloudFormation を読むクライアントを実行時の
-# AWS_REGION で作り、スタックのリージョンを見ない。us-east-1 にある
-# health-global を ap-northeast-1 で探して見つけられず、全リソースが
-# 「not found」になる。import には --stack-region に当たるオプションが無いため、
+# AWS_REGION で作り、スタックのリージョンを見ない。us-east-1 にあった
+# health-global（いまは無い）を ap-northeast-1 で探して見つけられず、全リソースが
+# 「not found」になった。import には --stack-region に当たるオプションが無いため、
 # スタックごとに AWS_REGION を合わせて打つ。cdkd 側で直ったら消す。
 #
 # 状態を置くバケットが別のリージョンにあっても cdkd が向き先を直すので、

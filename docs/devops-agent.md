@@ -6,8 +6,8 @@
 
 ```
 CloudWatch アラーム ─┐
-外形監視・カナリア ──┼→ SNS（dev-sakekasu-alerts）┬→ Slack 通知 Lambda → Slack（既存のアラートチャンネル）
-AWS Health ──────────┘                            │
+外形監視・カナリア ──┴→ SNS（dev-sakekasu-alerts）┬→ Slack 通知 Lambda → Slack（既存のアラートチャンネル）
+                                                  │
                                                   └→ 転送 Lambda → DevOps Agent Webhook
                                                                         ↓
                                                      自動調査 → Slack（DevOps Agent 専用チャンネル）
@@ -48,7 +48,7 @@ Agent Space は運用ツール専用のメンバーアカウント `ops-tooling`
 調査に回すのは、次の条件を満たすものだけ。エージェントは秒課金なので、鳴ったもの全部を投げると費用が読めなくなる。
 
 - CloudWatch アラームが `ALARM` に変わったとき。復旧（`OK`）とデータ不足では投げない
-- AWS Health のうち `issue`（実際の障害）だけ。予定された変更やお知らせは投げない
+- AWS Health のうち `issue`（実際の障害）だけ。予定された変更やお知らせは投げない。ただし AWS Health の通知は共通基盤（sakekasu-integrated_environment）へ移したので、いまはこのトピックに流れてこない。転送 Lambda の判定は残してある
 - 転送 Lambda 自身の失敗アラーム（`dev-sakekasu-devops-agent-webhook-failure`）は捨てる。届かないことを届けようとして調査が積み上がるのを避けるため
 
 調査の識別子は「アラーム名 + 状態が変わった時刻」で作る。SNS が再試行しても同じ値になるので調査は1件に収まり、2度目の発報では別の値になるので重複として捨てられない。

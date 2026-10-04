@@ -177,17 +177,19 @@ export class MonitoringStack extends cdk.Stack {
     // SNS はトピック作成時に「所有アカウントからの publish を許可する」既定ポリシーを
     // 暗黙に持っていて、アラーム通知はこれに乗っている。だがこの既定は
     // 明示的なトピックポリシーを置いた瞬間に丸ごと置き換わる。
-    // 下の AwsHealthRule がこのトピックを宛先にしているため、CDK は
-    // events.amazonaws.com を許可する AWS::SNS::TopicPolicy を必ず生成する。
-    // その副作用でアラーム側の権限が落ちる。
+    // 以前は AWS Health のルール（EventBridge）がこのトピックを宛先にしていて、
+    // CDK が events.amazonaws.com を許可する AWS::SNS::TopicPolicy を生成し、
+    // その副作用でアラーム側の権限が落ちた。
     //
-    // 暗黙の既定に戻すのではなく明示しているのは、将来また別のサービスを
-    // 宛先に足しても、この文だけは残るようにするため。
+    // Health のルールは共通基盤へ移して無くなったが、この文は外さない。
+    // 暗黙の既定に戻すのではなく明示しておけば、将来また別のサービス
+    // （EventBridge など）を宛先に足しても、この文だけは残る。
+    // ここを消してから何かを宛先に足すと、同じ無音の事故がもう一度起きる。
     //
     // ## 実際に一度壊した（2026-08-06 〜 08-17）
     //
-    // AwsHealthRule を入れた 08-06 から、このスタックのアラーム全部が無音になった。
-    // 鳴ってはいるが誰にも届かない状態で、9日間気づけなかった。
+    // AWS Health のルール（当時は AwsHealthRule）を入れた 08-06 から、このスタックの
+    // アラーム全部が無音になった。鳴ってはいるが誰にも届かない状態で、9日間気づけなかった。
     // EventBridge 経由の AWS Health 通知だけは許可が残っていて届き続けたため、
     // 通知が来ること自体は日常的に起きていたのが、気づけなかった理由。
     //
@@ -267,25 +269,8 @@ export class MonitoringStack extends cdk.Stack {
       evaluationPeriods: 1,
     });
 
-    // --- AWS 側の障害・メンテナンス（AWS Health）---
-
-    // 自分たちのコードでは直せない事象を、気づく前に受け取るための経路。
-    // グローバルサービスのイベントは us-east-1 にしか来ないため、
-    // 別スタック（HealthGlobalStack）から当リージョンのイベントバスへ転送している。
-    // 転送されたものも同じ形でこのバスに入るので、ルールはここ1本で済む
-    new events.Rule(this, 'AwsHealthRule', {
-      ruleName: `${prefix}-aws-health`,
-      description: 'AWS Health の障害・予定された変更を Slack へ流す',
-      eventPattern: {
-        source: ['aws.health'],
-        detail: {
-          // お知らせや調査中まで拾うと日常的に鳴ってしまうため、
-          // 実際の障害と、対応が必要になる予定変更に絞る
-          eventTypeCategory: ['issue', 'scheduledChange'],
-        },
-      },
-      targets: [new targets.SnsTopic(this.alertTopic)],
-    });
+    // AWS Health の通知は共通基盤（sakekasu-integrated_environment）へ移した。
+    // アカウント全体の話なので 1 か所だけが持つ。ここにも残すと同じ通知が 2 通届く
 
     // --- AI: ソムリエ（AgentCore Runtime）---
 
