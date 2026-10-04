@@ -122,6 +122,8 @@ describe('SiteStack', () => {
     expect(csp.get('script-src')).toEqual(["'self'"]);
     expect(csp.get('frame-ancestors')).toEqual(["'none'"]);
     expect(csp.get('object-src')).toEqual(["'none'"]);
+    // default-src を引き継がないので、明示しないとフォームの送信先が無制限になる
+    expect(csp.get('form-action')).toEqual(["'self'"]);
   });
 
   it('CSP の通信先は画面が実際に叩く先だけ（https: のような丸ごとの許可をしない）', () => {

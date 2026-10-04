@@ -122,6 +122,10 @@ export class SiteStack extends cdk.Stack {
       ].join(' '),
       "frame-ancestors 'none'",
       "base-uri 'self'",
+      // form-action は default-src を引き継がない。書かないと、HTML を差し込まれたときに
+      // フォームの送信先を外へ向けられる。画面のフォームはどれも onSubmit で処理していて、
+      // ログインもリダイレクトなので、自分のオリジンだけでよい（PR #256 のレビュー指摘）
+      "form-action 'self'",
       "object-src 'none'",
     ].join('; ');
 
