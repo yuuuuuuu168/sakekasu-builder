@@ -13,7 +13,6 @@ import path from 'node:path';
 import url from 'node:url';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib';
-import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
 import { BillingNotifierStack } from '../lib/billing-notifier-stack.js';
@@ -146,7 +145,6 @@ const env = { account: '111122223333', region: 'ap-northeast-1' };
  */
 const STACKS_WITH_LAMBDA: Record<string, string> = {
   'api-stack.ts': 'api',
-  'auth-stack.ts': 'auth',
   'monitoring-stack.ts': 'monitoring',
   'billing-notifier-stack.ts': 'billing',
   'devops-agent-stack.ts': 'devopsAgent',
@@ -160,7 +158,6 @@ function synthAllTemplates(): {
 } {
   const app = new cdk.App();
 
-  const authStack = new AuthStack(app, 'TestAuth', { envName: SYNTH_ENV_NAME, env });
   const apiStack = new ApiStack(app, 'TestApi', {
     envName: SYNTH_ENV_NAME,
     sharedAuth: TEST_SHARED_AUTH,
@@ -196,7 +193,6 @@ function synthAllTemplates(): {
   });
 
   const stacks = {
-    auth: authStack,
     api: apiStack,
     monitoring: monitoringStack,
     devopsAgent: devopsAgentStack,
@@ -570,7 +566,7 @@ describe('Lambda のランタイム', () => {
   });
 
   // Issue #86: 計装を入れるのは api スタックの2関数だけ。監視系
-  // （health-check / slack-notifier / signup-notifier）は
+  // （health-check / slack-notifier）は
   // 意図的に対象外にしている。監視の監視は既存のアラームで足りていて、
   // 広げるとノイズと費用だけが増えるため。
   //

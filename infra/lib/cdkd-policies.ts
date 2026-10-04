@@ -161,26 +161,25 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
       resources: ['*'],
     }),
 
-    // Cognito も同様。ListUsers / AdminGetUser のような利用者を引ける API は
-    // 入れない（UserPool と Client の作り替えには要らない）
+    // Cognito は読み取りだけ。ListUsers / AdminGetUser のような利用者を引ける API は
+    // 入れない。
+    //
+    // 作成・更新・削除は外した。このアプリのスタックが持っていた Cognito のリソースは
+    // 旧ユーザープール（sakekasu-dev-auth）だけで、共通ログインへ移ってアプリから
+    // 外したため。旧プールの片付け（cdkd state destroy）は人が自分の権限で打つ
+    // （docs/shared-login.md の「旧ユーザープールを外す」）。
+    //
+    // 読み取りを残すのは、api の AppSync が共通ログインのプールを認可に使っているため。
+    // AppSync の作成・更新でプールの確認が呼び出し元の権限で走るかどうかを確かめて
+    // いないので、ここを空にして api のデプロイを落とす賭けはしない
     new iam.PolicyStatement({
-      sid: 'ManageCognitoUserPools',
+      sid: 'ReadCognitoUserPools',
       actions: [
-        'cognito-idp:CreateUserPool',
-        'cognito-idp:DeleteUserPool',
         'cognito-idp:DescribeUserPool',
-        'cognito-idp:UpdateUserPool',
-        'cognito-idp:GetUserPoolMfaConfig',
-        'cognito-idp:SetUserPoolMfaConfig',
-        'cognito-idp:AddCustomAttributes',
-        'cognito-idp:CreateUserPoolClient',
-        'cognito-idp:DeleteUserPoolClient',
         'cognito-idp:DescribeUserPoolClient',
-        'cognito-idp:UpdateUserPoolClient',
         'cognito-idp:ListUserPoolClients',
+        'cognito-idp:GetUserPoolMfaConfig',
         'cognito-idp:ListTagsForResource',
-        'cognito-idp:TagResource',
-        'cognito-idp:UntagResource',
       ],
       resources: ['*'],
     }),
@@ -350,8 +349,8 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
       resources: [roleBoundaryArn(account)],
     }),
 
-    // cdkd が対応表に持たない型（Cognito UserPoolClient / Logs MetricFilter /
-    // AppSync FunctionConfiguration）は Cloud Control API で作られる。
+    // cdkd が対応表に持たない型（Logs MetricFilter / AppSync FunctionConfiguration。
+    // 旧ユーザープールを外す前は Cognito UserPoolClient も）は Cloud Control API で作られる。
     // Cloud Control のアクションは cloudformation 名前空間にある
     new iam.PolicyStatement({
       sid: 'UseCloudControlApi',

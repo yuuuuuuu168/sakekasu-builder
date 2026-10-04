@@ -1,9 +1,0 @@
-{
-  "name": "signup-notifier-lambda",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "@aws-sdk/client-sns": "^3.800.0"
-  }
-}

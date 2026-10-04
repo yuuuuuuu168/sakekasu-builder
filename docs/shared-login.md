@@ -17,7 +17,7 @@
 | MFA | 任意（アプリの「MFA」ダイアログで登録） | 必須（TOTP）。登録も入力もマネージドログインの画面で行う |
 | パスワード | 8 文字以上 | 16 文字以上 |
 | ユーザーの作り方 | 画面からセルフサインアップ | 共通ログイン側で管理者が作る（そちらの `docs/identity.md`） |
-| 新規登録の Slack 通知 | 旧プールの Post Confirmation トリガー | 役目を終えた（共通プールにセルフサインアップが無い）。旧プールを外すときに一緒に外す |
+| 新規登録の Slack 通知 | 旧プールの Post Confirmation トリガー | 役目を終えた（共通プールにセルフサインアップが無い）。旧プールと一緒に外した |
 | トークンの有効期限 | アクセス 1 時間 / リフレッシュ 30 日 | 同じ |
 
 接続先の値は `infra/cdk.json` の context `sharedAuth` に `{ domain, userPoolId, clientId }` で置いてある。
@@ -128,7 +128,187 @@ Export を消すのは auth をアプリから外す 2 段目に回した。
 
 ### 2 段目: auth スタックをアプリから外す
 
-1 段目のマージと deploy が済んでから。手順は 2 段目の PR で書く。
+コードから外したもの:
+
+- `AuthStack`（`infra/lib/auth-stack.ts` とテスト）、新規登録通知の Lambda（`infra/lambda/signup-notifier`）、
+  `infra/bin/app.ts` の `exportValue` と api → auth の依存
+- `infra/scripts/migrate-to-cdkd.sh` の auth と、auth にしか無かった UserPoolClient の識別子の手当て
+- `infra/lib/cdkd-policies.ts` の Cognito の作成・更新・削除の権限（読み取りは残した。理由はコメント）。
+  効くのは `sakekasu-github-oidc` を手でデプロイしたとき（下の手順 10）
+- データの付け替えのスクリプト（`infra/scripts/migrate_owner_sub.py` とテスト、`test.yml` の `scripts` ジョブ）。
+  付け替えは済み、旧プールを消すと逆向きに流す相手も無くなる。中身は git の履歴にある
+
+**マージしても AWS 側は何も変わらない。** `cdkd deploy --all` が扱うのは合成したスタックだけで、
+state にしか無いスタックには触らない（0.291.31。health-global を外したときと同じ。
+[cdkd-migration.md](cdkd-migration.md) の「health-global を外した」）。旧プールもトリガーの Lambda も残るので、
+マージと deploy が通ったあとに手で消す。CI に入れないのも health-global と同じ理由
+（CI の cdkd ロールは IAM ロールを消せない。一度きりの破壊的な手順を deploy に置かない）。
+
+#### `cdkd state destroy` で何が消えて何が残るか
+
+`state destroy` は、state に記録した `DeletionPolicy` が `Retain` のリソースを消さずに state から外すだけにする
+（0.291.31 の `runDestroyForStack`）。合成結果では次のとおり。実際の値は手順 1 で state から読んで確かめる。
+
+| 論理 ID | 型 | 名前 | `state destroy` で |
+| --- | --- | --- | --- |
+| `UserPool6BA7E5F2` | `AWS::Cognito::UserPool` | `dev-sakekasu-userpool`（`ap-northeast-1_eZOfInCT4`） | **残る**（Retain）。手順 5 で消す |
+| `UserPoolUserPoolClient40176907` | `AWS::Cognito::UserPoolClient` | `dev-sakekasu-client` | 消える |
+| `UserPoolCanaryUserPoolClientD962CFED` | `AWS::Cognito::UserPoolClient` | `dev-sakekasu-canary-client` | 消える |
+| `UserPoolPostConfirmationCognito0E6001F8` | `AWS::Lambda::Permission` | トリガーの呼び出し許可 | 消える |
+| `SignupNotifierFunctionF191E88B` | `AWS::Lambda::Function` | `dev-sakekasu-signup-notifier` | 消える |
+| `SignupNotifierFunctionServiceRole180FCFE5` | `AWS::IAM::Role` | `sakekasu-dev-auth-SignupNotifierFunctionServiceRole180FCFE5` | 消える（自分の権限で打つので消せる） |
+| `SignupNotifierFunctionServiceRoleDefaultPolicy5E860FA5` | `AWS::IAM::Policy` | 上のロールのインラインポリシー | 消える |
+| `SignupNotifierLogGroupF4C03A83` | `AWS::Logs::LogGroup` | `/aws/lambda/dev-sakekasu-signup-notifier` | **残る**（Retain）。手順 6 で消す |
+| `SignupNotifyFailMetricFilter1ADE9132` | `AWS::Logs::MetricFilter` | `SignupNotifyFailCount` | 消える |
+
+- ユーザープールの削除保護（`DeletionProtection`）は CDK で指定しておらず、既定の `INACTIVE` のはず。手順 2 で確かめる
+- ドメイン（Hosted UI のプレフィックスやカスタムドメイン）はテンプレートに無い。手で付けていないことを手順 2 で確かめる。
+  付いているとプールを消せない
+- カナリアの監視ユーザー（`canary@…`）と本人の旧アカウントは、プールと一緒に消える
+- `--remove-protection` は削除保護を外すだけで、Retain のリソースは消さない。ここでは要らない
+
+#### 手順（Mac から。2 段目のマージ後の deploy が通ってから）
+
+**マージより前に打たない。** main のアプリにまだ auth が入っている間に消すと、次の deploy が作り直す
+（ユーザープールは名前が重複できるので、空の新しいプールが黙ってできる）。
+
+**`CDKD_ROLE_ARN` は渡さない。** 自分の権限（`sakekasu-builder`）で直接打つ。
+
+```bash
+cd infra
+export AWS_PROFILE=sakekasu-builder AWS_REGION=ap-northeast-1
+
+# 0. 1 段目が効いていること。監視スタックの state に旧プールの Import が無いこと（[] になる）
+npx cdkd state show sakekasu-dev-monitoring --json \
+  | jq '[.state.imports // [] | .. | strings | select(startswith("sakekasu-dev-auth:"))]'
+
+# 1. 消す対象と DeletionPolicy を確かめる。9 行出て、UserPool と LogGroup が Retain であること
+npx cdkd state show sakekasu-dev-auth --json \
+  | jq -r '.state.resources | to_entries[] | [.key, .value.resourceType, .value.physicalId, (.value.deletionPolicy // "-")] | @tsv'
+
+# 2. プールの中身を確かめる。Name が dev-sakekasu-userpool、DeletionProtection が INACTIVE、
+#    Domain と CustomDomain が null であること
+aws cognito-idp describe-user-pool --user-pool-id ap-northeast-1_eZOfInCT4 \
+  --query 'UserPool.{Name:Name,DeletionProtection:DeletionProtection,Domain:Domain,CustomDomain:CustomDomain,Users:EstimatedNumberOfUsers}'
+
+# 3. スタックを消す。リソースを消してから state も消す。確認を訊かれたら y
+npx cdkd state destroy sakekasu-dev-auth --stack-region ap-northeast-1
+
+# 4. state から消えたことを確かめる（sakekasu-dev-auth が無いこと）
+npx cdkd state list
+
+# 5. 残ったユーザープールを消す。ここで旧 sub は二度と戻らなくなる
+aws cognito-idp delete-user-pool --user-pool-id ap-northeast-1_eZOfInCT4
+aws cognito-idp describe-user-pool --user-pool-id ap-northeast-1_eZOfInCT4   # ResourceNotFoundException
+
+# 6. 残ったロググループを消す（新規登録通知と、1 段目で外したカナリアのもの）
+aws logs delete-log-group --log-group-name /aws/lambda/dev-sakekasu-signup-notifier
+aws logs delete-log-group --log-group-name /aws/lambda/dev-sakekasu-sommelier-canary
+```
+
+手順 2 で `Domain` か `CustomDomain` に値があったら、5 の前に
+`aws cognito-idp delete-user-pool-domain --user-pool-id ap-northeast-1_eZOfInCT4 --domain <その値>` で外す。
+`DeletionProtection` が `ACTIVE` だったら、5 の前に
+`aws cognito-idp update-user-pool --user-pool-id ap-northeast-1_eZOfInCT4 --deletion-protection INACTIVE` で外す
+（`update-user-pool` は渡さなかった設定を既定に戻すが、直後に消すので構わない）。
+
+3 が途中で落ちたら state は残るので、原因を直してもう一度 3 を打てばよい。同じリソースで落ち続けるときに限り、
+AWS 側を手で消してから `npx cdkd state orphan sakekasu-dev-auth --stack-region ap-northeast-1` で記録だけを外す。
+UserPoolClient の削除で落ちたときは、5 でプールを消せばクライアントも一緒に消える。
+
+#### ほかに残っているもの
+
+どれも AWS 側を直接消す。順番は問わないが、上の手順の後に打つ。
+
+```bash
+export AWS_PROFILE=sakekasu-builder AWS_REGION=ap-northeast-1
+
+# 7. 取り残されたロール。全スタックへのタグ付け（#245）で cdkd が新しい名前のロールを作ったときに
+#    管理から外れたもの（cdkd-migration.md の「取り込み済みリソースへの初回更新は改名になる」）。
+#    get-role が NoSuchEntity なら何もしなくてよい
+role=sakekasu-dev-auth-SignupNotifierFunctionServiceRole-uF3uXTOrV5Pb
+aws iam get-role --role-name "$role" --query 'Role.{Name:RoleName,LastUsed:RoleLastUsed}'
+for arn in $(aws iam list-attached-role-policies --role-name "$role" \
+    --query 'AttachedPolicies[].PolicyArn' --output text); do
+  aws iam detach-role-policy --role-name "$role" --policy-arn "$arn"
+done
+for name in $(aws iam list-role-policies --role-name "$role" --query 'PolicyNames[]' --output text); do
+  aws iam delete-role-policy --role-name "$role" --policy-name "$name"
+done
+aws iam delete-role --role-name "$role"
+
+# 8. カナリアの監視ユーザーの認証情報（Secrets Manager）。まず同じ置き場に他に何があるかを見る
+aws secretsmanager list-secrets --filters Key=name,Values=dev-sakekasu/monitoring/ \
+  --query 'SecretList[].{Name:Name,LastAccessed:LastAccessedDate}' --output table
+aws secretsmanager delete-secret --secret-id dev-sakekasu/monitoring/canary-user \
+  --recovery-window-in-days 7
+```
+
+8 は 7 日間は `aws secretsmanager restore-secret --secret-id dev-sakekasu/monitoring/canary-user` で戻せる。
+一覧にカナリア用の別の秘密（以前の名前など）が出たら、それも同じように消す。Slack の Webhook URL は
+SSM パラメータ（`/dev-sakekasu/monitoring/slack-webhook-url`）なので、この一覧には出ない。消さない。
+
+#### 旧 sub の下の画像を消す
+
+付け替えでは旧 sub（`e7d42a18-6071-70f4-dbe2-8f67cb896483`）の下の画像を新 sub（`37c47a88-30a1-7052-0fe7-98ec1af2d32e`）の下へ写し、旧キーは残した。
+旧プールを消すと旧 sub で開ける人はいなくなるので、消してよい。先に、写し漏れが無いことを確かめる。
+
+```bash
+cd "$(mktemp -d)"   # キーの一覧を書き出す作業場所
+export AWS_PROFILE=sakekasu-builder AWS_REGION=ap-northeast-1
+bucket=dev-sakekasu-images
+old=e7d42a18-6071-70f4-dbe2-8f67cb896483
+new=37c47a88-30a1-7052-0fe7-98ec1af2d32e
+
+# 9-1. 旧 sub と新 sub の下のキーを、sub を外した形で並べる。
+#      {sub}/tmp/ は 1 日で消える一時領域で写していないので、旧の側から外す
+aws s3api list-objects-v2 --bucket "$bucket" --prefix "$old/" --query 'Contents[].Key' --output text \
+  | tr '\t' '\n' | grep -v '^None$' | grep -v "^$old/tmp/" | sed "s|^$old/||" | sort > old-keys.txt
+aws s3api list-objects-v2 --bucket "$bucket" --prefix "$new/" --query 'Contents[].Key' --output text \
+  | tr '\t' '\n' | grep -v '^None$' | sed "s|^$new/||" | sort > new-keys.txt
+
+# 9-2. 件数。旧は付け替えのときの 648 件、新はそれ以上（付け替えの後に足した画像のぶん）であること
+wc -l old-keys.txt new-keys.txt
+
+# 9-3. 旧にあって新に無いキー。0 であること。0 でなければ消さずに止まる
+comm -23 old-keys.txt new-keys.txt | wc -l
+
+# 9-4. 消す。まず --dryrun で対象を見る（tmp/ の残りも含めて旧 sub の下を全部消す）
+aws s3 rm "s3://$bucket/$old/" --recursive --dryrun | wc -l
+aws s3 rm "s3://$bucket/$old/" --recursive
+
+# 9-5. 消えたことを確かめる（0 になる）
+aws s3api list-objects-v2 --bucket "$bucket" --prefix "$old/" --query 'KeyCount'
+```
+
+バケットはバージョニングが有効なので、`aws s3 rm` は削除マーカーを置くだけで、旧版はそのまま残る
+（一時領域のライフサイクルルールはタグの付いたものしか見ないので、ここで消した旧版は期限で消えない）。
+間違えて消したものがあっても旧版から戻せる。旧 sub の痕跡を容量ごと消したいときは、落ち着いてから旧版と
+削除マーカーも消す。こちらは戻せない。
+
+```bash
+# 9-6.（任意・戻せない）旧 sub の下の旧版と削除マーカーを消す
+aws s3api list-object-versions --bucket "$bucket" --prefix "$old/" \
+  --query '[Versions || `[]`, DeleteMarkers || `[]`][][].[Key, VersionId]' --output text \
+  | while IFS=$'\t' read -r key version; do
+      aws s3api delete-object --bucket "$bucket" --key "$key" --version-id "$version" >/dev/null
+    done
+aws s3api list-object-versions --bucket "$bucket" --prefix "$old/" \
+  --query '{Versions: length(Versions || `[]`), DeleteMarkers: length(DeleteMarkers || `[]`)}'   # どちらも 0
+```
+
+#### `sakekasu-github-oidc` を更新する（任意）
+
+```bash
+# 10. cdkd のデプロイロールから Cognito の作成・更新・削除の権限を外す。
+#     README の「OIDC 連携の初回セットアップ」と同じく、このスタックだけは手でデプロイする
+cd infra
+AWS_PROFILE=sakekasu-builder npx cdk diff sakekasu-github-oidc -c github-oidc=true
+AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc -c github-oidc=true
+```
+
+打たなくても困らない。デプロイ済みのロールが広いままになるだけで、アプリのデプロイは通る。
+diff に `ManageCognitoUserPools` の削除と `ReadCognitoUserPools` の追加以外が出たら、デプロイせずに止まる。
 
 ## カナリア（ソムリエとの実会話の監視）は消した
 
@@ -178,81 +358,16 @@ sub を使っている場所と扱い:
 Identity Pool（cognito-identity）は使っていない。identityId や `cognito:username` をキーにしたデータも無い。
 
 DynamoDB の主キーは `id` だけで、`owner` は通常の属性。だから「新しいキーで写しを作る」のではなく、
-同じ項目の `owner` を書き換える。写しを作る方式にしないのは、飲酒記録の `purchaseRecordId` が
+同じ項目の `owner` を書き換えた。写しを作る方式にしなかったのは、飲酒記録の `purchaseRecordId` が
 購入記録の `id` を指していて、id が変わると在庫との紐づけが切れるため。
-書き換えなので旧項目の `owner` は残らないが、次の 2 つで戻せる。
 
-- 旧 sub と新 sub を入れ替えてスクリプトを流す（画像は旧キーに残っているのでコピーは起きず、記録だけが戻る）
-- テーブルの PITR（35 日）で、書き換え前の時点に戻す
+### 結果
 
-スクリプトは `infra/scripts/migrate_owner_sub.py`。既定は dry-run で、件数と例を出すだけ。
-`--apply` を付けたときだけ書き込む。
+付け替えは済んだ。スクリプト（`infra/scripts/migrate_owner_sub.py`）を Mac から管理者権限で流し、
 
-- 先に S3、次に DynamoDB（記録が指す先の画像を先に揃える）
-- S3 は新しいキーにすでにあればスキップ。旧キーは消さない
-- DynamoDB は条件付き。`owner` が旧 sub のままで、読んだあとに `updatedAt` が変わっていない項目だけを書き換える
-- 何度流しても安全。途中で落ちたら、もう一度流せば続きから進む
+- S3: 旧 sub（`e7d42a18-6071-70f4-dbe2-8f67cb896483/`）の下の 648 件を、新 sub（`37c47a88-30a1-7052-0fe7-98ec1af2d32e/`）の下へ写した。旧キーは残した
+- DynamoDB: 2 つのテーブルの `owner` と `imageKey` / `imageKeys` を新 sub に書き換えた
 
-### 手順
-
-スクリプトは Mac から、管理者権限のプロファイル（`sakekasu-builder`）で流す。
-クラウドセッションの読み取り専用プロファイル（`verify`）では DynamoDB と S3 の中身も Cognito のユーザーも読めないので流せない。
-
-1. この変更の PR をマージする。`deploy.yml`（infra）と `deploy-sommelier.yml`（ソムリエ）が走り、
-   画面は Amplify Hosting が出し直す。3 つとも終わるまで待つ
-2. `https://sakekasu-builder.com/` を開き、「サインイン」から共通ログインでログインする。
-   ユーザーがまだ無ければ、共通ログイン側で先に作る（sakekasu-integrated_environment の `docs/identity.md`）。
-   この時点では記録は空に見える
-3. 旧 sub を調べる（旧プール）
-
-   ```bash
-   export AWS_PROFILE=sakekasu-builder
-   aws cognito-idp list-users --region ap-northeast-1 \
-     --user-pool-id <旧プールの ID（sakekasu-dev-auth の UserPoolId 出力）> \
-     --query 'Users[].{user:Username, sub:Attributes[?Name==`sub`]|[0].Value, email:Attributes[?Name==`email`]|[0].Value}' \
-     --output table
-   ```
-
-4. 新 sub を調べる（共通プール）
-
-   ```bash
-   aws cognito-idp list-users --region ap-northeast-1 \
-     --user-pool-id <infra/cdk.json の sharedAuth.userPoolId> \
-     --query 'Users[].{user:Username, sub:Attributes[?Name==`sub`]|[0].Value, email:Attributes[?Name==`email`]|[0].Value}' \
-     --output table
-   ```
-
-5. dry-run で件数と例を確かめる
-
-   ```bash
-   uv run --with boto3 python infra/scripts/migrate_owner_sub.py \
-     --old-sub <旧 sub> --new-sub <新 sub> \
-     --purchase-table dev-sakekasu-purchase-records \
-     --drinking-table dev-sakekasu-drinking-records \
-     --bucket dev-sakekasu-images
-   ```
-
-   「旧 sub の記録」の件数が画面で見ていた記録の数と合っているか、「旧 sub で始まらない画像キー」の
-   注意が出ていないかを見る
-
-6. 書き込む
-
-   ```bash
-   uv run --with boto3 python infra/scripts/migrate_owner_sub.py \
-     --old-sub <旧 sub> --new-sub <新 sub> \
-     --purchase-table dev-sakekasu-purchase-records \
-     --drinking-table dev-sakekasu-drinking-records \
-     --bucket dev-sakekasu-images --apply
-   ```
-
-   「条件で見送った」が 1 件以上なら、画面で触っていないことを確かめてもう一度流し、0 件になるのを見る
-
-7. 画面を読み込み直し、記録と画像（一覧のサムネイル、詳細の原画）が出ること、
-   画像の追加と記録の削除ができることを確かめる
-
-旧キーの画像は残る。消すのは、旧プールを外す別 PR が落ち着いてからでよい
-（`infra/scripts/cleanup-orphan-images.py` は「どの記録からも参照されない画像」を消すので、
-付け替えの後に流せば旧 sub の下の画像がまとめて対象になる。中身を `--dry-run` で必ず確かめる）。
-
-スクリプトのテストは `uv run --with boto3 --with pytest pytest infra/scripts/tests`
-（AWS へは出ない。PR ごとに `test.yml` の `scripts` ジョブが走らせる）。
+スクリプトとテストは、旧プールを外す 2 段目で消した（git の履歴にある）。旧プールを消したあとは、
+旧 sub へ戻す先が無いため。書き換え前の記録が要るときは、テーブルの PITR（35 日）で書き換え前の時点に戻す。
+旧キーの画像の片付けは、上の「旧 sub の下の画像を消す」。

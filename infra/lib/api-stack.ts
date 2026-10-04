@@ -261,8 +261,9 @@ export interface ApiStackProps extends cdk.StackProps {
   /**
    * 共通ログインの接続先（cdk.json の context `sharedAuth`）。
    *
-   * 以前は AuthStack の UserPool をオブジェクト参照で受け取っていた。共通ログインは
-   * 別リポジトリのスタックなので、ID だけを受け取ってここで参照を組み立てる
+   * 以前はアプリ専用の旧プール（AuthStack。いまは外した）の UserPool を
+   * オブジェクト参照で受け取っていた。共通ログインは別リポジトリのスタックなので、
+   * ID だけを受け取ってここで参照を組み立てる
    */
   sharedAuth: SharedAuth;
 }
@@ -354,7 +355,6 @@ export class ApiStack extends cdk.Stack {
           authorizationType: appsync.AuthorizationType.USER_POOL,
           userPoolConfig: {
             // 共通ログインのユーザープール（4 アプリで共有）。
-            // 旧プール（AuthStack）は切り戻し用に残してあるだけで、ここからは読まない
             userPool: cognito.UserPool.fromUserPoolId(
               this,
               'SharedUserPool',
