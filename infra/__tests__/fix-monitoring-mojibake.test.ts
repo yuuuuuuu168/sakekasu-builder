@@ -4,7 +4,6 @@ import * as url from 'node:url';
 import { describe, expect, it } from 'vitest';
 import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
-import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
 import {
@@ -165,7 +164,7 @@ describe('planRepairs', () => {
  * `cdk.out` は読まない。CI の `npm test` は合成より前に走るので、ファイルの
  * 有無に頼ると検査ごと素通りする。他のテストと同じくその場で合成する。
  *
- * 3 スタックを合成し、そのたびに Lambda ごとに esbuild が走るため 1 件で 3〜4 秒かかる。
+ * 2 スタックを合成し、そのたびに Lambda ごとに esbuild が走るため 1 件で数秒かかる。
  * 全体を並列で回すと既定の 5 秒を超えて落ちたので、env-prefix のテストと同じく延ばしてある
  */
 describe('合成結果との突き合わせ', { timeout: 60_000 }, () => {
@@ -175,7 +174,6 @@ describe('合成結果との突き合わせ', { timeout: 60_000 }, () => {
     const app = new cdk.App();
     const env = { account: '111122223333', region: 'ap-northeast-1' };
 
-    const auth = new AuthStack(app, 'sakekasu-dev-auth', { envName: 'dev', env });
     const api = new ApiStack(app, 'sakekasu-dev-api', {
       envName: 'dev',
       sharedAuth: TEST_SHARED_AUTH,
@@ -188,12 +186,9 @@ describe('合成結果との突き合わせ', { timeout: 60_000 }, () => {
       functions: [api.presignedUrlFunction, api.ocrAnalyzerFunction, api.tastingNoteFunction],
       ocrFunction: api.ocrAnalyzerFunction,
       imageDeleteFailMetricFilter: api.imageDeleteFailMetricFilter,
-      signupNotifyFailMetricFilter: auth.signupNotifyFailMetricFilter,
       sommelierRuntimeArn:
         'arn:aws:bedrock-agentcore:ap-northeast-1:111122223333:runtime/sommelier_test-ABC123',
       siteUrl: 'https://example.com',
-      userPoolId: auth.userPool.userPoolId,
-      canaryUserPoolClientId: auth.canaryUserPoolClient.userPoolClientId,
       env,
     });
 

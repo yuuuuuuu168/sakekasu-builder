@@ -96,11 +96,8 @@ function synth() {
     ],
     ocrFunction: apiStack.ocrAnalyzerFunction,
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
-    signupNotifyFailMetricFilter: authStack.signupNotifyFailMetricFilter,
     sommelierRuntimeArn: RUNTIME_ARN,
     siteUrl: 'https://example.com',
-    userPoolId: authStack.userPool.userPoolId,
-    canaryUserPoolClientId: authStack.canaryUserPoolClient.userPoolClientId,
     env,
   });
 
@@ -168,20 +165,21 @@ describe('migrate-to-cdkd.sh の移行順', () => {
 
   /** 上の検査が素通りしていないことの確認。依存が実在しなければ順番の議論は無意味 */
   it('検査の前提として、スタック間の Export と ImportValue が実在する', () => {
-    expect(exportedNames(templates.auth).size).toBeGreaterThan(0);
+    expect(exportedNames(templates.api).size).toBeGreaterThan(0);
     expect(importedNames(templates.monitoring).size).toBeGreaterThan(0);
   });
 
   /**
-   * 共通ログインへ移ったので、api は auth の UserPool を読まなくなった。
-   * それでも auth は monitoring（カナリア）に UserPool の Export を出し続けるので、
-   * デプロイ中に「読まれている Export を消す」形にはならない
+   * 旧プールを外す 1 段目。api に続いて monitoring も auth を読まなくなった。
+   * これで auth はどのスタックからも読まれず、アプリから外せる
+   * （docs/shared-login.md の「旧プールを外す」）
    */
-  it('api は auth の Export を読まず、auth の UserPool の Export は monitoring が読み続ける', () => {
+  it('api も monitoring も auth の Export を読まない', () => {
     const authExports = exportedNames(templates.auth);
     expect([...importedNames(templates.api)].filter((name) => authExports.has(name))).toEqual([]);
-    expect([...importedNames(templates.monitoring)].filter((name) => authExports.has(name)).length)
-      .toBeGreaterThan(0);
+    expect(
+      [...importedNames(templates.monitoring)].filter((name) => name.startsWith('sakekasu-dev-auth:')),
+    ).toEqual([]);
   });
 });
 

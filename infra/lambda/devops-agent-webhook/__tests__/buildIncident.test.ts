@@ -246,18 +246,16 @@ describe('priorityForAlarm', () => {
   });
 
   it('利用者から見えない失敗は MEDIUM にする', () => {
-    expect(mod.priorityForAlarm('dev-sakekasu-signup-notify-fail')).toBe('MEDIUM');
+    expect(mod.priorityForAlarm('dev-sakekasu-image-delete-fail')).toBe('MEDIUM');
+    expect(mod.priorityForAlarm('dev-sakekasu-slack-notifier-failure')).toBe('MEDIUM');
     expect(mod.priorityForAlarm('dev-sakekasu-watcher-silent-health-check')).toBe('MEDIUM');
   });
 
-  it('監視の停止は対象がソムリエでも MEDIUM にする（壊れているのは監視の側）', () => {
-    // 名前に sommelier を含むため、順に見ると「ソムリエの故障」で HIGH に落ちてしまう
+  it('監視の停止は名前に監視対象を含んでも MEDIUM にする（壊れているのは監視の側）', () => {
+    // 名前に sommelier を含むため、順に見ると「ソムリエの故障」で HIGH に落ちてしまう。
+    // 以前のソムリエのカナリアがこの形だった。いまは無いが、並びの意図を固定しておく
     expect(mod.priorityForAlarm('dev-sakekasu-watcher-failure-sommelier-canary')).toBe('MEDIUM');
     expect(mod.priorityForAlarm('dev-sakekasu-watcher-silent-sommelier-canary')).toBe('MEDIUM');
-  });
-
-  it('ソムリエ本体のカナリアは HIGH のまま（監視の停止と取り違えない）', () => {
-    expect(mod.priorityForAlarm('dev-sakekasu-sommelier-canary')).toBe('HIGH');
   });
 
   it('表に無いアラームは HIGH に倒す（黙って埋もれさせない）', () => {

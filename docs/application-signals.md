@@ -42,7 +42,7 @@
 | `dev-sakekasu-ocr-analyzer` | Bedrock を呼ぶぶん遅延もエラーも起きやすく、下流ごとの内訳を見たい |
 | `dev-sakekasu-presigned-url` | 画像アップロードの入口。詰まると記録そのものが作れない |
 
-監視系（health-check / slack-notifier / sommelier-canary / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増える。
+監視系（health-check / slack-notifier / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増える。
 
 **1関数ずつ入れた。** 前回は2つ同時に入れて両方止め、画像アップロードの動線ごと失った。今回は `ocr-analyzer`（2026-08-10）を先にして6日ぶん動かし、そのあと `presigned-url`（2026-08-16）に広げている。OCR が落ちても記録の登録自体は通る（解析だけが失敗する）ので、被害が動線を塞がない側から試した。
 
@@ -212,14 +212,14 @@ done
 |---------|------|
 | `ocr-analyzer` / `presigned-url` | 計装する（この文書の対象） |
 | `sommelier_sommelier.DEFAULT`（AgentCore） | 既に計装済み（GenAI Observability） |
-| `health-check` / `slack-notifier` / `sommelier-canary` / `signup-notifier` | 意図的に対象外 |
+| `health-check` / `slack-notifier` / `signup-notifier` | 意図的に対象外 |
 | `LogRetention` × 2 / `CustomAWSCDKOpenIdConnectProv` | CDK が裏で作るカスタムリソース。対象外 |
 
 2関数が入ったので「4 instrumented / 6 not」あたりに落ち着く見込み（ソムリエと合わせて4）。反映には時間ウィンドウぶんの遅れがある。
 
 ### カナリアと RUM について
 
-`Services with Canaries` が 0 なのは、CloudWatch Synthetics を使っていないため。このプロジェクトは Lambda + EventBridge で外形監視とカナリアを自作していて（`sommelier-canary` / `health-check`）、機能としては足りている。Synthetics に移すと月額が増えるので、いまのところ移す理由がない。
+`Services with Canaries` が 0 なのは、CloudWatch Synthetics を使っていないため。このプロジェクトは Lambda + EventBridge で外形監視を自作していて（`health-check`）、機能としては足りている。ソムリエとの実会話を見るカナリア（`sommelier-canary`）も自作していたが、共通ログインへ移ったときに動かせなくなり、消した（[shared-login.md](shared-login.md)）。Synthetics に移すと月額が増えるので、いまのところ移す理由がない。
 
 `Services with AppMonitors` は CloudWatch RUM のことで、Application Signals とは別サービス。導入するかは独立した判断になる。
 
