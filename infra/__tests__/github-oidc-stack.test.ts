@@ -689,5 +689,12 @@ describe('GithubOidcStack', () => {
       expect(resources).toContain(`arn:aws:s3:::cdkd-state-${ACCOUNT}/cdkd/ReinventPlanner*`);
       expect(resources.some((r) => /cdkd\/sakekasu-(dev|staging|prod)/.test(r))).toBe(false);
     });
+
+    // 資産置き場のキーは中身のハッシュだけで、アプリで分けられない。削除は全部止める
+    it('共用の cdkd の資産置き場は消せない', () => {
+      const s = statement('DenyDeletingCdkdAssets');
+      expect(toArray(s.Action)).toEqual(['s3:DeleteObject', 's3:DeleteObjectVersion', 's3:DeleteBucket']);
+      expect(toArray(s.Resource)).toEqual([`arn:aws:s3:::cdkd-assets-${ACCOUNT}-*`]);
+    });
   });
 });
