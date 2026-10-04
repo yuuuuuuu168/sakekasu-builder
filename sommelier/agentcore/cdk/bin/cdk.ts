@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { AgentCoreStack } from '../lib/cdk-stack';
 import { ConfigIO, type AwsDeploymentTarget } from '@aws/agentcore-cdk';
-import { App, type Environment } from 'aws-cdk-lib';
+import { App, type Environment, Tags } from 'aws-cdk-lib';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -55,6 +55,9 @@ async function main() {
   }
 
   const app = new App();
+  // 全リソースに App タグ（infra/bin/app.ts と同じ。コストの内訳に使う。デプロイ用ロールの
+  // ガードレールの判定にも使う予定だが、ガードレールはまだ無い）
+  Tags.of(app).add('App', 'builder');
 
   for (const target of targets) {
     const env = toEnvironment(target);
