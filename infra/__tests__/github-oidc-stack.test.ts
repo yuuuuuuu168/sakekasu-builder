@@ -703,7 +703,10 @@ describe('GithubOidcStack', () => {
         's3:PutBucketPolicy',
         's3:DeleteBucketPolicy',
       ]);
-      expect(toArray(s.Resource)).toEqual([`arn:aws:s3:::cdkd-assets-${ACCOUNT}-*`]);
+      expect(toArray(s.Resource)).toEqual([
+        `arn:aws:s3:::cdkd-assets-${ACCOUNT}-*`,
+        `arn:aws:s3:::cdk-hnb659fds-assets-${ACCOUNT}-*`,
+      ]);
     });
   });
 });
