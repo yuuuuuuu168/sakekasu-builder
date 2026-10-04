@@ -233,10 +233,46 @@ describe("MonitoringStack", () => {
       Namespace: "AWS/AppSync",
       MetricName: "5XXError",
     });
-    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      Namespace: "AWS/DynamoDB",
-      MetricName: "ThrottledRequests",
-    });
+  });
+
+  // ThrottledRequests は TableName と Operation の組でしか出ないので、TableName だけで見ると
+  // データが無い扱いになり一度も鳴らない。テーブル単位で出る Read/WriteThrottleEvents を見る
+  type AlarmMetricEntry = {
+    Expression?: string;
+    ReturnData?: boolean;
+    MetricStat?: {
+      Metric: { Namespace: string; MetricName: string; Dimensions: Array<{ Name: string }> };
+    };
+  };
+  it("DynamoDB のスロットリングはテーブル単位で出る指標で見る", () => {
+    const alarms = Object.values(
+      template.findResources("AWS::CloudWatch::Alarm", {
+        Properties: { AlarmName: Match.stringLikeRegexp("^dev-sakekasu-dynamodb-throttle-") },
+      }),
+    ) as Array<{ Properties: { MetricName?: string; Metrics: AlarmMetricEntry[] } }>;
+    expect(alarms.length).toBeGreaterThan(0);
+
+    for (const { Properties: p } of alarms) {
+      expect(p.MetricName).toBeUndefined();
+      const metrics = p.Metrics;
+      const expression = metrics.find((m) => m.Expression);
+      expect(expression?.Expression).toBe("FILL(r, 0) + FILL(w, 0)");
+      expect(expression?.ReturnData).not.toBe(false);
+
+      const names = metrics
+        .filter((m) => m.MetricStat)
+        .map((m) => {
+          const metric = m.MetricStat!.Metric;
+          expect(metric.Namespace).toBe("AWS/DynamoDB");
+          expect(metric.Dimensions.map((d) => d.Name)).toEqual(["TableName"]);
+          return metric.MetricName;
+        });
+      expect(names.sort()).toEqual(["ReadThrottleEvents", "WriteThrottleEvents"]);
+    }
+  });
+
+  it("ThrottledRequests を TableName だけで見るアラームを作らない", () => {
+    expect(JSON.stringify(template.toJSON())).not.toContain("ThrottledRequests");
   });
 
   // 通知経路そのものが壊れると誰も気づけない
