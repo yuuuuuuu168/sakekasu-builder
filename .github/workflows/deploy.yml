@@ -108,7 +108,16 @@ jobs:
       # --no-wait は使わない
       - name: デプロイ（cdkd）
         if: steps.migrate.outputs.engine == 'cdkd'
-        run: npx cdkd deploy --all --yes
+        run: |
+          # cdkd はスタックが失敗しても終了コード 0 で抜けることがある（2026-10-04 にこのワークフローで、
+          # sakekasu-dev-api が失敗して自動ロールバックまで走ったのにステップは緑だった）。
+          # 出力にも失敗が出ていないか確かめる
+          set -o pipefail
+          npx cdkd deploy --all --yes 2>&1 | tee "$RUNNER_TEMP/cdkd-deploy.log"
+          if grep -qE 'Failed: |node\(s\) failed|Rollback completed' "$RUNNER_TEMP/cdkd-deploy.log"; then
+            echo "::error::cdkd の出力に失敗が出ている（終了コードは 0）。上のログを確かめる"
+            exit 1
+          fi
       # state に平文のシークレットが残っていないかの番人（PR #151 のレビュー）。
       # いまこのアプリの合成テンプレートに {{resolve:secretsmanager:...}} は無く
       # 残る余地も無いが、将来そうなったときに気づけるようにしておく。
