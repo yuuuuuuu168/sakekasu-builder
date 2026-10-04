@@ -5,7 +5,7 @@ import * as sns from 'aws-cdk-lib/aws-sns';
 import { DevOpsAgentStack } from '../lib/devops-agent-stack.js';
 
 // Agent Space を置く運用ツール専用アカウント（ops-tooling）
-const MONITORING_ACCOUNT_ID = '<運用アカウント ID>';
+const MONITORING_ACCOUNT_ID = '444455556666';
 const AGENT_SPACE_ARN = `arn:aws:aidevops:ap-northeast-1:${MONITORING_ACCOUNT_ID}:agentspace/abc123`;
 
 function synth(): Template {

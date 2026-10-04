@@ -28,7 +28,7 @@ export interface DevOpsAgentStackProps extends cdk.StackProps {
 /**
  * AWS DevOps Agent 連携のスタック（Issue #67）。
  *
- * Agent Space 自体は運用ツール用のアカウント（<運用アカウント ID> / ops-tooling）の
+ * Agent Space 自体は運用ツール用のアカウント（ops-tooling）の
  * コンソールで作る。
  * このスタックが持つのは、**アプリ本体のアカウント側に必要なもの**の2つ:
  *

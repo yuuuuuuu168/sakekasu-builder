@@ -72,13 +72,24 @@ jobs:
         # 明示しておけば両者が一致する（Issue #131 に記録のある落とし穴）
         env:
           CDK_DEFAULT_ACCOUNT: '232791540685'
-        run: npx cdk synth --all -q
+          # Agent Space の ARN は secrets から渡す（deploy.yml と同じ。bin/app.ts）。
+          # フォークからの PR には secrets が渡らないので、そのときは DevOps Agent の
+          # スタックを合成しないまま差分を取る
+          AGENT_SPACE_ARN: ${{ secrets.AGENT_SPACE_ARN }}
+        run: |
+          if [ -n "$AGENT_SPACE_ARN" ]; then
+            # 運用ツール用アカウントの ID をログに出さない
+            echo "::add-mask::$(cut -d: -f5 <<< "$AGENT_SPACE_ARN")"
+          fi
+          npx cdk synth --all -q
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::232791540685:role/sakekasu-github-actions-diff
           aws-region: ap-northeast-1
       - name: cdkd diff
         id: diff
+        env:
+          AGENT_SPACE_ARN: ${{ secrets.AGENT_SPACE_ARN }}
         # --fail は付けない。差分があるだけで落ちてしまう。
         #
         # 一方で cdkd 自体が落ちたときは落ちてほしいので pipefail を立てる。
@@ -89,6 +100,11 @@ jobs:
         run: |
           set -o pipefail
           npx cdkd diff --all 2>&1 | tee diff.txt
+          # diff.txt は PR コメントに貼る。ログのマスクは PR コメントには効かないので、
+          # 運用ツール用アカウントの ID をここで伏せる
+          if [ -n "$AGENT_SPACE_ARN" ]; then
+            sed -i "s/$(cut -d: -f5 <<< "$AGENT_SPACE_ARN")/<運用アカウント>/g" diff.txt
+          fi
       - name: PRコメントに diff を投稿（既存コメントは更新）
         if: always() && hashFiles('infra/diff.txt') != ''
         uses: actions/github-script@v9
