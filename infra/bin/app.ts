@@ -72,14 +72,19 @@ function buildApplicationStacks(app: cdk.App): void {
 
   // AuthStack: 旧ユーザープール（このアプリ専用。セルフサインアップあり）。
   //
-  // ログインは共通ログインへ移ったが、このスタックは消さない。プールは RETAIN で、
-  // 旧 sub からのデータ付け替え（docs/shared-login.md）が済んで落ち着くまでは
-  // 切り戻し先として残す。外すのはデータ移行が済んだ後の別 PR。
-  // ソムリエのカナリアもまだこのプールでサインインしている（止めてある）
+  // ログインは共通ログインへ移り、データの付け替えも済んだ。外すのは 2 段で、
+  // いまは 1 段目（docs/shared-login.md の「旧プールを外す」）。
+  // 監視スタックはもうこのスタックを読まないが、デプロイ済みの監視スタックは
+  // まだ Fn::ImportValue で Export を読んでいる。auth が先にデプロイされるので、
+  // ここで Export を消すと、読まれている Export を消す形になる。
+  // そこで Export だけを exportValue で同じ名前のまま残し、auth の
+  // テンプレートを 1 文字も変えない。次の段で、スタックごと外す
   const authStack = new AuthStack(app, `${prefix}-auth`, {
     envName: env,
     env: cdkEnv,
   });
+  authStack.exportValue(authStack.userPool.userPoolId);
+  authStack.exportValue(authStack.canaryUserPoolClient.userPoolClientId);
 
   // ApiStack: AppSync + DynamoDB（認証は共通ログインのユーザープール）
   const apiStack = new ApiStack(app, `${prefix}-api`, {
@@ -108,16 +113,8 @@ function buildApplicationStacks(app: cdk.App): void {
     ],
     ocrFunction: apiStack.ocrAnalyzerFunction,
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
-    signupNotifyFailMetricFilter: authStack.signupNotifyFailMetricFilter,
     sommelierRuntimeArn,
     siteUrl,
-    userPoolId: authStack.userPool.userPoolId,
-    canaryUserPoolClientId: authStack.canaryUserPoolClient.userPoolClientId,
-    // 共通ログインにはパスワードで直接サインインする経路が無い（authFlows が空、
-    // MFA 必須）。ソムリエが共通プールのトークンしか受け付けなくなるので、
-    // 旧プールでサインインするカナリアは止めておく。再開の選択肢は
-    // docs/shared-login.md の「カナリア」
-    canaryEnabled: false,
     env: cdkEnv,
   });
 

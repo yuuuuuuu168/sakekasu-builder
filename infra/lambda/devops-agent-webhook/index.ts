@@ -134,11 +134,12 @@ const PRIORITY_RULES: { match: RegExp; priority: Priority }[] = [
   // 利用者がサイトを開けない・記録を読み書きできない
   { match: /health-check-frontend|appsync-5xx/, priority: 'CRITICAL' },
   // 利用者からは見えないが放置はできないもの（通知の失敗・後片付けの失敗・監視の停止）。
-  // HIGH より先に見るのは、監視そのものの停止を表す watcher-failure-sommelier-canary /
-  // watcher-silent-sommelier-canary が、名前に sommelier を含むために
-  // 「ソムリエの故障」と取り違えられるのを防ぐため。壊れているのは監視の側なので MEDIUM に置く
+  // HIGH より先に見るのは、監視そのものの停止を表す watcher-* が、名前に監視対象
+  // （sommelier など）を含んだときに「その機能の故障」と取り違えられるのを防ぐため。
+  // 壊れているのは監視の側なので MEDIUM に置く。以前はソムリエのカナリア
+  // （watcher-failure-sommelier-canary）が実際にこの形だった
   {
-    match: /notify-fail|image-delete-fail|slack-notifier-failure|watcher-/,
+    match: /image-delete-fail|slack-notifier-failure|watcher-/,
     priority: 'MEDIUM',
   },
   // 主要機能（ソムリエ・OCR・記録の保存）が壊れている

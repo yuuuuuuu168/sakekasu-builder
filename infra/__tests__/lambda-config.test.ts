@@ -173,12 +173,9 @@ function synthAllTemplates(): {
     functions: [apiStack.presignedUrlFunction, apiStack.ocrAnalyzerFunction],
     ocrFunction: apiStack.ocrAnalyzerFunction,
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
-    signupNotifyFailMetricFilter: authStack.signupNotifyFailMetricFilter,
     sommelierRuntimeArn:
       'arn:aws:bedrock-agentcore:ap-northeast-1:111122223333:runtime/sommelier_test-ABC123',
     siteUrl: 'https://example.com',
-    userPoolId: 'ap-northeast-1_TEST',
-    canaryUserPoolClientId: 'canaryclientid',
     env,
   });
 
@@ -573,7 +570,7 @@ describe('Lambda のランタイム', () => {
   });
 
   // Issue #86: 計装を入れるのは api スタックの2関数だけ。監視系
-  // （health-check / slack-notifier / sommelier-canary / signup-notifier）は
+  // （health-check / slack-notifier / signup-notifier）は
   // 意図的に対象外にしている。監視の監視は既存のアラームで足りていて、
   // 広げるとノイズと費用だけが増えるため。
   //

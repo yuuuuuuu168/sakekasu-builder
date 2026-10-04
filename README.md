@@ -55,7 +55,7 @@
 
 | 機能 | 補足 |
 |------|------|
-| 監視とアラート通知 | 25アラーム（AI・サービス正常性・外形監視・カナリア・SLO）を Slack へ。AWS Health の通知は共通基盤へ移した。デプロイ前に手動登録あり。ソムリエのカナリアは共通ログインへの移行で止めてある（[docs/shared-login.md](docs/shared-login.md)） |
+| 監視とアラート通知 | 23アラーム（AI・サービス正常性・外形監視・SLO）を Slack へ。AWS Health の通知は共通基盤へ移した。デプロイ前に手動登録あり。ソムリエのカナリアは共通ログインでは動かせないので消した（[docs/shared-login.md](docs/shared-login.md)） |
 | 新規ユーザー登録の Slack 通知 | 旧ユーザープールの Post Confirmation → SNS（[#66](https://github.com/yuuuuuuu168/sakekasu-builder/issues/66)）。共通ログインにはセルフサインアップが無いので役目を終え、旧プールを外すときに一緒に外す |
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuuu168/sakekasu-builder/issues/92)） |
 | DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。プライベートチャンネルではメンションで調査の開始や照会もできる。コンソール側の設定あり（[#67](https://github.com/yuuuuuuu168/sakekasu-builder/issues/67)） |
@@ -448,15 +448,14 @@ Runtime の ARN はフロントの `src/features/sommelier/config.ts` に持つ�
 
 ```
 CloudWatch アラーム ─┐
-外形監視 Lambda ─────┤
-カナリア Lambda ─────┼→ SNS → Slack 通知 Lambda → Slack（Incoming Webhook）
+外形監視 Lambda ─────┼→ SNS → Slack 通知 Lambda → Slack（Incoming Webhook）
 新規登録通知 Lambda ─┘
-（Cognito トリガー）
+（旧プールの Cognito トリガー。旧プールを外すときに一緒に外す）
 ```
 
 アラームは**発報だけでなく復旧も通知する**ので、鳴りっぱなしなのか直ったのかが Slack だけで分かる。
 
-### 監視項目（25アラーム）
+### 監視項目（23アラーム）
 
 | 分類 | 監視対象 | 発報条件 |
 |------|---------|---------|
@@ -470,17 +469,15 @@ CloudWatch アラーム ─┐
 | サービス | DynamoDB スロットル（2テーブル） | 5分で1回以上 |
 | サービス | 画像削除の失敗 | 1時間で5回以上 |
 | 外形監視 | フロント配信 / ソムリエ Runtime / AppSync | 2回続けて到達不可 |
-| 外形監視 | ソムリエとの実会話（カナリア） | 失敗したら即時 |
 | 通知経路 | Slack 通知 Lambda のエラー | 1回以上 |
-| 通知経路 | 新規登録通知の送信失敗（`SignupNotifyFailCount`） | 5分で1回以上 |
-| 監視自体 | 外形監視・カナリアの実行失敗 | 1回以上 |
-| 監視自体 | 外形監視・カナリアが動いていない | 実行回数が0（外形監視は1時間、カナリアは12時間） |
+| 監視自体 | 外形監視の実行失敗 | 1回以上 |
+| 監視自体 | 外形監視が動いていない | 1時間の実行回数が0 |
 
-監視そのものが動かなくなると異常に気づけないため、**Slack 通知 Lambda と外形監視・カナリアも監視対象**に含めている。「エラーで失敗した」だけでなく「**そもそも動いていない**」も見る。スケジュールが止まるとエラーすら記録されず、静かに監視が消えるため。
+監視そのものが動かなくなると異常に気づけないため、**Slack 通知 Lambda と外形監視も監視対象**に含めている。「エラーで失敗した」だけでなく「**そもそも動いていない**」も見る。スケジュールが止まるとエラーすら記録されず、静かに監視が消えるため。
 
 既定では「データが無い＝異常なし」として扱うが、欠損そのものに意味がある指標は例外にしている。
 
-- **カナリア**: `MISSING`（状態を保持）。6時間に1度しか計測しないため、既定のままだと直っていないのに次の計測を待つ間に復旧扱いになる
+- **SLO の達成率**: `MISSING`（状態を保持）。30日 rolling で動きが遅く、値が途切れたときに既定のままだと、未達のまま復旧扱いになる
 - **実行回数の監視**: `BREACHING`（欠損は異常）。記録が無いことが「動いていない」ことを意味するため
 
 **認証拒否の監視が今回の障害への直接の答え**。実際に障害当時のメトリクスを確認したところ、`UnauthorizedInboundTokenException` が3回記録されていた。これを監視していれば即座に気づけた。
@@ -496,7 +493,8 @@ Slack 通知 Lambda と DevOps Agent の転送 Lambda には、Health イベン�
 ### 新規ユーザー登録の通知（Issue #66）
 
 **共通ログインへ移ったので役目を終えた。** 共通プールにはセルフサインアップが無い。
-通知は旧ユーザープールに付けたまま残してあり、旧プールを外す別 PR で一緒に外す（[docs/shared-login.md](docs/shared-login.md)）。
+送信失敗のアラーム（`dev-sakekasu-signup-notify-fail`）は、旧プールを外す 1 段目で監視スタックから外した。
+通知 Lambda そのものは旧ユーザープールに付いたまま残っていて、2 段目で auth スタックごと外す（[docs/shared-login.md](docs/shared-login.md)）。
 以下は旧プールでの仕組み。
 
 誰かがサインアップして確認を終えると、Cognito の Post Confirmation トリガーが通知 Lambda（`infra/lambda/signup-notifier/`）を呼び、既存のアラートトピック経由で Slack に「メールアドレス・登録時刻（JST）・ユーザープール」を流す。パスワード再設定の確認でも同じトリガーが呼ばれるため、`triggerSource` でサインアップ確認だけに絞っている。
@@ -510,13 +508,14 @@ Slack 通知 Lambda と DevOps Agent の転送 Lambda には、Health イベン�
 
 到達性の確認（5分ごと）は、**認証情報を持たずに**行う。ソムリエ Runtime と AppSync はあえて認証なしで叩き、**401/403 が返ることを正常**とみなす。これで「エンドポイントが生きている」ことと「認証が働いている」ことを、監視側に鍵を持たせずに確認できる。
 
-実際に会話できるかはカナリア（6時間ごと）が見る。こちらは監視用ユーザーでサインインして短い相談を投げ、応答が返るまでを確認する。毎回 LLM を呼ぶため頻度を抑えている。
-
-**カナリアはいま止めてある。** 共通ログインのクライアントはパスワードで直接サインインできず（MFA も必須）、ソムリエは共通プールのトークンしか受け付けなくなったため、旧プールでサインインするカナリアは必ず落ちる。スケジュールを無効にし、カナリアの3つのアラームは通知だけを切ってある。再開の選択肢は [docs/shared-login.md](docs/shared-login.md) の「カナリア」。下の手順と「カナリアを通すための2箇所」は、旧プールで動いていたときのもの。
+以前は、実際に会話できるかをカナリア（6時間ごと。監視用ユーザーでサインインして短い相談を投げる）が見ていた。
+共通ログインのクライアントはパスワードで直接サインインできず（MFA も必須）、ソムリエは共通プールのトークンしか
+受け付けなくなったので、旧プールでサインインするカナリアは必ず落ちる。いったん止めたあと、旧プールを外すときに
+コードごと消した。作り直すなら共通ログイン側の変更が要る（[docs/shared-login.md](docs/shared-login.md) の「カナリア」）。
 
 ### デプロイ前の準備
 
-Webhook URL と監視ユーザーのパスワードはリポジトリに置けないため、**先に手動で登録**する。CDK は名前で参照するだけ。
+Webhook URL はリポジトリに置けないため、**先に手動で登録**する。CDK は名前で参照するだけ。
 
 ```bash
 # 1. Slack の Incoming Webhook URL を登録する
@@ -526,63 +525,17 @@ AWS_PROFILE=sakekasu-builder aws ssm put-parameter \
   --value 'https://hooks.slack.com/services/XXX/YYY/ZZZ' \
   --region ap-northeast-1
 
-# 2. カナリア用の Cognito ユーザーを作る（パスワードは自分で決める）
-AWS_PROFILE=sakekasu-builder aws cognito-idp admin-create-user \
-  --user-pool-id ap-northeast-1_eZOfInCT4 \
-  --username canary@example.com \
-  --message-action SUPPRESS \
-  --region ap-northeast-1
-AWS_PROFILE=sakekasu-builder aws cognito-idp admin-set-user-password \
-  --user-pool-id ap-northeast-1_eZOfInCT4 \
-  --username canary@example.com \
-  --password '<決めたパスワード>' --permanent \
-  --region ap-northeast-1
-
-# 3. その認証情報を Secrets Manager に入れる
-AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
-  --name dev-sakekasu/monitoring/canary-user \
-  --secret-string '{"username":"canary@example.com","password":"<決めたパスワード>"}' \
-  --region ap-northeast-1
-
-# 4. デプロイ
-cd infra
-AWS_PROFILE=sakekasu-builder npx cdk deploy --all -c env=dev
-
-# 5. 出力された CanaryUserPoolClientId を控え、agentcore.json を2箇所直してから
-#    ソムリエを再デプロイする（下の「カナリアを通すための2箇所」を参照）
-cd ../sommelier
-AWS_PROFILE=sakekasu-builder agentcore deploy --target dev
 ```
 
-カナリアがサインインするため、**専用の UserPoolClient**（`<env>-sakekasu-canary-client`）を用意している。ブラウザ向けクライアントは SRP のみのままにし、管理者パスワード認証はカナリア専用クライアントだけに持たせる。同じクライアントに両方を持たせると、IAM の足がかりを得た相手が任意の利用者になりすませる余地が広がるため。
+デプロイは main へのマージで `deploy.yml` が cdkd で行う（下の「デプロイ（CDK）」）。
 
-カナリア用クライアントは `ADMIN_USER_PASSWORD_AUTH` のみで SRP を持たない。このフローは IAM 認証済みの呼び出し元（＝カナリアの Lambda ロール）からしか使えず、ブラウザからは利用できない。
-
-#### カナリアを通すための2箇所（どちらか一方だけでは 403 になる）
-
-ソムリエの認証は**二段構え**（Runtime の JWT Authorizer + アプリ内の audience 検証）なので、`sommelier/agentcore/agentcore.json` を**2箇所**直す。
-
-```json
-// ① Runtime の JWT Authorizer が受け付けるクライアント
-"allowedClients": ["3a4unc2dbutrkm2hjn887s1h9m", "<CanaryUserPoolClientId>"]
-
-// ② アプリ内の audience 検証が受け付けるクライアント（カンマ区切り）
-{ "name": "COGNITO_APP_CLIENT_ID", "value": "3a4unc2dbutrkm2hjn887s1h9m,<CanaryUserPoolClientId>" }
-```
-
-①だけ直すとゲートウェイは通るがアプリ内検証で弾かれる。カナリアが `HTTP 403` を返したときは、まずこの2箇所を疑う（カナリアのログとアラーム本文にもその旨を出している）。
-
-Runtime の ARN とサイト URL は CDK コンテキストで差し替えられる。
-
-```bash
-npx cdk deploy sakekasu-dev-monitoring -c env=dev \
-  -c sommelierRuntimeArn=arn:aws:bedrock-agentcore:... \
-  -c siteUrl=https://example.com
-```
+Runtime の ARN とサイト URL は CDK コンテキスト（`sommelierRuntimeArn`・`siteUrl`）で差し替えられる。
+`infra/cdk.json` の context に書いてマージする。監視スタックは cdkd の管理下なので、手元から `cdk deploy` は打たない
+（CloudFormation のスタックが別に作られ、リソースが二重になる）。
 
 ### 費用の目安
 
-概算で**月5ドル前後**。内訳は CloudWatch アラーム25件（$0.10/件）とカスタムメトリクス8種（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。カナリアの Bedrock 呼び出しは月120回・短い応答のため数円程度。SLO とトレースの費用は Application Signals 側で別立てになる（月数十円から数百円の見込み。[docs/application-signals.md](docs/application-signals.md)）。
+概算で**月5ドル前後**。内訳は CloudWatch アラーム23件（$0.10/件）とカスタムメトリクス（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。SLO とトレースの費用は Application Signals 側で別立てになる（月数十円から数百円の見込み。[docs/application-signals.md](docs/application-signals.md)）。
 
 ## 毎日の利用料金 Slack 通知（Issue #92）
 
@@ -668,7 +621,7 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev
 
 計装が入っているのは OCR（`ocr-analyzer`、2026-08-10）と画像アップロードの入口（`presigned-url`、2026-08-16）の2つ。一度は起動ラッパーとレイヤーの組み合わせを取り違えて関数を止め、切り戻してから1つずつ入れ直した（PR [#110](https://github.com/yuuuuuuu168/sakekasu-builder/pull/110) → [#114](https://github.com/yuuuuuuu168/sakekasu-builder/pull/114)）。アカウント側の設定（サービス検出・Transaction Search）はソムリエの GenAI Observability を入れたときから有効で、アカウントに1つの設定なので CDK では管理していない。
 
-監視系の関数（health-check / slack-notifier / カナリア / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。この4つは従来どおり Lambda 標準メトリクス由来のエラー率と実行時間までしか見えない。計装が無かった頃でもエラー率は追えたので、それで既存のバグを1件見つけている（[#115](https://github.com/yuuuuuuu168/sakekasu-builder/issues/115)）。
+監視系の関数（health-check / slack-notifier / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。この3つは従来どおり Lambda 標準メトリクス由来のエラー率と実行時間までしか見えない。計装が無かった頃でもエラー率は追えたので、それで既存のバグを1件見つけている（[#115](https://github.com/yuuuuuuu168/sakekasu-builder/issues/115)）。
 
 SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 90% と「90% が15秒未満」。しきい値は日次の実測（p50/p90/p99）から決めた。割ったらアラームが鳴り、そのしきい値は SLO の目標と同じ定数から取っている。別々に書くと、片方だけ動かしたときに「SLO は未達なのにアラームは鳴らない」が黙って生まれる。
 
@@ -713,7 +666,7 @@ infra/
                  #                devops-agent / github-oidc）
   graphql/       # AppSync GraphQL スキーマ
   lambda/        # Lambda 関数（presigned-url, ocr-analyzer, tasting-note,
-                 #              health-check, slack-notifier, sommelier-canary,
+                 #              health-check, slack-notifier,
                  #              signup-notifier, billing-notifier,
                  #              devops-agent-webhook）
   scripts/       # amplify_outputs.json 生成、サムネイルのバックフィル、

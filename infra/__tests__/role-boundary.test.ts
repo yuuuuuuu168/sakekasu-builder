@@ -36,12 +36,9 @@ function buildApplicationStacks(): Array<{ name: string; template: Template }> {
     functions: [apiStack.presignedUrlFunction, apiStack.ocrAnalyzerFunction],
     ocrFunction: apiStack.ocrAnalyzerFunction,
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
-    signupNotifyFailMetricFilter: authStack.signupNotifyFailMetricFilter,
     sommelierRuntimeArn:
       'arn:aws:bedrock-agentcore:ap-northeast-1:111111111111:runtime/sommelier_test-AAAAAAAAAA',
     siteUrl: 'https://example.com',
-    userPoolId: authStack.userPool.userPoolId,
-    canaryUserPoolClientId: authStack.canaryUserPoolClient.userPoolClientId,
     env,
   });
 
