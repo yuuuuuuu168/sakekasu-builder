@@ -5,7 +5,10 @@ import { MonitoringStack } from '../lib/monitoring-stack.js';
 import { BillingNotifierStack } from '../lib/billing-notifier-stack.js';
 import { GithubOidcStack } from '../lib/github-oidc-stack.js';
 import { DevOpsAgentStack } from '../lib/devops-agent-stack.js';
-import { parseSharedAuth } from '../lib/shared-auth.js';
+import { SiteDnsStack } from '../lib/site-dns-stack.js';
+import { SiteStack } from '../lib/site-stack.js';
+import { parseSharedAuth, sharedAuthRegion, type SharedAuth } from '../lib/shared-auth.js';
+import { readFileSync } from 'node:fs';
 
 const app = new cdk.App();
 
@@ -14,8 +17,13 @@ const app = new cdk.App();
 // 締め出す恐れがあるため、billing と同様にフラグ付きの手動デプロイ専用。
 // 使用例: npx cdk deploy sakekasu-github-oidc -c github-oidc=true
 if (app.node.tryGetContext('github-oidc')) {
+  const siteZone = app.node.tryGetContext('siteZone') as string | undefined;
+  if (!siteZone) {
+    throw new Error('cdk.json の context に siteZone（例: sake.sakekasu-builder.com）が要る');
+  }
   new GithubOidcStack(app, 'sakekasu-github-oidc', {
     repository: 'yuuuuuuu168/sakekasu-builder',
+    siteZone,
     // アプリ本体と同じ sakekasu-builder アカウント
     env: { account: '<アプリのアカウント ID>', region: 'ap-northeast-1' },
   });
@@ -148,4 +156,56 @@ function buildApplicationStacks(app: cdk.App): void {
 
   // スタック間の依存関係を明示（api → monitoring）
   monitoringStack.addDependency(apiStack);
+
+  buildSiteStacks(app, prefix, env, cdkEnv.account, sharedAuth);
+}
+
+/**
+ * フロントの配信（docs/sake-subdomain.md）。Amplify Hosting から移す先。
+ *
+ * 2 段階で合成する。鍵を分けてあるのは、ゾーンを作ってから親に NS を入れるまでの
+ * 間に配信スタックが合成されると、証明書の DNS 検証が通らずデプロイが終わらないため。
+ *
+ *   siteZone だけ:             ゾーン（sakekasu-<env>-site-dns）だけを作る
+ *   siteZone + siteHostedZoneId: 委任が済んだ後。証明書と配信（sakekasu-<env>-site）も作る
+ */
+function buildSiteStacks(
+  app: cdk.App,
+  prefix: string,
+  envName: string,
+  account: string | undefined,
+  sharedAuth: SharedAuth,
+): void {
+  const siteZone = app.node.tryGetContext('siteZone') as string | undefined;
+  if (!siteZone) return;
+
+  new SiteDnsStack(app, `${prefix}-site-dns`, {
+    zoneName: siteZone,
+    env: { account, region: 'ap-northeast-1' },
+  });
+
+  const siteHostedZoneId = app.node.tryGetContext('siteHostedZoneId') as string | undefined;
+  if (!siteHostedZoneId) return;
+
+  // CSP に入れる AppSync の URL は、画面が実際に読む設定ファイルから取る。
+  // api スタックの出力を参照でつなぐと us-east-1 から ap-northeast-1 への
+  // スタック間参照になるため使わない
+  const outputs = JSON.parse(
+    readFileSync(new URL('../../amplify_outputs.json', import.meta.url), 'utf8'),
+  ) as { data: { url: string } };
+
+  new SiteStack(app, `${prefix}-site`, {
+    envName,
+    domainName: siteZone,
+    hostedZoneId: siteHostedZoneId,
+    zoneName: siteZone,
+    graphqlUrl: outputs.data.url,
+    // 署名付き URL は Lambda の S3Client（ap-northeast-1、仮想ホスト形式）が作る
+    imageBucketDomain: `${envName}-sakekasu-images.s3.ap-northeast-1.amazonaws.com`,
+    cognitoRegion: sharedAuthRegion(sharedAuth),
+    authDomain: sharedAuth.domain,
+    sommelierRegion: 'ap-northeast-1',
+    // CloudFront の証明書は us-east-1 にしか置けない
+    env: { account, region: 'us-east-1' },
+  });
 }

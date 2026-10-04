@@ -39,6 +39,7 @@ describe('buildAmplifyConfig', () => {
 
   // 共通ログイン側に登録した戻り先は末尾の / まで完全一致。ずれると redirect_mismatch
   it.each([
+    ['https://sake.sakekasu-builder.com', 'https://sake.sakekasu-builder.com/'],
     ['https://sakekasu-builder.com', 'https://sakekasu-builder.com/'],
     ['https://www.sakekasu-builder.com', 'https://www.sakekasu-builder.com/'],
     ['http://localhost:5173', 'http://localhost:5173/'],

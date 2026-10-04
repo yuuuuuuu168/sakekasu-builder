@@ -7,6 +7,11 @@ import { createRoleBoundary } from './role-boundary.js';
 export interface GithubOidcStackProps extends cdk.StackProps {
   /** 信頼する GitHub リポジトリ（owner/repo 形式） */
   repository: string;
+  /**
+   * フロントの配信に使うサブドメインのゾーン（cdk.json の siteZone）。
+   * cdkd のデプロイロールが DNS レコードを書き換えられる範囲をここに絞る
+   */
+  siteZone: string;
 }
 
 /**
@@ -84,7 +89,7 @@ export class GithubOidcStack extends cdk.Stack {
       // 既定の1時間。cdkd のデプロイは数分で終わる想定で、長く持たせる理由がない
       maxSessionDuration: cdk.Duration.hours(1),
     });
-    for (const statement of cdkdDeployStatements(this.account)) {
+    for (const statement of cdkdDeployStatements(this.account, props.siteZone)) {
       cdkdDeployRole.addToPolicy(statement);
     }
 
@@ -119,7 +124,45 @@ export class GithubOidcStack extends cdk.Stack {
       diffRole.addToPolicy(statement);
     }
 
+    // フロントの配信物を置くロール（docs/sake-subdomain.md、deploy-site.yml）。
+    //
+    // deploy ロールとは分ける。deploy ロールは cdkd のロールへ入れるので、
+    // フロントのビルド（infra とは別の依存一式）を同じロールの下で走らせると、
+    // 乗っ取られた依存から cdkd の権限まで届きうる。こちらは配信バケットの
+    // オブジェクトを読み書きできるだけで、CloudFront にも IAM にも触れない。
+    //
+    // 認証情報を入れるのはビルドの後（deploy-site.yml）なので、ビルド中の
+    // スクリプトからはこのロールにも届かない。分けてあるのは多層の守り
+    const siteRole = new iam.Role(this, 'SiteDeployRole', {
+      roleName: 'sakekasu-github-actions-site',
+      description: 'Upload the frontend build to the site bucket (main branch only)',
+      assumedBy: new iam.WebIdentityPrincipal(provider.openIdConnectProviderArn, {
+        StringEquals: {
+          [`${githubDomain}:aud`]: 'sts.amazonaws.com',
+          [`${githubDomain}:sub`]: `repo:${props.repository}:ref:refs/heads/main`,
+        },
+      }),
+      maxSessionDuration: cdk.Duration.hours(1),
+    });
+    // バケット名は site-stack.ts の siteBucketName と同じ形。環境接頭辞は * で拾う
+    const siteBucketArn = `arn:aws:s3:::*-sakekasu-site-${this.account}`;
+    siteRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'ListSiteBucket',
+        actions: ['s3:ListBucket'],
+        resources: [siteBucketArn],
+      }),
+    );
+    siteRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'WriteSiteObjects',
+        actions: ['s3:PutObject', 's3:DeleteObject'],
+        resources: [`${siteBucketArn}/*`],
+      }),
+    );
+
     new cdk.CfnOutput(this, 'DeployRoleArn', { value: deployRole.roleArn });
+    new cdk.CfnOutput(this, 'SiteDeployRoleArn', { value: siteRole.roleArn });
     new cdk.CfnOutput(this, 'DiffRoleArn', { value: diffRole.roleArn });
     new cdk.CfnOutput(this, 'CdkdDeployRoleArn', { value: cdkdDeployRole.roleArn });
     new cdk.CfnOutput(this, 'RoleBoundaryArn', { value: roleBoundary.managedPolicyArn });
