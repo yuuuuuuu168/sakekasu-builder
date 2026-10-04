@@ -139,21 +139,34 @@ arn:aws:iam::232791540685:role/sakekasu-dev-devops-agent-monitoring
 
 cdkd は CloudFormation を通らないのでスタックの出力が無い。ロール名は固定なので ARN はこの形になる。
 
-続けてリソース検出を設定する。**タグで指定する。**
+リソース検出に設定項目は無い。**自動で走る。** 経路は2つある。
 
-```
-Project = sakekasu-builder
+- **CloudFormation スタック** — スタックとその中のリソースを列挙する
+- **Resource Explorer** — スタックに属さないリソースは、**タグの付いているもの**がここから拾われる
+
+このリポジトリは cdkd への移行で CloudFormation のスタックが消えているので、**使えるのは後者だけ**。タグを付けてあるのはこのためで、コンソールにタグを指定する欄があるわけではない。タグが付いていること自体が検出の条件になる（下の「タグの付け方」）。
+
+以前この手順には CloudFormation スタック3つ（`sakekasu-dev-auth` / `-api` / `-monitoring`）を並べていた。そのスタックは消えたので、スタック指定は使えない。
+
+#### Resource Explorer が要る
+
+セカンダリアカウントで Resource Explorer が有効でないと、スタックに属さないリソースは1つも出てこない。確認はこれ。
+
+```sh
+aws resource-explorer-2 list-indexes --profile verify --region ap-northeast-1
 ```
 
-以前はここに CloudFormation スタック3つ（`sakekasu-dev-auth` / `-api` / `-monitoring`）を並べていたが、cdkd への移行でそのスタックは消えた。スタック指定は使えない。
+`232791540685` の ap-northeast-1 にはインデックスがあって `ACTIVE`、既定ビューは `tags` を含みフィルタも空。ただし種別は `LOCAL` で、アカウント内に `AGGREGATOR` が1つも無い（2026-10-04 時点）。AWS のトラブルシュートは **Agent Space と同じリージョンに集約インデックスを置くこと**を求めている。トポロジにリソースが出てこないときは、Resource Explorer のコンソールで ap-northeast-1 のインデックスを集約インデックスに昇格させる。
 
 #### タグの付け方
 
-タグは CDK からではなく、Resource Groups Tagging API で直接付けてある（2026-10-04、52リソース）。CDK の `Tags.of` で付ける道は一度試して取り下げた。cdkd が取り込み済みリソースを改名してしまうのと、ロググループへのタグ付けが通らないため（[docs/cdkd-migration.md](cdkd-migration.md) の「取り込み済みリソースへの初回更新は改名になる」）。
+タグは CDK からではなく、Resource Groups Tagging API で直接付けてある（2026-10-04、55リソース）。CDK の `Tags.of` で付ける道は一度試して取り下げた。cdkd が取り込み済みリソースを改名してしまうのと、ロググループへのタグ付けが通らないため（[docs/cdkd-migration.md](cdkd-migration.md) の「取り込み済みリソースへの初回更新は改名になる」）。
 
 合成テンプレートに `Tags` が無いので、cdkd はこのタグを管理対象外として素通りする。デプロイで消えることはない（`cdkd diff` が差分を出さないことを確認済み）。
 
 裏を返すと、**リソースを足してもタグは自動では付かない**。監視対象を増やしたら付け直す。
+下のスクリプトは `dev-sakekasu-` の前方一致で集めるので、増えた分も含めてそのまま流せばよい。
+DevOps Agent 自身のリソース（webhook の Lambda・ロググループ・失敗アラーム）も、デプロイ後にこれで付けた。
 
 ```sh
 PROFILE=sakekasu-builder
@@ -192,6 +205,8 @@ done
 `grep -v learning` を入れているのは、同じアカウントに住む learning のテーブルが `dev-sakekasu-learning-progress` という名前で、素朴な前方一致に引っかかるため。付与の API は失敗しても終了コード 0 を返し、`FailedResourcesMap` に中身を入れる。空の `{}` であることを確かめる。
 
 トポロジにリソースが出てこないときは、セカンダリロールに `AIDevOpsAgentAccessPolicy` が付いているかを最初に疑う。コンソールの検証がチェックマークを出していても、ポリシーが外れていることがある。
+
+次に疑うのは Resource Explorer（上の「Resource Explorer が要る」）。スタックの無いこのアカウントでは、ここが止まると検出そのものが成立しない。
 
 ### 8. 動作を確認する
 
