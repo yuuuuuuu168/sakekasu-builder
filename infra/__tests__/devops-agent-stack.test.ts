@@ -35,7 +35,7 @@ describe('DevOpsAgentStack', () => {
 
   it('DevOps Agent のサービスプリンシパルだけが引き受けられる調査用ロールを作る', () => {
     template.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'dev-sakekasu-devops-agent-monitoring',
+      RoleName: 'sakekasu-dev-devops-agent-monitoring',
       AssumeRolePolicyDocument: {
         Statement: Match.arrayWith([
           Match.objectLike({
@@ -50,7 +50,7 @@ describe('DevOpsAgentStack', () => {
 
   it('信頼条件でプライマリアカウントと Agent Space を絞る（混乱した代理人の防止）', () => {
     template.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'dev-sakekasu-devops-agent-monitoring',
+      RoleName: 'sakekasu-dev-devops-agent-monitoring',
       AssumeRolePolicyDocument: {
         Statement: Match.arrayWith([
           Match.objectLike({
@@ -74,7 +74,7 @@ describe('DevOpsAgentStack', () => {
 
   it('調査用ロールには読み取り専用の管理ポリシーだけを付ける（実行系は持たせない）', () => {
     template.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'dev-sakekasu-devops-agent-monitoring',
+      RoleName: 'sakekasu-dev-devops-agent-monitoring',
       ManagedPolicyArns: [
         {
           'Fn::Join': Match.arrayWith([
