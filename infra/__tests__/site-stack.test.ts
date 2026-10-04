@@ -8,6 +8,7 @@ const ACCOUNT = '111111111111';
 const DOMAIN = 'sake.sakekasu-builder.com';
 const GRAPHQL_URL = 'https://abc.appsync-api.ap-northeast-1.amazonaws.com/graphql';
 const IMAGE_BUCKET = 'dev-sakekasu-images.s3.ap-northeast-1.amazonaws.com';
+const CERTIFICATE_ARN = `arn:aws:acm:us-east-1:${ACCOUNT}:certificate/00000000-0000-0000-0000-000000000000`;
 
 function synthSite(): Template {
   const stack = new SiteStack(new cdk.App(), 'TestSite', {
@@ -15,6 +16,7 @@ function synthSite(): Template {
     domainName: DOMAIN,
     hostedZoneId: 'Z0000000000000000000',
     zoneName: DOMAIN,
+    certificateArn: CERTIFICATE_ARN,
     graphqlUrl: GRAPHQL_URL,
     imageBucketDomain: IMAGE_BUCKET,
     cognitoRegion: 'ap-northeast-1',
@@ -108,11 +110,16 @@ describe('SiteStack', () => {
     });
   });
 
-  it('証明書はドメインのゾーンで DNS 検証し、A と AAAA を張る', () => {
-    template.hasResourceProperties('AWS::CertificateManager::Certificate', {
-      DomainName: DOMAIN,
-      ValidationMethod: 'DNS',
+  it('証明書は作らず、context で渡した ARN を使う（cdkd は ACM の証明書を作れない）', () => {
+    template.resourceCountIs('AWS::CertificateManager::Certificate', 0);
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        ViewerCertificate: Match.objectLike({ AcmCertificateArn: CERTIFICATE_ARN }),
+      }),
     });
+  });
+
+  it('A と AAAA を張る', () => {
     template.hasResourceProperties('AWS::Route53::RecordSet', { Name: `${DOMAIN}.`, Type: 'A' });
     template.hasResourceProperties('AWS::Route53::RecordSet', { Name: `${DOMAIN}.`, Type: 'AAAA' });
   });

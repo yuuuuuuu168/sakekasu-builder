@@ -461,6 +461,9 @@ function siteDeliveryStatements(siteZone: string): iam.PolicyStatement[] {
         },
       },
     }),
+    // いまは使っていない。証明書は cdkd では作れず、コンソールで作ることにした
+    // （site-stack.ts の冒頭）。外すと OIDC スタックの手動更新が要るので、次に
+    // そのスタックを更新するときにまとめて外す
     new iam.PolicyStatement({
       sid: 'ManageSiteCertificate',
       actions: [
