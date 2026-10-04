@@ -10,14 +10,6 @@ import { parseSharedAuth } from '../lib/shared-auth.js';
 
 const app = new cdk.App();
 
-// このリポジトリが作る全スタックに付ける。DevOps Agent のリソース検出が
-// このタグでアプリを絞るため（docs/devops-agent.md）。CloudFormation が
-// 付けていた aws:cloudformation:stack-name は cdkd への移行でスタックが
-// 消えたぶん腐っていくので、こちらで管理するタグに寄せる。
-// 同じアカウントに kakeibo・learning・reinvent-planner のリソースも
-// 同居しているため、アプリ単位の目印が要る
-cdk.Tags.of(app).add('Project', 'sakekasu-builder');
-
 // GitHub Actions からの CDK デプロイ用 OIDC 連携（Issue #94）。
 // Actions 自身にこのスタックを触らせると、ロールの更新ミスで自分を
 // 締め出す恐れがあるため、billing と同様にフラグ付きの手動デプロイ専用。
@@ -136,10 +128,6 @@ function buildApplicationStacks(app: cdk.App): void {
   // cdkd deploy --all では消えないため、手で cdkd state destroy する
   // （docs/cdkd-migration.md の「health-global を外した」）
 
-  // Env を付ける対象。環境に紐づくスタックだけを入れる。OIDC スタックは
-  // 環境をまたいで1つなので、ここには入れず Project だけで足りる
-  const envScopedStacks: cdk.Stack[] = [authStack, apiStack, monitoringStack];
-
   // DevOps Agent 連携（Issue #67）。Agent Space はプライマリアカウントの
   // コンソールで作るため、その ARN がコンテキストに入るまでは合成しない。
   // コンソール作業が済んだら cdk.json の context に agentSpaceArn を書けば、
@@ -172,7 +160,6 @@ function buildApplicationStacks(app: cdk.App): void {
       env: cdkEnv,
     });
     devopsAgentStack.addDependency(monitoringStack);
-    envScopedStacks.push(devopsAgentStack);
   }
 
   // スタック間の依存関係を明示。
@@ -180,9 +167,4 @@ function buildApplicationStacks(app: cdk.App): void {
   // これまでと変えないため（auth → api → monitoring）
   apiStack.addDependency(authStack);
   monitoringStack.addDependency(apiStack);
-
-  // 将来 staging や prod を足したとき、同じ仕組みで環境ごとに絞れるようにする
-  for (const stack of envScopedStacks) {
-    cdk.Tags.of(stack).add('Env', env);
-  }
 }
