@@ -26,12 +26,14 @@ builder だけがトップレベルのドメイン（`sakekasu-builder.com`）�
 | スタック | リージョン | 合成される条件 | 中身 |
 | --- | --- | --- | --- |
 | `sakekasu-dev-site-dns` | ap-northeast-1 | context `siteZone` | `sake.sakekasu-builder.com` のゾーン（RETAIN） |
-| `sakekasu-dev-site` | us-east-1 | `siteZone` と `siteHostedZoneId` | 証明書、配信バケット、CloudFront（OAC）、セキュリティヘッダ、A / AAAA |
+| `sakekasu-dev-site` | us-east-1 | `siteZone`、`siteHostedZoneId`、`siteCertificateArn` | 配信バケット、CloudFront（OAC）、セキュリティヘッダ、A / AAAA |
 
 - 2 つに分けてあるのは、ゾーンを親から委任してもらう前に証明書を作ると、DNS 検証が
-  通らずデプロイが終わらないため（kakeibo で 45 分止めた）
-- 配信スタックは証明書ごと us-east-1 に置く。証明書を別スタックにすると ARN を
-  スタック間の参照で渡すことになるので、まとめた
+  通らないため（kakeibo で 45 分止めた）
+- 証明書（us-east-1）は cdkd では作らず、コンソールで作って ARN を `siteCertificateArn` で渡す。
+  cdkd は CDK が付ける DNS 検証の設定を ACM に渡せず、`ValidationDomain` が null だとして
+  弾かれる（2026-10-04 に実際に落ちた。共通基盤の auth の証明書も同じ扱い）
+- 配信スタックは us-east-1 に置く。CloudFront に付ける証明書がそこにしか置けないため
 - 配信物は `deploy-site.yml` が `aws s3 sync` で置く。使うロールは
   `sakekasu-github-actions-site` で、配信バケットのオブジェクトを読み書きできるだけ。
   cdkd のロールにも CloudFront にも届かない
@@ -93,13 +95,24 @@ dig NS sake.sakekasu-builder.com +short
 ```
 
 **ここを確かめずに手順 5 へ進まない。** 証明書の検証レコードが誰も引かないゾーンに入り、
-ACM が PENDING_VALIDATION のまま待ち続ける。
+ACM が検証待ちのまま止まる。
 
-### 5. 配信スタックを作り、配信物を置く
+### 5. 証明書を作る（人の作業、アプリのアカウント）
 
-`infra/cdk.json` に `"siteHostedZoneId": "<手順 3 のゾーン ID>"` を足す PR をマージする。
-deploy.yml が証明書・バケット・CloudFront を作る。証明書の検証と CloudFront の
-展開でそれぞれ数分かかる。
+アプリのアカウント（232791540685）のコンソールで、**リージョンを us-east-1（バージニア北部）に
+切り替えてから** ACM を開く。
+
+1. 「証明書をリクエスト」→「パブリック証明書」
+2. ドメイン名は `sake.sakekasu-builder.com`、検証方法は DNS
+3. 作った証明書を開き、「Route 53 でレコードを作成」を押す。同じアカウントの
+   sake. のゾーンに検証用の CNAME が入る
+4. 数分で状態が「発行済み」になる。ARN を控える
+
+### 6. 配信スタックを作り、配信物を置く
+
+`infra/cdk.json` に `"siteHostedZoneId": "<手順 3 のゾーン ID>"` と
+`"siteCertificateArn": "<手順 5 の ARN>"` を足す PR をマージする。deploy.yml が
+バケット・CloudFront・エイリアスを作る。CloudFront の展開に数分かかる。
 
 デプロイが終わったら、Actions の画面から **deploy-site** を手で実行する（workflow_dispatch）。
 初回は src/ に変更が無いので、自動では走らない。
@@ -116,7 +129,7 @@ deploy.yml が証明書・バケット・CloudFront を作る。証明書の検�
 curl -sI https://sake.sakekasu-builder.com/ | grep -iE 'strict-transport|content-security|x-frame|permissions-policy'
 ```
 
-### 6. apex を sake. へ転送する（別の PR）
+### 7. apex を sake. へ転送する（別の PR）
 
 apex と www を、パスを保ったまま `https://sake.sakekasu-builder.com/` へ 301 で転送する。
 ブックマークを救うため。
@@ -134,7 +147,7 @@ apex と www を、パスを保ったまま `https://sake.sakekasu-builder.com/`
   apex と www をそこへ向けて Amplify アプリを消す。apex の証明書と A レコードは親のゾーン
   （管理アカウント）側の手作業が要る。設計は別の PR で詰める
 
-### 7. 片付け
+### 8. 片付け
 
 転送に切り替えてしばらく様子を見てから、次を外す。
 
@@ -148,9 +161,9 @@ apex と www を、パスを保ったまま `https://sake.sakekasu-builder.com/`
 
 ## 戻すとき
 
-手順 1〜5 は足すだけの変更なので、apex の画面には影響しない。sake. 側がおかしければ、
+手順 1〜6 は足すだけの変更なので、apex の画面には影響しない。sake. 側がおかしければ、
 `siteHostedZoneId` を cdk.json から消せば配信スタックは合成されなくなる。ただし
 `cdkd deploy --all` は合成されなかったスタックを消さないので、消すなら手で
 `cdkd destroy sakekasu-dev-site` を打つ（バケットは RETAIN なので残る）。
 
-手順 6 の後は、Amplify のリダイレクト規則を外せば apex は元の画面に戻る。
+手順 7 の後は、Amplify のリダイレクト規則を外せば apex は元の画面に戻る。
