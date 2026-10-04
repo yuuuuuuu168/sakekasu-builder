@@ -691,8 +691,8 @@ describe('GithubOidcStack', () => {
     });
 
     // 資産置き場のキーは中身のハッシュだけで、アプリで分けられない。削除は全部止める
-    it('共用の cdkd の資産置き場は消せない', () => {
-      const s = statement('DenyDeletingCdkdAssets');
+    it('共用の資産置き場は消せず、設定も変えられない', () => {
+      const s = statement('DenyDestroyingSharedAssets');
       // ライフサイクルでの期限切れやポリシーの差し替えは、削除と同じ結果になる
       // 状態バケットと同じ設定変更（暗号化、レプリケーション、公開設定など）も止める
       const actions = toArray(s.Action);
