@@ -55,7 +55,7 @@
 
 | 機能 | 補足 |
 |------|------|
-| 監視とアラート通知 | 25アラーム（AI・サービス正常性・外形監視・カナリア・SLO）と AWS Health を Slack へ。デプロイ前に手動登録あり。ソムリエのカナリアは共通ログインへの移行で止めてある（[docs/shared-login.md](docs/shared-login.md)） |
+| 監視とアラート通知 | 25アラーム（AI・サービス正常性・外形監視・カナリア・SLO）を Slack へ。AWS Health の通知は共通基盤へ移した。デプロイ前に手動登録あり。ソムリエのカナリアは共通ログインへの移行で止めてある（[docs/shared-login.md](docs/shared-login.md)） |
 | 新規ユーザー登録の Slack 通知 | 旧ユーザープールの Post Confirmation → SNS（[#66](https://github.com/yuuuuuuu168/sakekasu-builder/issues/66)）。共通ログインにはセルフサインアップが無いので役目を終え、旧プールを外すときに一緒に外す |
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuuu168/sakekasu-builder/issues/92)） |
 | DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。プライベートチャンネルではメンションで調査の開始や照会もできる。コンソール側の設定あり（[#67](https://github.com/yuuuuuuu168/sakekasu-builder/issues/67)） |
@@ -450,8 +450,6 @@ Runtime の ARN はフロントの `src/features/sommelier/config.ts` に持つ�
 CloudWatch アラーム ─┐
 外形監視 Lambda ─────┤
 カナリア Lambda ─────┼→ SNS → Slack 通知 Lambda → Slack（Incoming Webhook）
-AWS Health ──────────┤
-（EventBridge 経由）  │
 新規登録通知 Lambda ─┘
 （Cognito トリガー）
 ```
@@ -477,7 +475,6 @@ AWS Health ──────────┤
 | 通知経路 | 新規登録通知の送信失敗（`SignupNotifyFailCount`） | 5分で1回以上 |
 | 監視自体 | 外形監視・カナリアの実行失敗 | 1回以上 |
 | 監視自体 | 外形監視・カナリアが動いていない | 実行回数が0（外形監視は1時間、カナリアは12時間） |
-| AWS 側 | AWS Health の障害・予定された変更 | イベントが届いたら即時（アラームではなく EventBridge 経由） |
 
 監視そのものが動かなくなると異常に気づけないため、**Slack 通知 Lambda と外形監視・カナリアも監視対象**に含めている。「エラーで失敗した」だけでなく「**そもそも動いていない**」も見る。スケジュールが止まるとエラーすら記録されず、静かに監視が消えるため。
 
@@ -490,31 +487,11 @@ AWS Health ──────────┤
 
 ### AWS 側の障害・メンテナンス（AWS Health）
 
-自分たちのコードでは直せない事象（サービス障害、EC2 の再起動予定、証明書の期限、サービス廃止の予告など）を、気づく前に受け取る。
+**共通基盤（[sakekasu-integrated_environment](https://github.com/yuuuuuuu168/sakekasu-integrated_environment) の `docs/monitoring.md`）へ移した。** AWS Health はアカウント全体の話で、4 アプリのどれか1つが持つものではない。共通基盤にも同じルール（ap-northeast-1 の `sakekasu-integrated-aws-health` と、us-east-1 から転送する `sakekasu-integrated-health-global`）が入ったので、こちらにも残すと同じ通知が 2 通届く。
 
-```
-[us-east-1]        Health ルール ──転送──┐
-                                          ▼
-[ap-northeast-1]   Health ルール → SNS（既存）→ Slack 通知 Lambda → Slack
-```
+外したのは、監視スタックの `dev-sakekasu-aws-health` ルールと、us-east-1 の `sakekasu-dev-health-global` スタック（転送ルール `dev-sakekasu-aws-health-global` とロール `dev-sakekasu-health-forwarder`）。us-east-1 のスタックはアプリから外しても `cdkd deploy --all` では消えないので、手で消す（[docs/cdkd-migration.md](docs/cdkd-migration.md) の「health-global を外した」）。
 
-**グローバルサービス（IAM・CloudFront・Route 53 など）のイベントは us-east-1 にしか届かない。** また EventBridge のターゲットは同一リージョンに限られるため、us-east-1 側は「東京のイベントバスへ転送する」だけを行う（`infra/lib/health-global-stack.ts`）。転送されたイベントも同じ形で東京のバスに入るので、**受け口のルールは東京側の1本で済む**。
-
-通知するのは `issue`（実際の障害）と `scheduledChange`（予定された変更）のみ。`accountNotification`（お知らせ）や `investigation`（調査中）まで拾うと日常的に鳴ってノイズになるため、あえて絞っている。
-
-Slack には日本語の見出しを付け、対象サービス・種類・リージョン・開始/終了時刻（JST）・**影響を受けるリソース**を出す。本文は英語で長くなりがちなので冒頭のみ載せ、詳細は AWS Health Dashboard へ誘導する。
-
-なお **Basic サポートプランでは AWS にテストイベントを発行してもらえない**（Business+ 以上が必要）。また `aws.` で始まるイベントソースは AWS の予約で、自前で `put-events` することもできない（`NotAuthorizedForSourceException` になる）。
-
-そのため実機での確認は、**Slack 通知 Lambda を直接呼んで見え方を確かめる**方法をとる。ルールのイベントパターン自体は CDK のテストで固定している。
-
-```bash
-# Health イベント形式の SNS メッセージを Lambda に渡す
-AWS_PROFILE=sakekasu-builder aws lambda invoke \
-  --function-name dev-sakekasu-slack-notifier \
-  --payload file://event.json --cli-binary-format raw-in-base64-out \
-  --region ap-northeast-1 /dev/stdout
-```
+Slack 通知 Lambda と DevOps Agent の転送 Lambda には、Health イベントを整形するコードが残っている。イベントがもう届かないので動かないが、害は無く、アラームの経路と同じ関数なので手を付けていない。
 
 ### 新規ユーザー登録の通知（Issue #66）
 
@@ -567,7 +544,7 @@ AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
   --secret-string '{"username":"canary@example.com","password":"<決めたパスワード>"}' \
   --region ap-northeast-1
 
-# 4. デプロイ（AWS Health 用に us-east-1 のスタックも含まれる）
+# 4. デプロイ
 cd infra
 AWS_PROFILE=sakekasu-builder npx cdk deploy --all -c env=dev
 
@@ -669,7 +646,7 @@ SNS（dev-sakekasu-alerts）┬→ Slack 通知 Lambda → Slack（既存のア�
 
 Agent Space は運用ツール専用アカウント（`<運用アカウント ID>` / `ops-tooling`）に置き、調査対象はアプリ本体のアカウント（`232791540685`）。CDK が作るのはアプリ本体側の2つで、調査用のクロスアカウントロール（読み取り専用）と、アラームを Webhook へ転送する Lambda。Agent Space の作成・Slack 連携・GitHub 連携・Webhook の発行はコンソールでの手作業になる。
 
-エージェントは秒課金なので、投げるものを絞っている。アラームは `ALARM` に変わったときだけ（復旧では投げない）、AWS Health は実際の障害だけ（予定された変更では投げない）、転送 Lambda 自身の失敗アラームは捨てる。
+エージェントは秒課金なので、投げるものを絞っている。アラームは `ALARM` に変わったときだけ（復旧では投げない）、転送 Lambda 自身の失敗アラームは捨てる。AWS Health は共通基盤へ移したので、このトピックにはもう流れてこない。
 
 調査結果を読んだ先で追加の指示を出したくなるぶんは、双方向用のプライベートチャンネルで受ける。メンションで調査を始めたり、経過や根拠を聞いたりできて、返答は元メッセージのスレッドに積まれる。双方向はプライベートチャンネルでしか有効にできず、有効化には `AIDevOpsChannelAccessPolicy` を付けた IAM ロールが要る。CloudFormation 側にまだ双方向のフィールドが無いため、この設定はコンソールでの手作業になる。
 
@@ -732,8 +709,8 @@ src/
     sommelier/   # ソムリエ相談チャット（Runtime 呼び出し）
   components/    # 共通コンポーネント（shadcn/ui, ThemeProvider 等）
 infra/
-  lib/           # CDK スタック（auth / api / monitoring / health-global /
-                 #                billing-notifier / devops-agent / github-oidc）
+  lib/           # CDK スタック（auth / api / monitoring / billing-notifier /
+                 #                devops-agent / github-oidc）
   graphql/       # AppSync GraphQL スキーマ
   lambda/        # Lambda 関数（presigned-url, ocr-analyzer, tasting-note,
                  #              health-check, slack-notifier, sommelier-canary,
