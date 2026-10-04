@@ -6,7 +6,6 @@ import * as url from 'node:url';
 import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
-import { HealthGlobalStack } from '../lib/health-global-stack.js';
 import { TEST_SHARED_AUTH } from './shared-auth-fixture.js';
 
 /**
@@ -104,17 +103,11 @@ function synth() {
     canaryUserPoolClientId: authStack.canaryUserPoolClient.userPoolClientId,
     env,
   });
-  const healthGlobalStack = new HealthGlobalStack(app, 'sakekasu-dev-health-global', {
-    envName: 'dev',
-    targetRegion: TEST_REGION,
-    env: { account: TEST_ACCOUNT, region: 'us-east-1' },
-  });
 
   return {
     auth: Template.fromStack(authStack),
     api: Template.fromStack(apiStack),
     monitoring: Template.fromStack(monitoringStack),
-    'health-global': Template.fromStack(healthGlobalStack),
   } as const;
 }
 
@@ -127,9 +120,9 @@ describe('migrate-to-cdkd.sh の移行順', () => {
     order = scriptOrder();
   });
 
-  it('cdk deploy --all が出す4スタックを過不足なく並べている', () => {
+  it('cdk deploy --all が出す3スタックを過不足なく並べている', () => {
     expect(order.map((s) => s.suffix).sort()).toEqual(
-      ['api', 'auth', 'health-global', 'monitoring'],
+      ['api', 'auth', 'monitoring'],
     );
   });
 
@@ -138,7 +131,6 @@ describe('migrate-to-cdkd.sh の移行順', () => {
       auth: 'ap-northeast-1',
       api: 'ap-northeast-1',
       monitoring: 'ap-northeast-1',
-      'health-global': 'us-east-1',
     };
     for (const { suffix, region } of order) {
       expect(region, `${suffix} のリージョン`).toBe(expected[suffix]);

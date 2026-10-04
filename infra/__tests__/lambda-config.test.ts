@@ -462,7 +462,7 @@ describe('Lambda のランタイム', () => {
   // 非推奨の logRetention はもう使わない（Issue #129）。CDK v3 で消えるので、
   // 新しい関数を足すときにうっかり戻すと、同じ移行をもう一度やることになる。
   // 合成結果の側でも見ているが、合成の対象に入っていないスタック
-  // （health-global など）まで届くのはソース走査のほうだけ
+  // （devops-agent や billing-notifier など）まで届くのはソース走査のほうだけ
   it('infra/lib に非推奨の logRetention が残っていない', () => {
     const offenders: string[] = [];
 
