@@ -46,7 +46,7 @@ export function siteBucketName(envName: string, account: string): string {
 /**
  * フロントの配信（docs/sake-subdomain.md）。S3 に置いて CloudFront から OAC で読む。
  *
- * これまでは Amplify Hosting がコンソールの設定だけで配っていて、ビルド設定・
+ * 以前は Amplify Hosting がコンソールの設定だけで配っていて、ビルド設定・
  * リライト・セキュリティヘッダ・ドメインがすべて IaC の外にあった
  * （docs/amplify-exit.md）。サブドメイン（sake.）へ移るのに合わせて CDK に載せる。
  *
