@@ -685,9 +685,9 @@ describe('GithubOidcStack', () => {
 
     it('他のアプリの cdkd の状態は書き換えられず、builder の状態は対象に入らない', () => {
       const resources = toArray(statement('DenyWritingOtherAppsState').Resource);
-      expect(resources).toContain(`arn:aws:s3:::cdkd-state-${ACCOUNT}/cdkd/sakekasu-kakeibo-*`);
+      expect(resources).toContain(`arn:aws:s3:::cdkd-state-${ACCOUNT}/cdkd/sakekasu-kakeibo*`);
       expect(resources).toContain(`arn:aws:s3:::cdkd-state-${ACCOUNT}/cdkd/ReinventPlanner*`);
-      expect(resources.some((r) => /cdkd\/sakekasu-(dev|staging|prod)-/.test(r))).toBe(false);
+      expect(resources.some((r) => /cdkd\/sakekasu-(dev|staging|prod)/.test(r))).toBe(false);
     });
   });
 });
