@@ -21,8 +21,15 @@ const app = new cdk.App();
 // IAM ロールには付けない。CloudFormation から cdkd へ移したロールは物理名が CFN の命名のままで、
 // cdkd はロールを更新するたびに名前が変わったとみなして作り直す（2026-10-04 にタグを足しただけで
 // 作り直しが起き、古いロールからポリシーがはがれて API が止まった）。ロールはガードレールでも
-// 名前の接頭辞で範囲を絞る
-cdk.Tags.of(app).add('App', 'builder', { excludeResourceTypes: ['AWS::IAM::Role'] });
+// 名前の接頭辞で範囲を絞る。
+//
+// Application Signals の SLO にも付けない。cdkd は SLO を Cloud Control API で更新し、その途中で
+// application-signals:GetServiceLevelObjective を呼ぶが、cdkd 用ロールにその権限が無く断られる
+// （2026-10-04、sakekasu-dev-monitoring のデプロイが失敗してロールバックした）。ロールの権限を
+// 足すには OIDC スタックを手でデプロイする必要があるので、タグのためにはそこまでしない
+cdk.Tags.of(app).add('App', 'builder', {
+  excludeResourceTypes: ['AWS::IAM::Role', 'AWS::ApplicationSignals::ServiceLevelObjective'],
+});
 
 // GitHub Actions からの CDK デプロイ用 OIDC 連携（Issue #94）。
 // Actions 自身にこのスタックを触らせると、ロールの更新ミスで自分を
