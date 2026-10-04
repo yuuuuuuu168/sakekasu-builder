@@ -64,15 +64,62 @@ Amplify Hosting のプレビュー URL（`*.amplifyapp.com`）は登録してい
 
 | 何を | 名前 |
 | --- | --- |
-| カナリアの Lambda とロール、インラインポリシー | `dev-sakekasu-sommelier-canary` |
+| カナリアの Lambda（ロールとインラインポリシーはマージの前に手で消す。下の手順） | `dev-sakekasu-sommelier-canary` |
 | カナリアのスケジュール | `dev-sakekasu-sommelier-canary-schedule` |
 | カナリアのアラーム 3 件 | `dev-sakekasu-sommelier-canary`・`dev-sakekasu-watcher-failure-sommelier-canary`・`dev-sakekasu-watcher-silent-sommelier-canary` |
 | 新規登録通知の失敗アラーム | `dev-sakekasu-signup-notify-fail` |
 | 出力 | `CanaryCredentialsSecretName` |
 
 カナリアのロググループ（`/aws/lambda/dev-sakekasu-sommelier-canary`）は RETAIN なので、deploy では消えずに残る。
-2 段目の手順で手で消す。カナリアのロールは自動生成名（`sakekasu-dev-monitoring-SommelierCanary…`）で
-`role/sakekasu-*` に入るので、CI の cdkd ロールで消せる。
+2 段目の手順で手で消す。
+
+#### マージの前に、カナリアの IAM ロールを手で消す
+
+**CI の cdkd ロールは IAM ロールを消せない。** cdkd はロールを消す前に `iam:ListInstanceProfilesForRole` を打つが、
+`sakekasu-cdkd-deploy` にはこの権限が無い（足さない理由は [cdkd-migration.md](cdkd-migration.md) の
+「取り込み済みリソースへの初回更新は改名になる」）。ロールの名前が `role/sakekasu-*` に入っていても同じで、
+このまま 1 段目をマージすると、deploy がカナリアのロールの削除で落ちる。
+
+cdkd はロールを消す前に `GetRole` で有無を見て、無ければ消したものとして state から外す。
+そこで、ロールだけ先に自分の権限で消しておく。カナリアのスケジュールは止めてあるので、Lambda からロールが
+消えても何も起きない。
+
+```bash
+export AWS_PROFILE=sakekasu-builder AWS_REGION=ap-northeast-1
+
+# 1. カナリアの Lambda が使っているロールの名前を引く
+role_arn="$(aws lambda get-function-configuration --function-name dev-sakekasu-sommelier-canary \
+  --query Role --output text)"
+role="${role_arn##*/}"
+echo "$role"   # sakekasu-dev-monitoring-SommelierCanary… で始まること
+
+# 2. 付いているポリシーを外してから消す
+for arn in $(aws iam list-attached-role-policies --role-name "$role" \
+    --query 'AttachedPolicies[].PolicyArn' --output text); do
+  aws iam detach-role-policy --role-name "$role" --policy-arn "$arn"
+done
+for name in $(aws iam list-role-policies --role-name "$role" --query 'PolicyNames[]' --output text); do
+  aws iam delete-role-policy --role-name "$role" --policy-name "$name"
+done
+aws iam delete-role --role-name "$role"
+
+# 3. 消えたことを確かめる（NoSuchEntity になること）
+aws iam get-role --role-name "$role"
+```
+
+インラインポリシー（`AWS::IAM::Policy`）も 2 で一緒に消える。cdkd がそれを消すときは
+`NoSuchEntity` を「消えている」として扱うので、deploy は止まらない。
+
+ここまで済ませたら 1 段目をマージする。deploy（`deploy.yml`）が通ったら、監視スタックの state に
+旧プールの Import が残っていないことを確かめる。残っていると、2 段目の `cdkd state destroy` が
+`StackHasActiveImportsError` で止まる。
+
+```bash
+cd infra
+npx cdkd state show sakekasu-dev-monitoring --json \
+  | jq '[.state.imports // [] | .. | strings | select(startswith("sakekasu-dev-auth:"))]'
+# [] になること
+```
 
 auth スタックのテンプレートは 1 文字も変えていない。`infra/bin/app.ts` で `exportValue` を使い、
 監視スタックが読んでいた 2 つの Export を同じ名前のまま出し続けている。deploy は auth → api → monitoring の順に
