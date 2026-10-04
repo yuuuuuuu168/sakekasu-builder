@@ -129,41 +129,49 @@ ACM が検証待ちのまま止まる。
 curl -sI https://sake.sakekasu-builder.com/ | grep -iE 'strict-transport|content-security|x-frame|permissions-policy'
 ```
 
-### 7. apex を sake. へ転送する（別の PR）
+### 7. apex を sake. へ転送する
 
 apex と www を、パスを保ったまま `https://sake.sakekasu-builder.com/` へ 301 で転送する。
 ブックマークを救うため。
 
 **apex の A レコードは消さない。** 共通ログインの独自ドメイン（`auth.sakekasu-builder.com`）は、
 親のドメインに A レコードがあることを Cognito が求める
-（sakekasu-integrated_environment の docs/identity.md）。転送用の CloudFront を apex に向ける形なら
-これを満たしたままにできる。
+（sakekasu-integrated_environment の docs/identity.md）。
 
-やり方は 2 つある。
-
-- 当面: Amplify のリダイレクト規則で apex と www を sake. へ 301 にする。
-  インフラを足さずに済み、Amplify の証明書と A レコードもそのまま残る
-- 最終形: 転送専用の CloudFront（CloudFront Functions で 301 を返すだけ）を CDK で作り、
-  apex と www をそこへ向けて Amplify アプリを消す。apex の証明書と A レコードは親のゾーン
-  （管理アカウント）側の手作業が要る。設計は別の PR で詰める
+転送専用の CloudFront（CloudFront Functions で 301 を返すだけ）を sakekasu-integrated_environment に
+置き、apex と www をそこへ向けて Amplify アプリを消した。apex は builder ではなく 4 アプリ共通の
+ドメインになるので、builder ではなく共通基盤に置いた。手順と記録は同リポジトリの
+docs/apex-redirect.md にある。
 
 ### 8. 片付け
 
-転送に切り替えてしばらく様子を見てから、次を外す。
-
 - 共通ログインの builder のクライアントから `https://sakekasu-builder.com/` と
-  `https://www.sakekasu-builder.com/`
-- 画像バケットの CORS（[api-stack.ts](../infra/lib/api-stack.ts)）から apex と `*.amplifyapp.com`
-- 外形監視の対象を sake. に替える。sakekasu-integrated_environment の `healthChecks` の builder と、
-  このリポジトリの `siteUrl`（monitoring-stack は外形監視を共通基盤と二重に持っているので、
-  あわせて外すことを検討する）
-- [amplify-exit.md](amplify-exit.md) に「移行した」と書き足す
+  `https://www.sakekasu-builder.com/` を外した（sakekasu-integrated_environment の infra/cdk.json）
+- 画像バケットの CORS（[api-stack.ts](../infra/lib/api-stack.ts)）から apex と `*.amplifyapp.com` を外した
+- 外形監視の対象を sake. に替えた。共通基盤の `healthChecks` の builder と、このリポジトリの `siteUrl`。
+  monitoring-stack が外形監視を共通基盤と二重に持っている件は、別に片付ける
+- [amplify-exit.md](amplify-exit.md) に「移行した」と書き足した
+
+残っているもの:
+
+- cdkd のロールの ACM の権限（`ManageSiteCertificate`）は使っていない。外すには OIDC スタックの
+  手動更新が要るので、次にそのスタックを更新するときにまとめて外す
+
+## 実施の記録（2026-10-04）
+
+| 項目 | 値 |
+| --- | --- |
+| sake. のゾーン | `Z02665782L8OPX32KFGCD`（管理アカウントの親ゾーンから NS で委任） |
+| 証明書（us-east-1） | `arn:aws:acm:us-east-1:<アプリのアカウント ID>:certificate/df2e84f0-e69b-4124-bb1e-768f0aae6baf` |
+| 配信バケット | `dev-sakekasu-site-<アプリのアカウント ID>` |
+
+途中で 2 回つまずいた。
+
+- 証明書を cdkd で作ろうとして落ちた（`ValidationDomain` が null）。コンソールで作る形に直した
+- そのとき失敗したデプロイのロールバックで、配信バケット（RETAIN）が state から外れたまま
+  AWS に残った。同じ名前で作り直す前に、空であることを確かめて手で消した
 
 ## 戻すとき
 
-手順 1〜6 は足すだけの変更なので、apex の画面には影響しない。sake. 側がおかしければ、
-`siteHostedZoneId` を cdk.json から消せば配信スタックは合成されなくなる。ただし
-`cdkd deploy --all` は合成されなかったスタックを消さないので、消すなら手で
-`cdkd destroy sakekasu-dev-site` を打つ（バケットは RETAIN なので残る）。
-
-手順 7 の後は、Amplify のリダイレクト規則を外せば apex は元の画面に戻る。
+Amplify アプリは消したので、Amplify には戻せない。sake. の配信がおかしいときは、
+deploy-site を前のコミットで手で実行し直すか、配信スタックの設定を直してデプロイする。

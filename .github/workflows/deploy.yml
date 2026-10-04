@@ -1,7 +1,7 @@
 # main へのマージで CDK スタックを自動デプロイする（Issue #94）。
 # 認証はアクセスキーではなく GitHub OIDC（sakekasu-github-oidc スタックの
-# deploy ロール）を使う。フロントは Amplify（apex）と deploy-site.yml（sake.）が
-# 別途デプロイするため、ここでは infra/ の変更だけを対象にする。ソムリエ（AgentCore）は
+# deploy ロール）を使う。フロントは deploy-site.yml が別途デプロイするため、
+# ここでは infra/ の変更だけを対象にする。ソムリエ（AgentCore）は
 # デプロイ先のスタックが別なので deploy-sommelier.yml が受け持つ。
 #
 # デプロイは cdkd（CloudFormation を経由せず AWS SDK / Cloud Control API を
