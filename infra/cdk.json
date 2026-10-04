@@ -14,6 +14,7 @@
     "env": "dev",
     "siteZone": "sake.sakekasu-builder.com",
     "siteHostedZoneId": "Z02665782L8OPX32KFGCD",
+    "siteCertificateArn": "arn:aws:acm:us-east-1:<アプリのアカウント ID>:certificate/df2e84f0-e69b-4124-bb1e-768f0aae6baf",
     "agentSpaceArn": "arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/<Agent Space ID>",
     "sharedAuth": {
       "domain": "auth.sakekasu-builder.com",
