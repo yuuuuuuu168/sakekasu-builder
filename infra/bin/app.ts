@@ -3,7 +3,6 @@ import * as cdk from 'aws-cdk-lib';
 import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
-import { HealthGlobalStack } from '../lib/health-global-stack.js';
 import { BillingNotifierStack } from '../lib/billing-notifier-stack.js';
 import { GithubOidcStack } from '../lib/github-oidc-stack.js';
 import { DevOpsAgentStack } from '../lib/devops-agent-stack.js';
@@ -130,17 +129,16 @@ function buildApplicationStacks(app: cdk.App): void {
     env: cdkEnv,
   });
 
-  // グローバルサービスの AWS Health イベントは us-east-1 にしか届かないため、
-  // そこで受けて監視リージョンのイベントバスへ転送する
-  const healthGlobalStack = new HealthGlobalStack(app, `${prefix}-health-global`, {
-    envName: env,
-    targetRegion: cdkEnv.region!,
-    env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
-  });
+  // AWS Health の通知はここに置かない。アカウント全体の話なので、共通基盤
+  // （sakekasu-integrated_environment の sakekasu-integrated-monitoring /
+  // sakekasu-integrated-health-global）だけが持つ。両方に置くと同じ通知が 2 通届く。
+  // 以前ここにあった us-east-1 の sakekasu-dev-health-global は、アプリから外しても
+  // cdkd deploy --all では消えないため、手で cdkd state destroy する
+  // （docs/cdkd-migration.md の「health-global を外した」）
 
   // Env を付ける対象。環境に紐づくスタックだけを入れる。OIDC スタックは
   // 環境をまたいで1つなので、ここには入れず Project だけで足りる
-  const envScopedStacks: cdk.Stack[] = [authStack, apiStack, monitoringStack, healthGlobalStack];
+  const envScopedStacks: cdk.Stack[] = [authStack, apiStack, monitoringStack];
 
   // DevOps Agent 連携（Issue #67）。Agent Space はプライマリアカウントの
   // コンソールで作るため、その ARN がコンテキストに入るまでは合成しない。
@@ -182,8 +180,6 @@ function buildApplicationStacks(app: cdk.App): void {
   // これまでと変えないため（auth → api → monitoring）
   apiStack.addDependency(authStack);
   monitoringStack.addDependency(apiStack);
-  // 転送先のバスでルールが待ち構えている状態にしてから転送側を作る
-  healthGlobalStack.addDependency(monitoringStack);
 
   // 将来 staging や prod を足したとき、同じ仕組みで環境ごとに絞れるようにする
   for (const stack of envScopedStacks) {

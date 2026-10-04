@@ -25,6 +25,8 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 
 手順3と3.5 は 2026-10-03 に完了を確認した。`sakekasu-cdkd-deploy` ロールと `sakekasu-role-boundary` ポリシーはどちらも 2026-08-16 付で実在し、境界の `PermissionsBoundaryUsageCount` は 13。合成した4スタックの IAM ロール数（api 8 / auth 1 / monitoring 3 / health-global 1 = 13）と一致するので、全ロールに境界が付いている。
 
+その後、AWS Health の通知を共通基盤へ移したので `sakekasu-dev-health-global` はアプリから外した（下の「health-global を外した」）。このファイルの「4スタック」「ロール13」などの数字は外す前のもので、手順の記録としてそのまま残してある。
+
 境界を適用するコード（`0490e66`）が main に入ったあと、`deploy` ワークフローの `cdk deploy --all` は 9/15・9/26・10/2 と3回成功している。境界ポリシーが無ければ IAM 側で落ちるため、これも傍証になる。
 
 ### 順番を外すと止まるところ
@@ -80,7 +82,7 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 - `sakekasu-dev-auth`
 - `sakekasu-dev-api`
 - `sakekasu-dev-monitoring`
-- `sakekasu-dev-health-global`（us-east-1）
+- `sakekasu-dev-health-global`（us-east-1）。移行は済ませたが、その後 AWS Health の通知を共通基盤へ移したのでアプリから外した（下の「health-global を外した」）
 
 `sakekasu-dev-devops-agent` は `agentSpaceArn` の context が入っているときだけ合成される。いまは入っていないため `cdkd list` にも出ないが、入れた時点で同じ扱いになる。
 
@@ -930,6 +932,61 @@ CDK CLI 側のフォールバック（`cdk deploy`）には `--app cdk.out` を�
 
 デプロイロールにはこの経路に必要な `cloudformation:UpdateStack` / `DeleteStack` / チェンジセット系が [cdkd-policies.ts](../infra/lib/cdkd-policies.ts) で入っている。
 
+## health-global を外した
+
+AWS Health の通知は、アカウント全体の話として共通基盤（sakekasu-integrated_environment の `docs/monitoring.md`）が持つことにした。ap-northeast-1 の `sakekasu-integrated-aws-health` と、us-east-1 から転送する `sakekasu-integrated-health-global` が同じことをするので、builder に残すと同じ通知が 2 通届く。
+
+builder から外したのは2つ。
+
+| 何を | どこ | どう消えるか |
+| --- | --- | --- |
+| ルール `dev-sakekasu-aws-health` | `sakekasu-dev-monitoring`（ap-northeast-1） | main へのマージで deploy が消す |
+| スタック `sakekasu-dev-health-global`（ルール `dev-sakekasu-aws-health-global`、ロール `dev-sakekasu-health-forwarder` とそのインラインポリシー） | us-east-1 | **手で消す**（下の手順） |
+
+監視スタックのトピックポリシーからは `events.amazonaws.com` の文が消え、`cloudwatch.amazonaws.com` の明示の許可だけが残る。トピックポリシー自体は残るので置き換わりは起きない（明示の許可を残している理由は `infra/lib/monitoring-stack.ts` のコメント）。
+
+### us-east-1 のスタックが deploy で消えない理由
+
+`cdkd deploy --all` の対象は合成結果に入っているスタックだけで、state にしか無いスタックには触らない（0.291.31 の `deploy` は `--all` のとき合成したスタックの一覧をそのまま対象にする）。アプリから外しただけでは `sakekasu-dev-health-global` の state と実物が us-east-1 に残り、グローバルの Health イベントを東京の default バスへ転送し続ける。転送先には共通基盤のルールが待っているので、共通基盤自身の転送と合わせてグローバル分だけ 2 通になる。
+
+### deploy.yml で消さない理由
+
+一度だけの `cdkd state destroy` を deploy に入れる案もあったが採らなかった。
+
+- **CI のロールでは消せない。** `sakekasu-cdkd-deploy` の IAM の権限（`DeleteRole` / `DeleteRolePolicy`）は `role/sakekasu-*` に絞ってある。転送ロールの名前は `dev-sakekasu-health-forwarder` で、この範囲に入らない。ルールを消したところでロールの削除が AccessDenied になり、deploy が赤くなって state も中途半端に残る
+- 通すにはデプロイロールの範囲を広げる必要があり、それには OIDC スタックの手動デプロイが要る。一度きりの削除のために、main への push から届く権限を広げるのは割に合わない
+- 一度きりの破壊的な手順を CI に置くと、外し忘れたときに何をするのか読み手に分かりにくい
+
+スタックの中身だけを空にして残す案も、空のスタックの state が残り続けて結局どこかで手で消すことになるので採らなかった。
+
+### 手順（Mac から。マージ後の deploy が通ってから）
+
+**マージより前に打たない。** main のアプリにまだ `sakekasu-dev-health-global` が入っている間に消すと、次の deploy が作り直す。
+
+**`CDKD_ROLE_ARN` は渡さない。** 自分の権限で直接打つ（手順3 の末尾を参照）。
+
+```bash
+cd infra
+export AWS_PROFILE=sakekasu-builder
+
+# 1. 消す対象を確かめる。ルール・ロール・インラインポリシーの3つが出ること
+npx cdkd state resources sakekasu-dev-health-global --stack-region us-east-1
+
+# 2. 消す。リソースを消してから state も消す。確認を訊かれたら y
+AWS_REGION=us-east-1 npx cdkd state destroy sakekasu-dev-health-global --stack-region us-east-1
+
+# 3. 消えたことを確かめる
+npx cdkd state list                                   # sakekasu-dev-health-global (us-east-1) が無いこと
+aws events describe-rule --name dev-sakekasu-aws-health-global --region us-east-1   # ResourceNotFoundException
+aws iam get-role --role-name dev-sakekasu-health-forwarder                          # NoSuchEntity
+```
+
+`cdkd state destroy` は合成を要らない版の destroy で、state に記録されたリソースを消してから state を消す。cdkd の destroy は state のリージョンにクライアントを切り替えるが、`import` のリージョンの取り違え（上の「cdkd の版と、先行リポジトリで判明している不具合」）と同じ形で踏まないよう、`AWS_REGION` も合わせておく。
+
+インラインポリシーの手当て（「`cdkd export` はインラインポリシーの手当てが要る」）はここでは要らない。`AWS::IAM::Policy` の削除が物理 ID で空振りしても、ロールを消すときに cdkd がロールのインラインポリシーを `ListRolePolicies` で引いて実名で消してから `DeleteRole` を打つ。手順3 の `get-role` が NoSuchEntity を返せば、ポリシーごと消えている。
+
+途中で落ちたら state は残るので、原因を直してもう一度 2 を打てばよい。同じリソースで落ち続けるときに限り、AWS 側を手で消してから `npx cdkd state orphan sakekasu-dev-health-global --stack-region us-east-1` で記録だけを外す。
+
 ## 運用コマンドの対応
 
 CloudFormation のスタックが無くなるので、コンソールのスタックビューは使えなくなる。
@@ -952,7 +1009,7 @@ state の置き場所は `s3://cdkd-state-<アプリのアカウント ID>/cdkd/
 
 問題が起きたら、スタック単位で CFn へ戻せる。リソースは作り直されない。
 
-**`export` の前に、そのスタックのインラインポリシーを実際の名前で消しておく。** 省くとフェーズ2 が必ず落ちる（手順6 の「`cdkd export` はインラインポリシーの手当てが要る」を参照）。対象は api 8 / monitoring 3 / auth 1 / health-global 1 の計13個。名前は `cdkd export --dry-run` の「Phase 2 will also re-CREATE ...」に並ぶ論理 ID と同じで、`aws iam list-role-policies --role-name <ロール名>` でも引ける。
+**`export` の前に、そのスタックのインラインポリシーを実際の名前で消しておく。** 省くとフェーズ2 が必ず落ちる（手順6 の「`cdkd export` はインラインポリシーの手当てが要る」を参照）。対象は api 8 / monitoring 3 / auth 1 の計12個（health-global の1個はスタックごと外した）。名前は `cdkd export --dry-run` の「Phase 2 will also re-CREATE ...」に並ぶ論理 ID と同じで、`aws iam list-role-policies --role-name <ロール名>` でも引ける。
 
 ```bash
 cd infra

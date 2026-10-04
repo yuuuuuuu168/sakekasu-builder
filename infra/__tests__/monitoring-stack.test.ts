@@ -105,11 +105,14 @@ describe("MonitoringStack", () => {
   /**
    * トピックポリシーに明示的な文を1つでも置くと、SNS が暗黙に持っている
    * 「所有アカウントからの publish を許可する」既定ポリシーが丸ごと消える。
-   * AwsHealthRule が events.amazonaws.com の文を作るため、この置き換えは必ず起きる。
+   * 以前は AWS Health のルールが events.amazonaws.com の文を作っていて、
+   * この置き換えが必ず起きていた。
    *
    * 実際に一度これで壊れた。全アラームが鳴っても Slack に何も届かず、
    * EventBridge 経由の AWS Health 通知だけが生きていたので気づけなかった。
-   * アラーム経路が無言で死ぬ壊れ方なので、テストで固定する。
+   * Health のルールは共通基盤へ移したが、また別の宛先を足したときに同じ壊れ方を
+   * しないよう、明示の許可は残してある。アラーム経路が無言で死ぬ壊れ方なので、
+   * テストで固定する。
    */
   it("トピックポリシーが CloudWatch アラームからの publish を許可している", () => {
     expect(cloudwatchPublishStatements(template)).toHaveLength(1);
@@ -479,40 +482,14 @@ describe("MonitoringStack", () => {
     });
   });
 
-  // AWS 側の障害は自分たちでは直せないが、気づかないと対応が遅れる
-  it("AWS Health のイベントを SNS へ流すルールがある", () => {
-    template.hasResourceProperties("AWS::Events::Rule", {
-      Name: "dev-sakekasu-aws-health",
-      EventPattern: {
-        source: ["aws.health"],
-        detail: { eventTypeCategory: ["issue", "scheduledChange"] },
-      },
-      State: "ENABLED",
-    });
-  });
-
-  // お知らせや調査中まで拾うと日常的に鳴ってノイズになる
-  it("Health は障害と予定変更だけに絞る", () => {
-    const rules = template.findResources("AWS::Events::Rule");
-    const health = Object.values(rules).find(
-      (r) => r.Properties?.Name === "dev-sakekasu-aws-health",
+  // AWS Health の通知は共通基盤（sakekasu-integrated_environment）だけが持つ。
+  // こちらにも戻すと同じ通知が 2 通届く
+  it("AWS Health のルールを持たない", () => {
+    const rules = Object.values(template.findResources("AWS::Events::Rule"));
+    const healthRules = rules.filter((r) =>
+      JSON.stringify(r.Properties?.EventPattern ?? {}).includes("aws.health"),
     );
-    const categories = health!.Properties.EventPattern.detail
-      .eventTypeCategory as string[];
-    expect(categories).not.toContain("accountNotification");
-    expect(categories).not.toContain("investigation");
-  });
-
-  it("Health ルールの宛先が通知用の SNS トピックである", () => {
-    const rules = template.findResources("AWS::Events::Rule");
-    const health = Object.values(rules).find(
-      (r) => r.Properties?.Name === "dev-sakekasu-aws-health",
-    );
-    expect(health!.Properties.Targets).toHaveLength(1);
-    // トピックは同スタック内なので Ref で参照される
-    expect(JSON.stringify(health!.Properties.Targets[0])).toContain(
-      "AlertTopic",
-    );
+    expect(healthRules).toHaveLength(0);
   });
 
   // Issue #86: Application Signals
