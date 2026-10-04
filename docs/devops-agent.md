@@ -37,7 +37,9 @@ Agent Space は運用ツール専用のメンバーアカウント `ops-tooling`
 
 ### 調査用のクロスアカウントロール
 
-`dev-sakekasu-devops-agent-monitoring`。読み取り専用の管理ポリシー `AIDevOpsAgentAccessPolicy` だけを持ち、これに加えて Resource Explorer のサービスリンクロール作成だけを許可する。アクション実行用（Operator）のロールは作っていない。まず調査だけ任せ、実行が必要になってから最小権限で足す。
+`sakekasu-dev-devops-agent-monitoring`。読み取り専用の管理ポリシー `AIDevOpsAgentAccessPolicy` だけを持ち、これに加えて Resource Explorer のサービスリンクロール作成だけを許可する。アクション実行用（Operator）のロールは作っていない。まず調査だけ任せ、実行が必要になってから最小権限で足す。
+
+名前だけ他のリソースと向きが違う（`dev-sakekasu-` ではなく `sakekasu-dev-`）。cdkd のデプロイロールが `role/sakekasu-*` にしか `iam:CreateRole` を持っておらず、`dev-` 始まりだと作れないため。スタック名 `sakekasu-dev-devops-agent` には揃っている。
 
 信頼条件は `aws:SourceAccount`（プライマリのアカウント ID）と `aws:SourceArn`（Agent Space の ARN）の両方で絞る。混乱した代理人（confused deputy）を防ぐための条件で、AWS のドキュメントもこの形を推奨している。
 
@@ -132,7 +134,7 @@ Agent Space の ARN は秘密ではない（引き受けには IAM の信頼条�
 コンソールの Capabilities タブ → Cloud → Secondary sources → Add から、調査用ロールを登録する。ウィザードはロールを自分で作らせようとするが、ここでは CDK が作ったものを渡す。
 
 ```
-arn:aws:iam::232791540685:role/dev-sakekasu-devops-agent-monitoring
+arn:aws:iam::232791540685:role/sakekasu-dev-devops-agent-monitoring
 ```
 
 cdkd は CloudFormation を通らないのでスタックの出力が無い。ロール名は固定なので ARN はこの形になる。
@@ -254,7 +256,7 @@ Slack ワークスペースのアカウントレベル登録は済んでいる�
 
 許しているのはチャットの開始とメッセージ送信だけで、宛先はプリンシパルタグ `AgentSpaceId` で絞られる。ロールにこのタグが無い、あるいは値が違うと何も通らない。自分でロールを作るとここを落としやすいので、自動作成を選んでいる。
 
-調査そのものの権限はこのロールとは別で、アプリ本体アカウントの `dev-sakekasu-devops-agent-monitoring` が持っている。そちらは読み取り専用のままなので、Slack から何を頼んでもリソースは変わらない。Operator ロールを作っていないことが、そのまま双方向のガードレールになっている。
+調査そのものの権限はこのロールとは別で、アプリ本体アカウントの `sakekasu-dev-devops-agent-monitoring` が持っている。そちらは読み取り専用のままなので、Slack から何を頼んでもリソースは変わらない。Operator ロールを作っていないことが、そのまま双方向のガードレールになっている。
 
 ### 使い方
 

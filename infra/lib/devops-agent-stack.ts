@@ -60,8 +60,12 @@ export class DevOpsAgentStack extends cdk.Stack {
 
     // アクション実行用（Operator）は作らない。まず調査だけを任せ、
     // 実行が必要になった時点で最小権限で足す（Issue #67 の方針）
+    // 名前が `sakekasu-` で始まらないと cdkd のデプロイロールが作れない。
+    // cdkd-policies.ts の iam:CreateRole は `role/sakekasu-*` に絞ってある。
+    // 他のリソースと違って `${prefix}-`（= dev-sakekasu-）を使えないのはこのため。
+    // スタック名が `sakekasu-dev-devops-agent` なので、そちらに揃う形でもある
     const monitoringRole = new iam.Role(this, 'MonitoringRole', {
-      roleName: `${prefix}-devops-agent-monitoring`,
+      roleName: `sakekasu-${props.envName}-devops-agent-monitoring`,
       // IAM の description は ASCII + Latin-1 のみ（日本語を入れるとデプロイが 400 で落ちる）
       description: 'Read-only role assumed by AWS DevOps Agent for cross-account investigation',
       assumedBy: new iam.ServicePrincipal('aidevops.amazonaws.com', {
