@@ -694,15 +694,10 @@ describe('GithubOidcStack', () => {
     it('共用の cdkd の資産置き場は消せない', () => {
       const s = statement('DenyDeletingCdkdAssets');
       // ライフサイクルでの期限切れやポリシーの差し替えは、削除と同じ結果になる
-      expect(toArray(s.Action)).toEqual([
-        's3:DeleteObject',
-        's3:DeleteObjectVersion',
-        's3:DeleteBucket',
-        's3:PutLifecycleConfiguration',
-        's3:PutBucketVersioning',
-        's3:PutBucketPolicy',
-        's3:DeleteBucketPolicy',
-      ]);
+      // 状態バケットと同じ設定変更（暗号化、レプリケーション、公開設定など）も止める
+      const actions = toArray(s.Action);
+      expect(actions).toEqual(expect.arrayContaining(['s3:DeleteObject', 's3:DeleteObjectVersion']));
+      expect(actions).toEqual(expect.arrayContaining(toArray(statement('DenyChangingCdkdStateBucket').Action)));
       expect(toArray(s.Resource)).toEqual([
         `arn:aws:s3:::cdkd-assets-${ACCOUNT}-*`,
         `arn:aws:s3:::cdk-hnb659fds-assets-${ACCOUNT}-*`,
