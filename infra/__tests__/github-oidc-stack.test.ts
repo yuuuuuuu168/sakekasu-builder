@@ -640,4 +640,68 @@ describe('GithubOidcStack', () => {
     );
     expect(urls).toContain('https://token.actions.githubusercontent.com');
   });
+
+  describe('cdkd のデプロイロールのガードレール', () => {
+    function guardrail(): { Properties: { Roles: unknown[]; PolicyDocument: { Statement: Statement[] } } } {
+      const policies = Object.values(
+        template.findResources('AWS::IAM::ManagedPolicy', {
+          Properties: { ManagedPolicyName: 'sakekasu-cdkd-deploy-guardrail' },
+        }),
+      );
+      expect(policies).toHaveLength(1);
+      return policies[0] as ReturnType<typeof guardrail>;
+    }
+    const statement = (sid: string): Statement => {
+      const found = guardrail().Properties.PolicyDocument.Statement.find((s) => s.Sid === sid);
+      expect(found, sid).toBeDefined();
+      return found as Statement;
+    };
+
+    it('cdkd のデプロイロールにだけ付き、中身は Deny だけ', () => {
+      expect(guardrail().Properties.Roles).toEqual([{ Ref: expect.stringMatching(/^CdkdDeployRole/) }]);
+      expect(guardrail().Properties.PolicyDocument.Statement.every((s) => s.Effect === 'Deny')).toBe(true);
+    });
+
+    it('他のアプリの App タグが付いたリソースと、他のアプリの App タグの付与を拒否する', () => {
+      expect(statement('DenyOtherAppsResources').Condition).toEqual({
+        Null: { 'aws:ResourceTag/App': 'false' },
+        StringNotEquals: { 'aws:ResourceTag/App': 'builder' },
+      });
+      expect(statement('DenyForeignAppTag').Condition).toEqual({
+        Null: { 'aws:RequestTag/App': 'false' },
+        StringNotEquals: { 'aws:RequestTag/App': 'builder' },
+      });
+    });
+
+    it('sakekasu-* のうち、builder の環境の接頭辞の外にあるロールは作り替えられない', () => {
+      const notResource = (statement('DenyRolesOutsideApp') as Statement & { NotResource: string[] }).NotResource;
+      expect(notResource).toEqual(
+        ['dev', 'staging', 'prod'].flatMap((env) => [
+          `arn:aws:iam::${ACCOUNT}:role/sakekasu-${env}-*`,
+          `arn:aws:iam::${ACCOUNT}:policy/sakekasu-${env}-*`,
+        ]),
+      );
+    });
+
+    it('他のアプリの cdkd の状態は書き換えられず、builder の状態は対象に入らない', () => {
+      const resources = toArray(statement('DenyWritingOtherAppsState').Resource);
+      expect(resources).toContain(`arn:aws:s3:::cdkd-state-${ACCOUNT}/cdkd/sakekasu-kakeibo*`);
+      expect(resources).toContain(`arn:aws:s3:::cdkd-state-${ACCOUNT}/cdkd/ReinventPlanner*`);
+      expect(resources.some((r) => /cdkd\/sakekasu-(dev|staging|prod)/.test(r))).toBe(false);
+    });
+
+    // 資産置き場のキーは中身のハッシュだけで、アプリで分けられない。削除は全部止める
+    it('共用の資産置き場は消せず、設定も変えられない', () => {
+      const s = statement('DenyDestroyingSharedAssets');
+      // ライフサイクルでの期限切れやポリシーの差し替えは、削除と同じ結果になる
+      // 状態バケットと同じ設定変更（暗号化、レプリケーション、公開設定など）も止める
+      const actions = toArray(s.Action);
+      expect(actions).toEqual(expect.arrayContaining(['s3:DeleteObject', 's3:DeleteObjectVersion']));
+      expect(actions).toEqual(expect.arrayContaining(toArray(statement('DenyChangingCdkdStateBucket').Action)));
+      expect(toArray(s.Resource)).toEqual([
+        `arn:aws:s3:::cdkd-assets-${ACCOUNT}-*`,
+        `arn:aws:s3:::cdk-hnb659fds-assets-${ACCOUNT}-*`,
+      ]);
+    });
+  });
 });
