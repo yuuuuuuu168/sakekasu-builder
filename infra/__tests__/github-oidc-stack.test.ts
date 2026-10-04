@@ -693,7 +693,16 @@ describe('GithubOidcStack', () => {
     // 資産置き場のキーは中身のハッシュだけで、アプリで分けられない。削除は全部止める
     it('共用の cdkd の資産置き場は消せない', () => {
       const s = statement('DenyDeletingCdkdAssets');
-      expect(toArray(s.Action)).toEqual(['s3:DeleteObject', 's3:DeleteObjectVersion', 's3:DeleteBucket']);
+      // ライフサイクルでの期限切れやポリシーの差し替えは、削除と同じ結果になる
+      expect(toArray(s.Action)).toEqual([
+        's3:DeleteObject',
+        's3:DeleteObjectVersion',
+        's3:DeleteBucket',
+        's3:PutLifecycleConfiguration',
+        's3:PutBucketVersioning',
+        's3:PutBucketPolicy',
+        's3:DeleteBucketPolicy',
+      ]);
       expect(toArray(s.Resource)).toEqual([`arn:aws:s3:::cdkd-assets-${ACCOUNT}-*`]);
     });
   });
