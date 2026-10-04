@@ -1,0 +1,106 @@
+# main へのマージで、フロントをビルドして sake.sakekasu-builder.com の配信バケットへ置く。
+#
+# これまでフロントは Amplify Hosting がコンソールの設定だけで配っていた。
+# サブドメイン（sake.）へ移るのに合わせて S3 + CloudFront（infra/lib/site-stack.ts）に
+# 載せ替える。手順と切り替えの順番は docs/sake-subdomain.md にある。
+#
+# 移行の間は Amplify（apex）とこのワークフロー（sake.）が同じ main から両方へ出す。
+# apex を sake. への転送に切り替えて Amplify アプリを消したら、こちらだけになる。
+#
+# 配信スタックがまだ無い間（cdk.json に siteHostedZoneId が無い間）は何もしない。
+# ゾーンの委任が済む前にマージしても、このワークフローが赤くならないようにするため。
+name: deploy-site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'theme/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tsconfig*.json'
+      - 'amplify_outputs.json'
+      - '.github/workflows/deploy-site.yml'
+  # 配信スタックを作った直後の初回は、フロントに変更が無くても置く必要がある。
+  # infra/cdk.json を paths に入れないのはそのため。siteHostedZoneId を足す PR で
+  # 走らせると、deploy.yml がバケットを作り終える前に同期しにいって落ちる
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+# 後続を打ち切らないのは deploy.yml と同じ理由で、最後の main の状態を必ず反映させるため
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+env:
+  # infra/lib/site-stack.ts の siteBucketName と同じ形
+  SITE_BUCKET: dev-sakekasu-site-232791540685
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: 配信スタックがあるかを確かめる
+        id: gate
+        run: |
+          if node -e 'process.exit(require("./infra/cdk.json").context.siteHostedZoneId ? 0 : 1)'; then
+            echo 'enabled=true' >>"$GITHUB_OUTPUT"
+          else
+            echo '::notice::infra/cdk.json に siteHostedZoneId が無いので、配信スタックはまだありません。何もしません（docs/sake-subdomain.md）'
+            echo 'enabled=false' >>"$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v7
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      # 依存の取得・検査・ビルドは、AWS の認証情報を入れる前に済ませる（deploy.yml と
+      # 同じ理由）。インストール時スクリプトやビルド中のコードが乗っ取られても、
+      # その時点では掴める認証情報が無い
+      - run: npm ci --ignore-scripts
+        if: steps.gate.outputs.enabled == 'true'
+      # test.yml と重なるが、paths やマージの経路によってはそちらが走らないことがある。
+      # 出す手前で必ず1回通す
+      - run: npx tsc --noEmit -p tsconfig.app.json
+        if: steps.gate.outputs.enabled == 'true'
+      - run: npx vitest run src/
+        if: steps.gate.outputs.enabled == 'true'
+      - run: npm run build
+        if: steps.gate.outputs.enabled == 'true'
+      # 配信バケットへ置くだけのロール。cdkd のロールにも CloudFront にも届かない
+      # （infra/lib/github-oidc-stack.ts の SiteDeployRole）
+      - uses: aws-actions/configure-aws-credentials@v6
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          role-to-assume: arn:aws:iam::232791540685:role/sakekasu-github-actions-site
+          aws-region: us-east-1
+      # 置く順番に意味がある。
+      #
+      # 1. assets/（ファイル名にハッシュが入る）を先に置く。1 年キャッシュさせてよい
+      # 2. 最後に index.html などを no-cache で置く。新しい index.html が見えた時点で、
+      #    それが指す assets/ は必ずもう在る
+      #
+      # assets/ は --delete しない。開いたままのタブが古い index.html から遅延読み込みで
+      # 古いチャンクを取りにくるため、消すとその画面が壊れる。ハッシュ付きで数百 KB ずつ
+      # 増えるだけなので、残しておいても困らない。
+      #
+      # CloudFront のキャッシュ無効化は打たない。index.html は no-cache なので
+      # キャッシュポリシーの最小 TTL（1 秒）で入れ替わる（site-stack.ts の冒頭）
+      - name: 配信バケットへ置く
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          aws s3 sync dist/assets "s3://${SITE_BUCKET}/assets" \
+            --cache-control 'public, max-age=31536000, immutable'
+          aws s3 sync dist "s3://${SITE_BUCKET}" \
+            --exclude 'assets/*' \
+            --delete \
+            --cache-control 'no-cache'

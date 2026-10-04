@@ -53,8 +53,10 @@ const LOGS_DATA_PLANE_ACTIONS = [
  * cdkd のデプロイロールに渡す権限。
  *
  * @param account デプロイ先のアカウント ID
+ * @param siteZone フロントの配信に使うサブドメインのゾーン（例: sake.sakekasu-builder.com）。
+ *   DNS レコードを書き換えられる範囲をこのゾーンの名前に絞る
  */
-export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
+export function cdkdDeployStatements(account: string, siteZone: string): iam.PolicyStatement[] {
   return [
     // 利用者のデータに触れないサービス群。ここはサービス単位で許可する
     new iam.PolicyStatement({
@@ -196,8 +198,9 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
       ],
     }),
 
-    // 画像バケットはバケット自体の設定だけ触れればよい。中身（利用者が
-    // 上げたレシート画像）を読み書きする権限は渡さない
+    // 画像バケットと配信バケットは、バケット自体の設定だけ触れればよい。
+    // 中身（利用者が上げた画像、配信物）を読み書きする権限は渡さない。
+    // 配信物を置くのは別のロール（sakekasu-github-actions-site）
     new iam.PolicyStatement({
       sid: 'ManageImageBucketConfiguration',
       actions: [
@@ -226,8 +229,10 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
         's3:PutBucketTagging',
       ],
       // 環境接頭辞が付くため dev / staging / prod をまとめて拾う
-      resources: ['arn:aws:s3:::*-sakekasu-images'],
+      resources: ['arn:aws:s3:::*-sakekasu-images', `arn:aws:s3:::*-sakekasu-site-${account}`],
     }),
+
+    ...siteDeliveryStatements(siteZone),
 
     // Lambda や AppSync の実行ロールを作る。スタック名が接頭辞に付くので
     // sakekasu-* に閉じられる（自動生成名は <スタック名>-<論理ID><ハッシュ>）。
@@ -321,6 +326,7 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
         `arn:aws:iam::${account}:role/sakekasu-cdkd-deploy`,
         `arn:aws:iam::${account}:role/sakekasu-github-actions-deploy`,
         `arn:aws:iam::${account}:role/sakekasu-github-actions-diff`,
+        `arn:aws:iam::${account}:role/sakekasu-github-actions-site`,
         `arn:aws:iam::${account}:oidc-provider/token.actions.githubusercontent.com`,
       ],
     }),
@@ -410,6 +416,100 @@ export function cdkdDeployStatements(account: string): iam.PolicyStatement[] {
 }
 
 /**
+ * フロントの配信（site-dns-stack.ts / site-stack.ts）を作るための権限。
+ *
+ * どれも利用者のデータを持たないので、読めること自体は問題にならない。
+ * 気をつけるのは、同じアカウントに他のアプリ（kakeibo・learning・reinvent）の
+ * ゾーンとディストリビューションも同居していること。
+ *
+ * - DNS レコードの書き換えは、`siteZone` とその配下の名前だけに絞る
+ *   （route53:ChangeResourceRecordSetsNormalizedRecordNames）。ゾーン ID では絞れない。
+ *   ゾーンを作るのはこのロール自身で、作るまで ID が決まらないため。
+ *   名前で絞れば、他のアプリのサブドメインを乗っ取る向きの書き換えはできない
+ * - ゾーンの削除（DeleteHostedZone）は渡さない。ゾーンは RETAIN で、cdkd が消しに
+ *   いくことは無い。渡すと他のアプリのゾーンを消せてしまう
+ * - CloudFront はリソースを絞れない（ディストリビューションの ID は作るまで決まらない）。
+ *   他のアプリのディストリビューションの設定も書き換えられる。上の lambda:* と同じ
+ *   性質の穴で、main への push からしか使えないことが歯止めになる
+ * - キャッシュの無効化（CreateInvalidation）は渡さない。配信物の更新では打たない
+ *   設計にしてある（site-stack.ts の冒頭）
+ */
+function siteDeliveryStatements(siteZone: string): iam.PolicyStatement[] {
+  return [
+    new iam.PolicyStatement({
+      sid: 'ManageSiteHostedZone',
+      actions: [
+        'route53:CreateHostedZone',
+        'route53:GetHostedZone',
+        'route53:UpdateHostedZoneComment',
+        'route53:ListResourceRecordSets',
+        'route53:ChangeTagsForResource',
+        'route53:ListTagsForResource',
+        'route53:GetChange',
+      ],
+      resources: ['*'],
+    }),
+    new iam.PolicyStatement({
+      sid: 'ChangeSiteRecordsOnly',
+      actions: ['route53:ChangeResourceRecordSets'],
+      resources: ['arn:aws:route53:::hostedzone/*'],
+      conditions: {
+        // 正規化された名前は小文字で、末尾のドットが無い。証明書の検証レコード
+        // （_xxxx.sake.sakekasu-builder.com）は2つ目の形で拾う
+        'ForAllValues:StringLike': {
+          'route53:ChangeResourceRecordSetsNormalizedRecordNames': [siteZone, `*.${siteZone}`],
+        },
+      },
+    }),
+    new iam.PolicyStatement({
+      sid: 'ManageSiteCertificate',
+      actions: [
+        'acm:RequestCertificate',
+        'acm:DescribeCertificate',
+        'acm:DeleteCertificate',
+        'acm:ListCertificates',
+        'acm:AddTagsToCertificate',
+        'acm:RemoveTagsFromCertificate',
+        'acm:ListTagsForCertificate',
+      ],
+      resources: ['*'],
+    }),
+    // ResponseHeadersPolicy は cdkd の対応表に無く Cloud Control API で作られる
+    // （docs/amplify-exit.md）。その先で cloudfront の API が呼ばれるので、ここで許可する
+    new iam.PolicyStatement({
+      sid: 'ManageSiteDistribution',
+      actions: [
+        'cloudfront:CreateDistribution',
+        'cloudfront:CreateDistributionWithTags',
+        'cloudfront:GetDistribution',
+        'cloudfront:GetDistributionConfig',
+        'cloudfront:UpdateDistribution',
+        'cloudfront:DeleteDistribution',
+        'cloudfront:ListDistributions',
+        'cloudfront:CreateOriginAccessControl',
+        'cloudfront:GetOriginAccessControl',
+        'cloudfront:GetOriginAccessControlConfig',
+        'cloudfront:UpdateOriginAccessControl',
+        'cloudfront:DeleteOriginAccessControl',
+        'cloudfront:ListOriginAccessControls',
+        'cloudfront:CreateResponseHeadersPolicy',
+        'cloudfront:GetResponseHeadersPolicy',
+        'cloudfront:GetResponseHeadersPolicyConfig',
+        'cloudfront:UpdateResponseHeadersPolicy',
+        'cloudfront:DeleteResponseHeadersPolicy',
+        'cloudfront:ListResponseHeadersPolicies',
+        'cloudfront:GetCachePolicy',
+        'cloudfront:ListCachePolicies',
+        'cloudfront:TagResource',
+        'cloudfront:UntagResource',
+        'cloudfront:ListTagsForResource',
+      ],
+      resources: ['*'],
+    }),
+  ];
+}
+
+/**
  * cdkd の差分表示（`cdkd diff`）に必要な読み取り権限。
  *
  * PR から流れるロールに付くので、書き込みは一切入れない。読み取りでも
@@ -484,7 +584,32 @@ export function cdkdDiffStatements(account: string): iam.PolicyStatement[] {
         's3:GetBucketOwnershipControls',
         's3:GetBucketTagging',
       ],
-      resources: ['arn:aws:s3:::*-sakekasu-images'],
+      resources: ['arn:aws:s3:::*-sakekasu-images', `arn:aws:s3:::*-sakekasu-site-${account}`],
+    }),
+
+    // フロントの配信（site-dns-stack.ts / site-stack.ts）。どれも利用者のデータを持たない
+    new iam.PolicyStatement({
+      sid: 'ReadSiteDelivery',
+      actions: [
+        'route53:GetHostedZone',
+        'route53:ListResourceRecordSets',
+        'route53:ListTagsForResource',
+        'acm:DescribeCertificate',
+        'acm:ListTagsForCertificate',
+        'cloudfront:GetDistribution',
+        'cloudfront:GetDistributionConfig',
+        'cloudfront:GetOriginAccessControl',
+        'cloudfront:GetOriginAccessControlConfig',
+        'cloudfront:GetResponseHeadersPolicy',
+        'cloudfront:GetResponseHeadersPolicyConfig',
+        'cloudfront:GetCachePolicy',
+        'cloudfront:ListDistributions',
+        'cloudfront:ListOriginAccessControls',
+        'cloudfront:ListResponseHeadersPolicies',
+        'cloudfront:ListCachePolicies',
+        'cloudfront:ListTagsForResource',
+      ],
+      resources: ['*'],
     }),
 
     new iam.PolicyStatement({

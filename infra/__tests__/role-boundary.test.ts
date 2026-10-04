@@ -70,6 +70,7 @@ describe('Permissions Boundary', () => {
     const template = Template.fromStack(
       new GithubOidcStack(new cdk.App(), 'TestGithubOidc', {
         repository: 'yuuuuuuu168/sakekasu-builder',
+        siteZone: 'sake.sakekasu-builder.com',
         env,
       }),
     );
@@ -91,6 +92,7 @@ describe('Permissions Boundary', () => {
     const template = Template.fromStack(
       new GithubOidcStack(new cdk.App(), 'TestGithubOidc', {
         repository: 'yuuuuuuu168/sakekasu-builder',
+        siteZone: 'sake.sakekasu-builder.com',
         env,
       }),
     );
