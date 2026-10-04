@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib';
-import { AuthStack } from '../lib/auth-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
 import { BillingNotifierStack } from '../lib/billing-notifier-stack.js';
@@ -70,21 +69,9 @@ function buildApplicationStacks(app: cdk.App): void {
   // 値は cdk.json の context に置き、スタック間の参照ではつながない
   const sharedAuth = parseSharedAuth(app.node.tryGetContext('sharedAuth'));
 
-  // AuthStack: 旧ユーザープール（このアプリ専用。セルフサインアップあり）。
-  //
-  // ログインは共通ログインへ移り、データの付け替えも済んだ。外すのは 2 段で、
-  // いまは 1 段目（docs/shared-login.md の「旧プールを外す」）。
-  // 監視スタックはもうこのスタックを読まないが、デプロイ済みの監視スタックは
-  // まだ Fn::ImportValue で Export を読んでいる。auth が先にデプロイされるので、
-  // ここで Export を消すと、読まれている Export を消す形になる。
-  // そこで Export だけを exportValue で同じ名前のまま残し、auth の
-  // テンプレートを 1 文字も変えない。次の段で、スタックごと外す
-  const authStack = new AuthStack(app, `${prefix}-auth`, {
-    envName: env,
-    env: cdkEnv,
-  });
-  authStack.exportValue(authStack.userPool.userPoolId);
-  authStack.exportValue(authStack.canaryUserPoolClient.userPoolClientId);
+  // 旧ユーザープール（sakekasu-dev-auth）はアプリから外した。cdkd deploy --all は
+  // 合成したスタックしか見ないので、外しただけでは消えない。手で cdkd state destroy
+  // する（docs/shared-login.md の「旧ユーザープールを外す」）
 
   // ApiStack: AppSync + DynamoDB（認証は共通ログインのユーザープール）
   const apiStack = new ApiStack(app, `${prefix}-api`, {
@@ -159,9 +146,6 @@ function buildApplicationStacks(app: cdk.App): void {
     devopsAgentStack.addDependency(monitoringStack);
   }
 
-  // スタック間の依存関係を明示。
-  // api はもう auth を参照していないが、依存は残す。デプロイの順番を
-  // これまでと変えないため（auth → api → monitoring）
-  apiStack.addDependency(authStack);
+  // スタック間の依存関係を明示（api → monitoring）
   monitoringStack.addDependency(apiStack);
 }

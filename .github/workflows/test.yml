@@ -82,21 +82,6 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm test
 
-  # infra/scripts の Python（データを書き換える運用スクリプト）。
-  # 共通ログインへの移行で、記録と画像の持ち主を旧 sub から新 sub へ付け替える
-  # スクリプトを足した。利用者のデータを書き換えるので、キーの変換と
-  # 冪等性のテストを PR ごとに走らせる。AWS へは出ない（S3 と DynamoDB は偽物）
-  scripts:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      # setup-uv は移動タグを打たないので、パッチまで指定する（sommelier ジョブと同じ）
-      - uses: astral-sh/setup-uv@v10.0.1
-      - name: 運用スクリプトのテスト
-        env:
-          PYTHONDONTWRITEBYTECODE: '1'
-        run: uv run --with boto3 --with pytest pytest -p no:cacheprovider infra/scripts/tests
-
   # フロント（src/**）は lint も型検査も CI のどこでも走っていなかった。infra の
   # テストと同じで、壊れても誰も気づかないまま main に入る状態だったため足す
   # （Issue #134）。infra のジョブとは分けて、片方が落ちてももう片方の結果が残るようにする

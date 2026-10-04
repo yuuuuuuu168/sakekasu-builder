@@ -79,7 +79,7 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 
 `deploy.yml` が `cdk deploy --all` で流しているスタック。`-c env=dev` は `cdk.json` の context 既定値。
 
-- `sakekasu-dev-auth`
+- `sakekasu-dev-auth`。移行は済ませたが、その後 共通ログインへ移ったのでアプリから外した（[shared-login.md](shared-login.md) の「旧ユーザープールを外す」）
 - `sakekasu-dev-api`
 - `sakekasu-dev-monitoring`
 - `sakekasu-dev-health-global`（us-east-1）。移行は済ませたが、その後 AWS Health の通知を共通基盤へ移したのでアプリから外した（下の「health-global を外した」）

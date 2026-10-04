@@ -98,7 +98,7 @@ src/
     ThemeToggle.tsx   # テーマ切替
   lib/               # ユーティリティ
 infra/               # AWS CDK インフラ定義
-  lib/               # CDK スタック（AuthStack, ApiStack）
+  lib/               # CDK スタック（ApiStack, MonitoringStack ほか。認証は共通ログイン）
   graphql/           # AppSync GraphQL スキーマ
   lambda/            # Lambda 関数（presigned-url, ocr-analyzer）
   scripts/           # amplify_outputs.json 生成スクリプト等
