@@ -407,6 +407,10 @@ export class ApiStack extends cdk.Stack {
       cors: [
         {
           allowedOrigins: [
+            // 配信を Amplify から CDK（site-stack.ts）へ移している途中。apex を
+            // sake. への転送に切り替えたら、apex と amplifyapp.com を外す
+            // （docs/sake-subdomain.md）
+            'https://sake.sakekasu-builder.com',
             'https://sakekasu-builder.com',
             'https://*.amplifyapp.com',
             'http://localhost:5173',

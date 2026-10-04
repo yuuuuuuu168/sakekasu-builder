@@ -31,8 +31,10 @@ export interface AppOutputs {
  *
  * ログインはマネージドログインへのリダイレクト（Authorization code + PKCE）。
  * 戻り先はいま開いているオリジンの `/` にする。共通ログイン側に登録してあるのは
- * `https://sakekasu-builder.com/`・`https://www.sakekasu-builder.com/`・
- * `http://localhost:5173/` の3つで、末尾の `/` まで完全一致でないと
+ * `https://sake.sakekasu-builder.com/`・`https://sakekasu-builder.com/`・
+ * `https://www.sakekasu-builder.com/`・`http://localhost:5173/` の4つで
+ * （apex と www は sake. への移行が済んだら外す。docs/sake-subdomain.md）、
+ * 末尾の `/` まで完全一致でないと
  * Cognito が redirect_mismatch で断る。Amplify Hosting のプレビュー URL などは
  * 登録していないので、そこからはログインできない。
  *
