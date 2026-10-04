@@ -55,7 +55,8 @@ async function main() {
   }
 
   const app = new App();
-  // 全リソースに App タグ（infra/bin/app.ts と同じ。コストの内訳とデプロイ用ロールのガードレールに使う）
+  // 全リソースに App タグ（infra/bin/app.ts と同じ。コストの内訳に使う。デプロイ用ロールの
+  // ガードレールの判定にも使う予定だが、ガードレールはまだ無い）
   Tags.of(app).add('App', 'builder');
 
   for (const target of targets) {
