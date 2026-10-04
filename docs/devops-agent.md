@@ -112,36 +112,82 @@ AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
 
 ### 6. デプロイする
 
-`agentSpaceArn` がコンテキストに入っているときだけスタックが合成される。まずは手元で確認する。
-
-```bash
-cd infra
-AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev \
-  -c agentSpaceArn=arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/xxxxxxxx
-```
-
-動作を確認したら `infra/cdk.json` の `context` に `agentSpaceArn` を書いてコミットする。以降は他のスタックと同じく、main へのマージで GitHub Actions が更新する。
+`agentSpaceArn` がコンテキストに入っているときだけスタックが合成される。`infra/cdk.json` の `context` に書いてあるので、main にマージすれば GitHub Actions の cdkd が作る。
 
 ```json
 {
   "context": {
     "env": "dev",
-    "agentSpaceArn": "arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/xxxxxxxx"
+    "agentSpaceArn": "arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/<Agent Space ID>"
   }
 }
 ```
 
 Agent Space の ARN は秘密ではない（引き受けには IAM の信頼条件が要る）ので、リポジトリに置いて問題ない。
 
+**手元から `npx cdk deploy` を打たない。** cdkd への移行で CloudFormation のスタックは削除されていて、リソースだけが残っている。その状態で `cdk deploy` を打つと、依存する auth / api / monitoring をゼロから作り直そうとして既存リソースと名前がぶつかる（[docs/cdkd-migration.md](cdkd-migration.md)）。計画を先に見たいときは PR の `cdk-diff` を読む。`infra/**` を触る PR では自動で走る。
+
 ### 7. セカンダリアカウントを Agent Space に登録する
 
-デプロイの出力 `MonitoringRoleArn` を控え、コンソールの Capabilities タブ → Cloud → Secondary sources → Add から登録する。ウィザードはロールを自分で作らせようとするが、ここでは CDK が作ったロールの ARN を渡す。
+コンソールの Capabilities タブ → Cloud → Secondary sources → Add から、調査用ロールを登録する。ウィザードはロールを自分で作らせようとするが、ここでは CDK が作ったものを渡す。
 
-続けてリソース検出を設定する。対象は既存の CloudFormation スタック3つ。
+```
+arn:aws:iam::<アプリのアカウント ID>:role/dev-sakekasu-devops-agent-monitoring
+```
 
-- `sakekasu-dev-auth`
-- `sakekasu-dev-api`
-- `sakekasu-dev-monitoring`
+cdkd は CloudFormation を通らないのでスタックの出力が無い。ロール名は固定なので ARN はこの形になる。
+
+続けてリソース検出を設定する。**タグで指定する。**
+
+```
+Project = sakekasu-builder
+```
+
+以前はここに CloudFormation スタック3つ（`sakekasu-dev-auth` / `-api` / `-monitoring`）を並べていたが、cdkd への移行でそのスタックは消えた。スタック指定は使えない。
+
+#### タグの付け方
+
+タグは CDK からではなく、Resource Groups Tagging API で直接付けてある（2026-10-04、52リソース）。CDK の `Tags.of` で付ける道は一度試して取り下げた。cdkd が取り込み済みリソースを改名してしまうのと、ロググループへのタグ付けが通らないため（[docs/cdkd-migration.md](cdkd-migration.md) の「取り込み済みリソースへの初回更新は改名になる」）。
+
+合成テンプレートに `Tags` が無いので、cdkd はこのタグを管理対象外として素通りする。デプロイで消えることはない（`cdkd diff` が差分を出さないことを確認済み）。
+
+裏を返すと、**リソースを足してもタグは自動では付かない**。監視対象を増やしたら付け直す。
+
+```sh
+PROFILE=sakekasu-builder
+REGION=ap-northeast-1
+ACCOUNT=<アプリのアカウント ID>
+API_ID=6mtw5cju3naydf7mxnaoulowta
+
+{
+  aws lambda list-functions --profile $PROFILE --region $REGION \
+    --query "Functions[?starts_with(FunctionName,'dev-sakekasu-')].FunctionArn" --output text
+  aws cloudwatch describe-alarms --profile $PROFILE --region $REGION \
+    --alarm-name-prefix dev-sakekasu- --query 'MetricAlarms[].AlarmArn' --output text
+  aws sns list-topics --profile $PROFILE --region $REGION \
+    --query "Topics[?contains(TopicArn,'dev-sakekasu-')].TopicArn" --output text
+  aws logs describe-log-groups --profile $PROFILE --region $REGION \
+    --log-group-name-prefix /aws/lambda/dev-sakekasu- --query 'logGroups[].arn' --output text
+  aws events list-rules --profile $PROFILE --region $REGION \
+    --name-prefix dev-sakekasu- --query 'Rules[].Arn' --output text
+  aws resourcegroupstaggingapi get-resources --profile $PROFILE --region $REGION \
+    --resource-type-filters application-signals \
+    --query "ResourceTagMappingList[?contains(ResourceARN,'dev-sakekasu-')].ResourceARN" --output text
+  echo "arn:aws:dynamodb:$REGION:$ACCOUNT:table/dev-sakekasu-purchase-records"
+  echo "arn:aws:dynamodb:$REGION:$ACCOUNT:table/dev-sakekasu-drinking-records"
+  echo "arn:aws:s3:::dev-sakekasu-images"
+  echo "arn:aws:appsync:$REGION:$ACCOUNT:apis/$API_ID"
+} | tr '\t' '\n' | sed 's/:\*$//' | grep '^arn:' | grep -v learning | sort -u > /tmp/arns.txt
+
+rm -f /tmp/part-*
+split -l 20 /tmp/arns.txt /tmp/part-
+for f in /tmp/part-*; do
+  aws resourcegroupstaggingapi tag-resources --profile $PROFILE --region $REGION \
+    --resource-arn-list $(cat $f) --tags Project=sakekasu-builder,Env=dev
+done
+```
+
+`grep -v learning` を入れているのは、同じアカウントに住む learning のテーブルが `dev-sakekasu-learning-progress` という名前で、素朴な前方一致に引っかかるため。付与の API は失敗しても終了コード 0 を返し、`FailedResourcesMap` に中身を入れる。空の `{}` であることを確かめる。
 
 トポロジにリソースが出てこないときは、セカンダリロールに `AIDevOpsAgentAccessPolicy` が付いているかを最初に疑う。コンソールの検証がチェックマークを出していても、ポリシーが外れていることがある。
 
