@@ -71,7 +71,7 @@ jobs:
       # 残っていて気づけない）。
       #
       # --ignore-scripts なのは、PR のブランチをそのまま checkout して入れる以上、
-      # lock に細工されたライフサイクルスクリプトを走らせないため。8つの lock は
+      # lock に細工されたライフサイクルスクリプトを走らせないため。Lambda ごとの lock は
       # いずれも hasInstallScript を持たないので、付けても壊れるものが無い
       - name: Lambda ごとの依存を入れる
         run: |

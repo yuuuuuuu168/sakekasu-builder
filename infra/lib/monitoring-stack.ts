@@ -86,46 +86,22 @@ export interface MonitoringStackProps extends cdk.StackProps {
   ocrFunction: NodejsFunction;
   /** 画像削除失敗のメトリクスフィルター（アラームはこちらで作る） */
   imageDeleteFailMetricFilter: logs.MetricFilter;
-  /** 新規登録の Slack 通知失敗のメトリクスフィルター（アラームはこちらで作る） */
-  signupNotifyFailMetricFilter: logs.MetricFilter;
   /** ソムリエ Runtime の ARN */
   sommelierRuntimeArn: string;
   /** フロントの公開 URL（外形監視の対象） */
   siteUrl: string;
-  /**
-   * カナリアが使う Cognito。共通ログインへ移ったあとも旧プール（AuthStack）を指す。
-   * 共通ログインのクライアントはパスワードで直接サインインできない（authFlows が空で、
-   * MFA も必須）ため、カナリアの行き先がまだ無い。下の canaryEnabled を参照
-   */
-  userPoolId: string;
-  /** カナリア専用のクライアント ID（ブラウザ向けとは分ける） */
-  canaryUserPoolClientId: string;
-  /**
-   * ソムリエのカナリア（6時間ごとの実会話）を動かすか。既定は true。
-   *
-   * false のときはリソースを消さずに止める。スケジュールを無効にし、カナリアに
-   * 関わる3つのアラーム（失敗・実行失敗・沈黙）の通知を切る。消さないのは、
-   * cdkd で管理しているリソースを減らすと戻すときに作り直しになるのと、
-   * 再開がこのフラグを戻すだけで済むようにするため。
-   *
-   * 共通ログインへ移った時点で false にしている。ソムリエの Runtime は
-   * 共通プールのトークンしか受け付けなくなり、旧プールでサインインする
-   * カナリアは必ず 401/403 で落ちる（docs/shared-login.md の「カナリア」）
-   */
-  canaryEnabled?: boolean;
 }
 
 /**
  * 監視とアラート通知をまとめたスタック。
  *
- * 通知先の Slack Webhook URL と、カナリアが使う監視ユーザーの認証情報は
- * リポジトリに置けないため、デプロイ前に手動で登録した SSM / Secrets Manager
- * を名前で参照する（README の手順を参照）。
+ * 通知先の Slack Webhook URL はリポジトリに置けないため、デプロイ前に
+ * 手動で登録した SSM パラメータを名前で参照する（README の手順を参照）。
  */
 export class MonitoringStack extends cdk.Stack {
   public readonly alertTopic: sns.Topic;
 
-  /** 外形監視・カナリアが書き込むカスタムメトリクスの名前空間 */
+  /** 外形監視が書き込むカスタムメトリクスの名前空間 */
   private readonly metricNamespace: string;
 
   constructor(scope: Construct, id: string, props: MonitoringStackProps) {
@@ -141,7 +117,6 @@ export class MonitoringStack extends cdk.Stack {
     this.metricNamespace = `${prefix}-monitoring`;
 
     const webhookParameterName = `/${prefix}/monitoring/slack-webhook-url`;
-    const canaryCredentialsSecretName = `${prefix}/monitoring/canary-user`;
 
     // --- Application Signals（Issue #86）---
     //
@@ -423,21 +398,6 @@ export class MonitoringStack extends cdk.Stack {
       evaluationPeriods: 1,
     });
 
-    // 新規登録の通知 Lambda は失敗してもサインアップを守るため throw しない。
-    // 沈黙したままだと登録に気づけなくなるので、失敗ログから起こした
-    // メトリクスで監視する（Issue #66）
-    this.addAlarm('SignupNotifyFailAlarm', {
-      alarmName: `${prefix}-signup-notify-fail`,
-      description:
-        '新規ユーザー登録の Slack 通知に失敗しています（登録自体は成功しています）',
-      metric: props.signupNotifyFailMetricFilter.metric({
-        statistic: 'Sum',
-        period: cdk.Duration.minutes(5),
-      }),
-      threshold: 1,
-      evaluationPeriods: 1,
-    });
-
     // --- 外形監視: 到達性（5分ごと）---
 
     const healthCheckTargets = [
@@ -519,88 +479,6 @@ export class MonitoringStack extends cdk.Stack {
       });
     }
 
-    // --- 外形監視: ソムリエとの実会話（6時間ごと）---
-
-    const canaryFunctionName = `${prefix}-sommelier-canary`;
-    const canary = new NodejsFunction(this, 'SommelierCanaryFunction', {
-      functionName: canaryFunctionName,
-      runtime: Runtime.NODEJS_22_X,
-      logGroup: lambdaLogGroup(this, 'SommelierCanaryLogGroup', canaryFunctionName),
-      entry: path.join(here, '../lambda/sommelier-canary/index.ts'),
-      handler: 'handler',
-      timeout: cdk.Duration.seconds(90),
-      environment: {
-        METRIC_NAMESPACE: this.metricNamespace,
-        USER_POOL_ID: props.userPoolId,
-        USER_POOL_CLIENT_ID: props.canaryUserPoolClientId,
-        CREDENTIALS_SECRET_ID: canaryCredentialsSecretName,
-        SOMMELIER_RUNTIME_ARN: props.sommelierRuntimeArn,
-        SOMMELIER_RUNTIME_REGION: this.region,
-        TIMEOUT_MS: '60000',
-      },
-      bundling: {
-        format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
-        mainFields: ['module', 'main'],
-        banner:
-          "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
-      },
-    });
-
-    canary.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['cloudwatch:PutMetricData'],
-        resources: ['*'],
-        conditions: { StringEquals: { 'cloudwatch:namespace': this.metricNamespace } },
-      }),
-    );
-    canary.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['secretsmanager:GetSecretValue'],
-        resources: [
-          `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${canaryCredentialsSecretName}-*`,
-        ],
-      }),
-    );
-    canary.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['cognito-idp:AdminInitiateAuth'],
-        resources: [
-          `arn:aws:cognito-idp:${this.region}:${this.account}:userpool/${props.userPoolId}`,
-        ],
-      }),
-    );
-
-    const canaryEnabled = props.canaryEnabled ?? true;
-
-    new events.Rule(this, 'SommelierCanarySchedule', {
-      ruleName: `${prefix}-sommelier-canary-schedule`,
-      // 毎回 LLM を呼ぶため、頻度を抑えて費用を小さくする
-      schedule: events.Schedule.rate(cdk.Duration.hours(6)),
-      targets: [new targets.LambdaFunction(canary)],
-      // 止めている間はルールごと無効にする（消さない。理由は props の説明）
-      enabled: canaryEnabled,
-    });
-
-    this.addAlarm('SommelierCanaryFailed', {
-      alarmName: `${prefix}-sommelier-canary`,
-      description:
-        'ソムリエに実際に相談できませんでした（認証または応答に失敗）。' +
-        '初回デプロイ直後なら、agentcore.json の allowedClients と COGNITO_APP_CLIENT_ID に' +
-        'カナリア用クライアントを登録し忘れていないか確認してください',
-      metric: new cloudwatch.Metric({
-        namespace: this.metricNamespace,
-        metricName: 'SommelierCanaryFailed',
-        statistic: 'Maximum',
-        period: cdk.Duration.hours(6),
-      }),
-      threshold: 1,
-      evaluationPeriods: 1,
-      // 6時間に1度しか計測しないため、次の計測までの空白を「異常なし」と
-      // みなすと、直っていないのに復旧扱いになってしまう。状態を保たせる
-      treatMissingData: cloudwatch.TreatMissingData.MISSING,
-      actionsEnabled: canaryEnabled,
-    });
-
     // 監視そのものが動かなくなると異常に気づけないため、実行側も監視する。
     // 「エラーで失敗した」だけでなく「そもそも動いていない」も見る必要がある
     // （スケジュールが止まるとエラーすら記録されず、静かに監視が消える）
@@ -611,16 +489,6 @@ export class MonitoringStack extends cdk.Stack {
         label: '外形監視',
         // 5分ごとに動くので、1時間あれば必ず実行されている
         silenceWindow: cdk.Duration.hours(1),
-        actionsEnabled: true,
-      },
-      {
-        fn: canary,
-        key: 'sommelier-canary',
-        label: 'ソムリエのカナリア',
-        // 6時間ごとなので、12時間あれば必ず実行されている
-        silenceWindow: cdk.Duration.hours(12),
-        // カナリアを止めている間は、沈黙のアラームが必ず鳴る。通知だけ切る
-        actionsEnabled: canaryEnabled,
       },
     ]) {
       this.addAlarm(`WatcherFailure-${watcher.key}`, {
@@ -632,7 +500,6 @@ export class MonitoringStack extends cdk.Stack {
         }),
         threshold: 1,
         evaluationPeriods: 1,
-        actionsEnabled: watcher.actionsEnabled,
       });
 
       this.addAlarm(`WatcherSilent-${watcher.key}`, {
@@ -651,7 +518,6 @@ export class MonitoringStack extends cdk.Stack {
         comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
         // 記録が無い＝一度も動いていない、とみなして異常にする
         treatMissingData: cloudwatch.TreatMissingData.BREACHING,
-        actionsEnabled: watcher.actionsEnabled,
       });
     }
 
@@ -662,10 +528,6 @@ export class MonitoringStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'SlackWebhookParameterName', {
       value: webhookParameterName,
       description: 'Slack Webhook URL を入れる SSM パラメータ名（手動登録）',
-    });
-    new cdk.CfnOutput(this, 'CanaryCredentialsSecretName', {
-      value: canaryCredentialsSecretName,
-      description: '監視ユーザーの認証情報を入れる Secrets Manager 名（手動登録）',
     });
   }
 
@@ -888,18 +750,13 @@ export class MonitoringStack extends cdk.Stack {
       evaluationPeriods: number;
       /**
        * データが無い期間の扱い。既定は「異常なし」。
-       * ただし、たまにしか計測しない指標（カナリアなど）でこれを使うと、
+       * ただし、動きの遅い指標（30日の rolling で見る SLO の達成率など）でこれを使うと、
        * 異常のまま次の計測を待つ間に「復旧」と判定されてしまうため、
        * そうした指標では MISSING を指定して状態を保たせる
        */
       treatMissingData?: cloudwatch.TreatMissingData;
       /** 既定は「しきい値以上で異常」。下回ったら異常にしたい指標で使う */
       comparisonOperator?: cloudwatch.ComparisonOperator;
-      /**
-       * 通知を出すか。既定は true。監視対象を一時的に止めている間に、
-       * アラームを消さずに黙らせるためだけに使う
-       */
-      actionsEnabled?: boolean;
     },
   ): cloudwatch.Alarm {
     // 通知先を作る前に呼ばれると undefined を読んで落ちる。TypeScript は
@@ -924,9 +781,6 @@ export class MonitoringStack extends cdk.Stack {
         cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       // 呼び出しが無い時間帯にデータ欠損で鳴らさない
       treatMissingData: options.treatMissingData ?? cloudwatch.TreatMissingData.NOT_BREACHING,
-      // 止めるときだけ明示する。true を書き込むと、既存の全アラームの定義に
-      // ActionsEnabled が増えて、意味の無い更新がデプロイのたびに出る
-      ...(options.actionsEnabled === false && { actionsEnabled: false }),
     });
 
     alarm.addAlarmAction(new actions.SnsAction(this.alertTopic));
