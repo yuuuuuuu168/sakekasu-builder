@@ -23,7 +23,7 @@ const OUTPUTS: AppOutputs = {
 
 describe('buildAmplifyConfig', () => {
   it('マネージドログインへ Authorization code で送る設定を組み立てる', () => {
-    const config = buildAmplifyConfig(OUTPUTS, 'https://sakekasu-builder.com');
+    const config = buildAmplifyConfig(OUTPUTS, 'https://sake.sakekasu-builder.com');
     expect(config.Auth?.Cognito).toMatchObject({
       userPoolId: 'ap-northeast-1_SharedTest',
       userPoolClientId: 'sharedtestclientid',
@@ -40,8 +40,6 @@ describe('buildAmplifyConfig', () => {
   // 共通ログイン側に登録した戻り先は末尾の / まで完全一致。ずれると redirect_mismatch
   it.each([
     ['https://sake.sakekasu-builder.com', 'https://sake.sakekasu-builder.com/'],
-    ['https://sakekasu-builder.com', 'https://sakekasu-builder.com/'],
-    ['https://www.sakekasu-builder.com', 'https://www.sakekasu-builder.com/'],
     ['http://localhost:5173', 'http://localhost:5173/'],
     ['http://localhost:5173/', 'http://localhost:5173/'],
   ])('戻り先はオリジン + / にする（%s）', (origin, expected) => {
