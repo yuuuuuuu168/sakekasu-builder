@@ -10,7 +10,7 @@ CloudWatch アラーム ─┐
                                                   │
                                                   └→ 転送 Lambda → DevOps Agent Webhook
                                                                         ↓
-                                                     自動調査 → Slack（#sakekasu-builder-agent・未確認）
+                                                     自動調査 → Slack（#sakekasu-builder-agent）
 
 人 ⇄ Slack（#sakekasu-builder-agent・プライベート）⇄ DevOps Agent
      メンションで調査の開始・経過の照会・追加の指示
@@ -222,7 +222,46 @@ AWS_PROFILE=sakekasu-builder aws lambda invoke \
 
 DevOps Agent の Web アプリで `CloudWatch アラーム: TEST-devops-agent` の調査が始まれば通っている。
 
-HTTP 200 が返るのに調査が始まらないときは、本文の形式か識別子の重複を疑う。同じ識別子で送ると重複として捨てられる。4xx が返るときは署名かヘッダーの問題。
+HTTP 200 が返るのに調査が始まらないときは、本文の形式を疑う。4xx が返るときは署名かヘッダーの問題。
+
+識別子は `AlarmName` と `Timestamp` を繋いだもので、転送 Lambda のログに残る。
+
+```
+INFO 調査を依頼しました: TEST-devops-agent-20261004-2-2026-10-04T05:00:00.000Z（優先度 HIGH）
+```
+
+**同じ識別子でなくても、内容が近ければ進行中の調査に合流する。** 2026-10-04 に `-2` を付けた
+2本目を流したところ、新しい調査は立たず Slack にも何も出なかった。API で見ると
+`LINKED` になっていた。
+
+```
+73796125  CloudWatch アラーム: TEST-devops-agent-20261004    IN_PROGRESS
+2a08a9c4  CloudWatch アラーム: TEST-devops-agent-20261004-2  LINKED
+```
+
+捨てられたのではなく、既存の調査に紐付いている。進行中の調査がある状態でテストを流すときは、
+Slack に何も出なくても失敗とは限らない。確認はこれ。
+
+```sh
+aws devops-agent list-backlog-tasks \
+  --agent-space-id <Agent Space ID> \
+  --profile verify-ops --region ap-northeast-1
+```
+
+#### 転送 Lambda のログが空のとき
+
+ロググループはあるのにストリームが1つも無い、`storedBytes` が 0 のまま、という状態は
+実行ロールに CloudWatch Logs の権限が無い。
+
+```sh
+aws iam list-attached-role-policies \
+  --role-name sakekasu-dev-devops-agent-WebhookForwarderFunctionServi-002870db \
+  --profile verify
+```
+
+`AWSLambdaBasicExecutionRole` が出なければそれ。途中で落ちたデプロイが残した state のずれが
+原因で、`cdkd diff` には出てこない（[docs/cdkd-migration.md](cdkd-migration.md) の
+「途中で落ちたデプロイは state と実物をずらして残る」）。
 
 #### セカンダリのリソースが見えているかを確かめる
 
@@ -261,8 +300,15 @@ AWS のドキュメントも、調査はトポロジに載っているリソー�
 アラームチャンネルを双方向に作り替えず別に足したのは、会話を始めたい人だけをメンバーにしたいため。
 アラームは広く見せておきたいので、パブリックのまま残す。
 
-**まだ確かめていないこと。** 自動調査の投稿がどちらのチャンネルに出るかは公式ドキュメントに書かれていない。
-テストアラームを1本鳴らして見ておく。両方に出るようなら、片方の関連付けを Remove して寄せる。
+**自動調査の投稿は `#sakekasu-builder-agent` だけに出る**（2026-10-04 にテストアラームで確認）。
+Agent Space に紐付いている Slack の関連付けは1つで、投稿先はそのチャンネル1つだけ。
+`#sakekasu-builder-alarm` に流れるのは SNS → Slack 通知 Lambda の別系統なので、二重投稿は起きない。
+
+```sh
+aws devops-agent list-associations \
+  --agent-space-id <Agent Space ID> \
+  --profile verify-ops --region ap-northeast-1
+```
 
 ### 手順
 

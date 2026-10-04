@@ -783,6 +783,69 @@ Failed to update log group SignupNotifierLogGroupF4C03A83: Invalid resourceArn
 
 取り込み済みのスタックに対しては、**全リソースに一律で何かを足す変更を避ける**。1リソースずつ、計画を `cdkd diff` で見てから進める。DevOps Agent のリソース検出に要るタグは、CDK を通さず Resource Groups Tagging API で直接付けた（[docs/devops-agent.md](devops-agent.md) の「タグの付け方」）。合成テンプレートに `Tags` が無ければ cdkd は素通りするので、外から付けた値は消えない。
 
+### 途中で落ちたデプロイは state と実物をずらして残る（2026-10-04）
+
+DevOps Agent の webhook 転送 Lambda が、ログを1行も書けない状態でしばらく動いていた。
+
+```
+/aws/lambda/dev-sakekasu-devops-agent-webhook
+  storedBytes: 0
+  logStreams: []
+```
+
+実行ロールに CloudWatch Logs の権限が無かった。
+
+```
+sakekasu-dev-devops-agent-WebhookForwarderFunctionServi-002870db
+  AttachedPolicies: []                          ← AWSLambdaBasicExecutionRole が無い
+  インラインポリシー: secretsmanager:GetSecretValue のみ
+```
+
+合成テンプレートは `ManagedPolicyArns` に `AWSLambdaBasicExecutionRole` を置いている。
+実物だけが欠けていた。
+
+#### なぜ気づけなかったか
+
+ロールの作成日時は 10/4 02:35:21 で、[#248](https://github.com/yuuuuuuu168/sakekasu-builder/pull/248) のデプロイが
+`iam:CreateRole` で落ちた時刻と一致する。ロールは作られ、マネージドポリシーを付ける手前で
+デプロイが止まった。**cdkd の state には「作成済み」とだけ記録された。**
+
+翌日 [#249](https://github.com/yuuuuuuu168/sakekasu-builder/pull/249) のデプロイでは、このロールは `Unchanged: 1` として素通りしている。
+state と合成テンプレートが一致していれば、cdkd は実物を見に行かない。
+`cdkd diff` も差分を出さない。
+
+CloudFormation ならロールバックで巻き戻るところだが、cdkd にそれは無い。
+途中で落ちたデプロイは、作りかけのリソースと「作成済み」の state を残して終わる。
+
+#### どう直したか
+
+実物をテンプレートに合わせる側に倒した。cdkd を通さず直接付けている。
+
+```sh
+aws iam attach-role-policy \
+  --profile sakekasu-builder \
+  --role-name sakekasu-dev-devops-agent-WebhookForwarderFunctionServi-002870db \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+```
+
+cdkd 経由で直そうとすると、取り込み済みリソースの改名・置き換えを踏む（ひとつ上の節）。
+テンプレートが期待する状態に実物を寄せれば、state もテンプレートも触らずに済む。
+
+#### 次に同じことが起きたら
+
+**デプロイが途中で落ちたら、その回で作られたリソースを実物で確認する。** `cdkd diff` は当てにならない。
+state が「作成済み」と言っている以上、差分は出ない。
+
+見つけ方の例。
+
+| 症状 | 疑うところ |
+| --- | --- |
+| ロググループの `storedBytes` が 0 のまま | 実行ロールに `AWSLambdaBasicExecutionRole` が付いているか |
+| Lambda は動くのに特定の API だけ失敗する | インラインポリシーが途中までしか入っていないか |
+
+同じスタックの他のリソースと比べるのが早い。今回は `dev-sakekasu-slack-notifier` の
+ロールにマネージドポリシーが付いていたので、欠けているほうが異常だと分かった。
+
 ### 残っている宿題
 
 | やること | なぜ |
