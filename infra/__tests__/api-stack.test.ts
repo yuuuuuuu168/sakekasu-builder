@@ -57,7 +57,7 @@ describe('ApiStack', () => {
     });
   });
 
-  // 共通ログインへの移行。旧プール（AuthStack）ではなく、cdk.json の sharedAuth の
+  // 共通ログインへの移行。旧プール（AuthStack。いまは外した）ではなく、cdk.json の sharedAuth の
   // プールを見る。共有プールには他のアプリのクライアントもいるので、builder の
   // クライアントに出たトークンだけを通す
   it('AppSync は共通ログインのプールを見て、builder のクライアントのトークンだけを通す', () => {

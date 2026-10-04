@@ -39,12 +39,15 @@ prefix="sakekasu-${env_name}"
 #
 # このアプリの Export と ImportValue の向きは合成結果で確かめてある。
 #
-#   auth           export 2 / import 0   ← 誰からも読まれなくなるまで消せない
-#   api            export 7 / import 1（auth から）
-#   monitoring     export 0 / import 9（api から7、auth から2）
+#   api            export 7 / import 0
+#   monitoring     export 1 / import 7（api から7）
 #
-# したがって monitoring → api → auth の順でなければ DeleteStack が
+# したがって monitoring → api の順でなければ DeleteStack が
 # 「Export ... cannot be deleted as it is in use by ...」で落ちる。
+#
+# 以前は末尾に auth（旧ユーザープール）も並べていたが、共通ログインへ移って
+# アプリから外した。cdkd の状態に残っているぶんは手で cdkd state destroy する
+# （docs/shared-login.md の「旧ユーザープールを外す」）。
 #
 # 以前は us-east-1 の health-global（AWS Health の転送）も先頭に並べていたが、
 # AWS Health の通知を共通基盤へ移したのでアプリから外した。cdkd の状態に
@@ -56,7 +59,6 @@ prefix="sakekasu-${env_name}"
 stacks=(
   "${prefix}-monitoring ap-northeast-1"
   "${prefix}-api ap-northeast-1"
-  "${prefix}-auth ap-northeast-1"
 )
 
 # このスクリプトが直に打つ aws コマンドの資格情報。
@@ -154,30 +156,16 @@ cdkd_state_exists() {
 #   AWS::Logs::MetricFilter       要 "<LogGroupName>|<FilterName>"  物理 ID は FilterName だけ
 #   AWS::AppSync::GraphQLApi      要 "<ApiId>"  物理 ID は ARN
 #
-# UserPoolClient の件は 0.291.16 で先行リポジトリが踏んでおり、
-# go-to-k/cdkd#3701 で 0.291.23 修正済みと読んで一度この回避を外したが、
-# 0.291.31 でも現に落ちた。手順5 の cdkd diff では出ず、取り込みで初めて出る。
+# UserPoolClient を持っていたのは auth（旧ユーザープール）だけで、アプリから
+# 外したので手当ても外した。残りの2型は api が持つ。
 #
 # 標準出力に --resource の引数を1行1トークンで書く。呼ぶ側が配列に読む。
 identifier_overrides() {
-  local name="$1" region="$2" resources logical phys pool pools filters log_group
+  local name="$1" region="$2" resources logical phys filters log_group
   resources="$(aws_cli cloudformation describe-stack-resources --stack-name "$name" --region "$region" \
     --query 'StackResources[].[LogicalResourceId,ResourceType,PhysicalResourceId]' --output text)"
 
   local out=()
-
-  # Cognito の UserPoolClient。同じスタックの User Pool と組にする
-  if grep -q $'\tAWS::Cognito::UserPoolClient\t' <<<"$resources"; then
-    pools="$(awk -F'\t' '$2 == "AWS::Cognito::UserPool" { print $3 }' <<<"$resources")"
-    if [ -z "$pools" ] || [ "$(grep -c . <<<"$pools")" -ne 1 ]; then
-      echo "::error::${name} の UserPoolClient に対応する User Pool を1つに決められません" >&2
-      return 1
-    fi
-    pool="$pools"
-    while IFS=$'\t' read -r logical _ phys; do
-      out+=("--resource" "${logical}=${pool}|${phys}")
-    done < <(awk -F'\t' '$2 == "AWS::Cognito::UserPoolClient"' <<<"$resources")
-  fi
 
   # Logs の MetricFilter。物理 ID が FilterName なので、そこから LogGroupName を引く。
   # describe-metric-filters の --filter-name-prefix は --log-group-name と一緒でないと

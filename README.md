@@ -56,7 +56,6 @@
 | 機能 | 補足 |
 |------|------|
 | 監視とアラート通知 | 23アラーム（AI・サービス正常性・外形監視・SLO）を Slack へ。AWS Health の通知は共通基盤へ移した。デプロイ前に手動登録あり。ソムリエのカナリアは共通ログインでは動かせないので消した（[docs/shared-login.md](docs/shared-login.md)） |
-| 新規ユーザー登録の Slack 通知 | 旧ユーザープールの Post Confirmation → SNS（[#66](https://github.com/yuuuuuuu168/sakekasu-builder/issues/66)）。共通ログインにはセルフサインアップが無いので役目を終え、旧プールを外すときに一緒に外す |
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuuu168/sakekasu-builder/issues/92)） |
 | DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。プライベートチャンネルではメンションで調査の開始や照会もできる。コンソール側の設定あり（[#67](https://github.com/yuuuuuuu168/sakekasu-builder/issues/67)） |
 | Application Signals による APM | OCR と画像アップロードの2関数を計装。OCR には SLO を2本置き、割ったらアラーム（[#86](https://github.com/yuuuuuuu168/sakekasu-builder/issues/86)） |
@@ -448,9 +447,7 @@ Runtime の ARN はフロントの `src/features/sommelier/config.ts` に持つ�
 
 ```
 CloudWatch アラーム ─┐
-外形監視 Lambda ─────┼→ SNS → Slack 通知 Lambda → Slack（Incoming Webhook）
-新規登録通知 Lambda ─┘
-（旧プールの Cognito トリガー。旧プールを外すときに一緒に外す）
+外形監視 Lambda ─────┴→ SNS → Slack 通知 Lambda → Slack（Incoming Webhook）
 ```
 
 アラームは**発報だけでなく復旧も通知する**ので、鳴りっぱなしなのか直ったのかが Slack だけで分かる。
@@ -492,17 +489,9 @@ Slack 通知 Lambda と DevOps Agent の転送 Lambda には、Health イベン�
 
 ### 新規ユーザー登録の通知（Issue #66）
 
-**共通ログインへ移ったので役目を終えた。** 共通プールにはセルフサインアップが無い。
-送信失敗のアラーム（`dev-sakekasu-signup-notify-fail`）は、旧プールを外す 1 段目で監視スタックから外した。
-通知 Lambda そのものは旧ユーザープールに付いたまま残っていて、2 段目で auth スタックごと外す（[docs/shared-login.md](docs/shared-login.md)）。
-以下は旧プールでの仕組み。
-
-誰かがサインアップして確認を終えると、Cognito の Post Confirmation トリガーが通知 Lambda（`infra/lambda/signup-notifier/`）を呼び、既存のアラートトピック経由で Slack に「メールアドレス・登録時刻（JST）・ユーザープール」を流す。パスワード再設定の確認でも同じトリガーが呼ばれるため、`triggerSource` でサインアップ確認だけに絞っている。
-
-設計上の注意は2点。
-
-- **通知 Lambda は決して throw しない**。Post Confirmation トリガーの失敗はサインアップの確認そのものをエラーにしてしまうため、SNS 送信の失敗は握りつぶしてログに残す。Cognito がトリガーの完了を5秒しか待たず、その5秒にはコールドスタートも含まれる点を踏まえ、送信は1.5秒で打ち切る。握りつぶした失敗は `SignupNotifyFailCount` メトリクス経由のアラームで拾う
-- **アラートトピックは名前規約で参照する**。トピックを作る監視スタックは AuthStack に依存済みのため、オブジェクト参照で受け取ると循環参照になる（画像削除アラームと同じ構図）
+旧ユーザープール（アプリ専用。セルフサインアップあり）の Post Confirmation トリガーから Slack へ流していた。
+共通ログインにはセルフサインアップが無いので役目を終え、旧プールと一緒に外した（[docs/shared-login.md](docs/shared-login.md)）。
+実装（`infra/lambda/signup-notifier/`）は git の履歴にある。
 
 ### 外形監視の考え方
 
@@ -621,7 +610,7 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev
 
 計装が入っているのは OCR（`ocr-analyzer`、2026-08-10）と画像アップロードの入口（`presigned-url`、2026-08-16）の2つ。一度は起動ラッパーとレイヤーの組み合わせを取り違えて関数を止め、切り戻してから1つずつ入れ直した（PR [#110](https://github.com/yuuuuuuu168/sakekasu-builder/pull/110) → [#114](https://github.com/yuuuuuuu168/sakekasu-builder/pull/114)）。アカウント側の設定（サービス検出・Transaction Search）はソムリエの GenAI Observability を入れたときから有効で、アカウントに1つの設定なので CDK では管理していない。
 
-監視系の関数（health-check / slack-notifier / signup-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。この3つは従来どおり Lambda 標準メトリクス由来のエラー率と実行時間までしか見えない。計装が無かった頃でもエラー率は追えたので、それで既存のバグを1件見つけている（[#115](https://github.com/yuuuuuuu168/sakekasu-builder/issues/115)）。
+監視系の関数（health-check / slack-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。この2つは従来どおり Lambda 標準メトリクス由来のエラー率と実行時間までしか見えない。計装が無かった頃でもエラー率は追えたので、それで既存のバグを1件見つけている（[#115](https://github.com/yuuuuuuu168/sakekasu-builder/issues/115)）。
 
 SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 90% と「90% が15秒未満」。しきい値は日次の実測（p50/p90/p99）から決めた。割ったらアラームが鳴り、そのしきい値は SLO の目標と同じ定数から取っている。別々に書くと、片方だけ動かしたときに「SLO は未達なのにアラームは鳴らない」が黙って生まれる。
 
@@ -662,15 +651,13 @@ src/
     sommelier/   # ソムリエ相談チャット（Runtime 呼び出し）
   components/    # 共通コンポーネント（shadcn/ui, ThemeProvider 等）
 infra/
-  lib/           # CDK スタック（auth / api / monitoring / billing-notifier /
+  lib/           # CDK スタック（api / monitoring / billing-notifier /
                  #                devops-agent / github-oidc）
   graphql/       # AppSync GraphQL スキーマ
   lambda/        # Lambda 関数（presigned-url, ocr-analyzer, tasting-note,
                  #              health-check, slack-notifier,
-                 #              signup-notifier, billing-notifier,
-                 #              devops-agent-webhook）
-  scripts/       # amplify_outputs.json 生成、サムネイルのバックフィル、
-                 # 共通ログインへの移行に伴う持ち主（sub）の付け替え
+                 #              billing-notifier, devops-agent-webhook）
+  scripts/       # amplify_outputs.json 生成、サムネイルのバックフィル
 sommelier/       # AgentCore プロジェクト（ソムリエエージェント）
   app/sommelier/ # Strands Agent 本体（Python）
   agentcore/     # AgentCore 設定と CDK
@@ -685,7 +672,7 @@ aidlc/           # AI-DLC のルールと成果物
 
 | ドキュメント | 内容 |
 |------------|------|
-| [docs/shared-login.md](docs/shared-login.md) | 共通ログインへの切り替え（変わったこと・旧プールの扱い・カナリア・旧 sub から新 sub へのデータの付け替え手順） |
+| [docs/shared-login.md](docs/shared-login.md) | 共通ログインへの切り替え（変わったこと・旧プールを外す手順・カナリア・旧 sub から新 sub へのデータの付け替えの記録） |
 | [docs/agentcore-phase1-design.md](docs/agentcore-phase1-design.md) | ソムリエ Phase 1 の設計（認証の二段構え・ツール設計・決定事項） |
 | [docs/devops-agent.md](docs/devops-agent.md) | DevOps Agent のセットアップ手順・Slack の双方向通信・優先度の割り当て・カスタムスキル・費用 |
 | [docs/application-signals.md](docs/application-signals.md) | Application Signals の計装対象・デプロイ後の確認手順・SLO の決め方・費用 |
@@ -754,9 +741,6 @@ npx vitest run src/
 # インフラ（CDK の synth テスト）
 cd infra
 npm test
-
-# 運用スクリプト（pytest。AWS へは出ない）
-uv run --with boto3 --with pytest pytest infra/scripts/tests
 
 # ソムリエ本体（pytest。AWS へは出ない）
 cd sommelier/app/sommelier
