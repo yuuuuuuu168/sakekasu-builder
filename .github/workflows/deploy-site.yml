@@ -1,11 +1,8 @@
 # main へのマージで、フロントをビルドして sake.sakekasu-builder.com の配信バケットへ置く。
 #
-# これまでフロントは Amplify Hosting がコンソールの設定だけで配っていた。
-# サブドメイン（sake.）へ移るのに合わせて S3 + CloudFront（infra/lib/site-stack.ts）に
-# 載せ替える。手順と切り替えの順番は docs/sake-subdomain.md にある。
-#
-# 移行の間は Amplify（apex）とこのワークフロー（sake.）が同じ main から両方へ出す。
-# apex を sake. への転送に切り替えて Amplify アプリを消したら、こちらだけになる。
+# 以前はフロントを Amplify Hosting がコンソールの設定だけで配っていた。サブドメイン（sake.）へ
+# 移るのに合わせて S3 + CloudFront（infra/lib/site-stack.ts）に載せ替えた（2026-10-04）。
+# 経緯は docs/sake-subdomain.md にある。Amplify アプリは消してあり、フロントを配るのはここだけ。
 #
 # 配信スタックがまだ無い間（cdk.json に siteHostedZoneId が無い間）は何もしない。
 # ゾーンの委任が済む前にマージしても、このワークフローが赤くならないようにするため。

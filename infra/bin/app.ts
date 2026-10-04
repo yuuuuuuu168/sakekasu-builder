@@ -95,7 +95,7 @@ function buildApplicationStacks(app: cdk.App): void {
     'arn:aws:bedrock-agentcore:ap-northeast-1:232791540685:runtime/sommelier_sommelier-Cn5eM865GE';
 
   const siteUrl =
-    (app.node.tryGetContext('siteUrl') as string | undefined) ?? 'https://sakekasu-builder.com';
+    (app.node.tryGetContext('siteUrl') as string | undefined) ?? 'https://sake.sakekasu-builder.com';
 
   const monitoringStack = new MonitoringStack(app, `${prefix}-monitoring`, {
     envName: env,
@@ -161,7 +161,7 @@ function buildApplicationStacks(app: cdk.App): void {
 }
 
 /**
- * フロントの配信（docs/sake-subdomain.md）。Amplify Hosting から移す先。
+ * フロントの配信（docs/sake-subdomain.md）。2026-10-04 に Amplify Hosting から移した。
  *
  * 段階を分けて合成する。ゾーンを親から委任してもらい、その後で証明書をコンソールで作る
  * （cdkd は ACM の証明書を作れない。理由は site-stack.ts の冒頭）。
