@@ -114,18 +114,13 @@ AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
 
 ### 6. デプロイする
 
-`agentSpaceArn` がコンテキストに入っているときだけスタックが合成される。`infra/cdk.json` の `context` に書いてあるので、main にマージすれば GitHub Actions の cdkd が作る。
+`agentSpaceArn` があるときだけスタックが合成される。ARN は運用ツール用アカウントの ID を含むので、公開リポジトリの `infra/cdk.json` には書かない。リポジトリの **Settings → Secrets and variables → Actions** に secret `AGENT_SPACE_ARN` として入れておけば、main にマージしたときに GitHub Actions が環境変数で `bin/app.ts` に渡し、cdkd が作る（`deploy.yml`）。
 
-```json
-{
-  "context": {
-    "env": "dev",
-    "agentSpaceArn": "arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/<Agent Space ID>"
-  }
-}
-```
+- `deploy.yml` は secret が無いと合成の前で止まる。無いまま合成すると、このスタックだけ黙って更新されなくなるため
+- `cdk-diff.yml` は secret があれば同じく渡す。フォークからの PR では secret が渡らないので、このスタックを除いた差分になる
+- 運用ツール用アカウントの ID は、ログでは `::add-mask::` で、PR コメントに貼る diff では置き換えで伏せる
 
-Agent Space の ARN は秘密ではない（引き受けには IAM の信頼条件が要る）ので、リポジトリに置いて問題ない。
+手元で合成するときは `-c agentSpaceArn=...` か環境変数 `AGENT_SPACE_ARN` で渡す。
 
 **手元から `npx cdk deploy` を打たない。** cdkd への移行で CloudFormation のスタックは削除されていて、リソースだけが残っている。その状態で `cdk deploy` を打つと、依存する auth / api / monitoring をゼロから作り直そうとして既存リソースと名前がぶつかる（[docs/cdkd-migration.md](cdkd-migration.md)）。計画を先に見たいときは PR の `cdk-diff` を読む。`infra/**` を触る PR では自動で走る。
 
