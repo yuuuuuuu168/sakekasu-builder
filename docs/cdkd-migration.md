@@ -749,6 +749,40 @@ pathToFileURL(argv[1])          : .../com%7Eapple%7ECloudDocs/probe.mjs
 
 検査を4件足した（`infra/__tests__/migrate-to-cdkd.test.ts`）。`engine=cfn` の前で state を調べていること、移行済みがあれば止めること、止めるときに `engine=` を書かないこと、`migrated` の展開が bash 3.2 の `set -u` で落ちない書き方であること。歯止めを外す変異・`exit 1` を外す変異・素の配列展開に変える変異のどれでも落ちる。
 
+### 取り込み済みリソースへの初回更新は改名になる（2026-10-04）
+
+全スタックに `Project` / `Env` タグを足す PR（[#245](https://github.com/yuuuuuuu168/sakekasu-builder/pull/245)）をマージしたところ、デプロイが `sakekasu-dev-auth` で落ちた。2つのことが重なっていた。
+
+**1. 取り込み済みリソースを cdkd が改名し、置き換え扱いにする。**
+
+```
+Resource SignupNotifierFunctionServiceRole180FCFE5 was replaced:
+  sakekasu-dev-auth-SignupNotifierFunctionServiceRole-uF3uXTOrV5Pb
+  → sakekasu-dev-auth-SignupNotifierFunctionServiceRole180FCFE5
+```
+
+古い名前は CloudFormation が生成したもの、新しい名前は cdkd が生成したもの。物理名を CFn に任せていたリソースは、cdkd が初めて更新するときに自分の流儀で名前を付け直す。タグに限らずどのプロパティ変更でも起きる。IAM ロールは13個あるので、何かを触るたびにこれが待っている。
+
+**2. ロググループへのタグ付けが通らない。** こちらが直接の失敗原因。
+
+```
+Failed to update log group SignupNotifierLogGroupF4C03A83: Invalid resourceArn
+```
+
+さらに、デプロイロールに `iam:ListInstanceProfilesForRole` が無いため古いロールを削除できず、ロールバックで新しいロールを消すこともできなかった。結果として両方のロールが残り、Lambda は古い方を指したまま動き続けた。
+
+#### どう収めたか
+
+[#247](https://github.com/yuuuuuuu168/sakekasu-builder/pull/247) でタグを revert した。revert 前に `cdkd diff` を取ると `0 to create, 3 to update, 0 to delete` で、置き換えも削除も起きないことが先に分かった。cdkd の state はすでに新しいロールを自分のものとして持っていて、取り残された Lambda と権限ポリシーの参照先をそちらに揃えるだけだった。
+
+**`iam:ListInstanceProfilesForRole` は足さなかった。** あれはロールの削除に要る権限で、足せば置き換えのたびに13個のロールが削除されうる状態になる。無かったことが結果的に安全装置として働いた。
+
+古いロール `sakekasu-dev-auth-SignupNotifierFunctionServiceRole-uF3uXTOrV5Pb` は管理対象から外れて孤児として残っている。誰も使っていないので害は無い。削除は手作業。
+
+#### 教訓
+
+取り込み済みのスタックに対しては、**全リソースに一律で何かを足す変更を避ける**。1リソースずつ、計画を `cdkd diff` で見てから進める。DevOps Agent のリソース検出に要るタグは、CDK を通さず Resource Groups Tagging API で直接付けた（[docs/devops-agent.md](devops-agent.md) の「タグの付け方」）。合成テンプレートに `Tags` が無ければ cdkd は素通りするので、外から付けた値は消えない。
+
 ### 残っている宿題
 
 | やること | なぜ |
