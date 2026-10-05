@@ -237,19 +237,13 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
   }
   assertNewUploadFileName(fileName);
 
-  // 大きさを送らない呼び出しは、まだ通す。インフラとフロントはマージで同時に
-  // デプロイされ、どちらが先に入るかは決まらない。ここで必須にすると、新しい
-  // フロントが行き渡るまでの間、古いフロントのアップロードが全部落ちる。
-  // 行き渡ったら必須にする（その間は署名に大きさが入らず、上限も効かない）
-  if (fileSize !== undefined && fileSize !== null) {
-    assertUploadSize(fileSize);
-  } else {
-    console.warn(JSON.stringify({
-      level: 'WARN',
-      action: 'generateUploadUrl',
-      message: 'fileSize not provided; upload size is not signed',
-    }));
+  // 必須の判定はここで行う。大きさの無い URL は S3 の上限（5TB）まで置けてしまう。
+  // スキーマは Int のまま（理由は schema.graphql の fileSize の説明）
+  // （Issue sakekasu-builder-archive#173）
+  if (fileSize === undefined || fileSize === null) {
+    throw new Error('Missing required argument: fileSize');
   }
+  assertUploadSize(fileSize);
 
   const location = temporary ? TEMP_LOCATION : recordType;
   // サムネイルのキーはサーバー側で導出する。クライアントに `thumb_` 付きの
@@ -262,7 +256,7 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
     Key: key,
     ContentType: contentType,
     // 申告された大きさを署名する。この URL ではこの大きさでしか置けなくなる
-    ...(fileSize !== undefined && fileSize !== null ? { ContentLength: fileSize } : {}),
+    ContentLength: fileSize,
     // タグはライフサイクルの削除条件。SDK はこの値を署名済み URL の
     // クエリ（x-amz-tagging）に入れる。署名対象ヘッダには入らないので、
     // クライアントは同名のヘッダを送ってはいけない。送ると二重指定になり
