@@ -1,6 +1,6 @@
 # 既存のロググループをスタックへ取り込む手順
 
-Lambda のログ保持期間の設定を、非推奨の `logRetention` から明示的な `logs.LogGroup` へ移すための AWS 側の作業メモ（[#129](https://github.com/yuuuuuuu168/sakekasu-builder/issues/129)）。
+Lambda のログ保持期間の設定を、非推奨の `logRetention` から明示的な `logs.LogGroup` へ移すための AWS 側の作業メモ（[#129](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/129)）。
 
 コードの変更だけでは移行が終わらない。既に存在するロググループを CloudFormation のスタックへ取り込む操作が要る。**2026-08-18 に dev の3スタックで実施済み。** ここに残すのは、実際に通った手順と、通らなかった道の記録。
 
@@ -167,7 +167,7 @@ auto-import は通常の更新なので、この制約がまるごと掛から�
 
 ## github-oidc のロググループについて
 
-`sakekasu-github-oidc` スタックに、保持期間が無期限のロググループが2つ残る（[#127](https://github.com/yuuuuuuu168/sakekasu-builder/issues/127) の拾い漏れ）。
+`sakekasu-github-oidc` スタックに、保持期間が無期限のロググループが2つ残る（[#127](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/127) の拾い漏れ）。
 
 ```
 /aws/lambda/sakekasu-github-oidc-CustomAWSCDKOpenIdConnectProv-NiSIARa7Eld2
