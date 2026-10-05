@@ -211,6 +211,34 @@ describe('ApiStack', () => {
     });
   });
 
+  // Issue #217: 削除や上書きで旧版になった記録の画像に期限が無く、
+  // 消したはずの写真が残り続けていた
+  describe('記録の画像の旧バージョン', () => {
+    it('タグに関係なく、旧バージョンを 30 日で消す', () => {
+      const bucket = Object.values(
+        template.findResources('AWS::S3::Bucket', {
+          Properties: { BucketName: 'dev-sakekasu-images' },
+        }),
+      )[0] as { Properties: { LifecycleConfiguration: { Rules: Record<string, unknown>[] } } };
+
+      // 一時領域のルールだけだと、タグの無い記録の画像には効かない。
+      // 絞り込みの無いルールで期限を置いていることを確かめる
+      const rule = bucket.Properties.LifecycleConfiguration.Rules.find(
+        (r) => r.Id === 'expire-noncurrent-versions',
+      );
+      expect(rule).toBeDefined();
+      expect(rule).toMatchObject({
+        Status: 'Enabled',
+        NoncurrentVersionExpiration: { NoncurrentDays: 30 },
+        ExpiredObjectDeleteMarker: true,
+      });
+      expect(rule).not.toHaveProperty('TagFilters');
+      expect(rule).not.toHaveProperty('Prefix');
+      // 現行の画像には期限を付けない（付けると記録から写真が消える）
+      expect(rule).not.toHaveProperty('ExpirationInDays');
+    });
+  });
+
   // SDL の `#` コメントは introspection に出ないため、AppSync コンソールや
   // codegen からは見えない。名前が「ヘッダで送れ」と読める項目なので、
   // 機械可読な警告を付けておく（PR #147 のレビュー指摘）
