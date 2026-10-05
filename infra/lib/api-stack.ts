@@ -403,6 +403,20 @@ export class ApiStack extends cdk.Stack {
           // 併せて消さないと容量が減らない
           noncurrentVersionExpiration: cdk.Duration.days(1),
         },
+        {
+          // 記録の画像を消しても、バージョン ID を付けない削除は削除マーカーを
+          // 置くだけで、実体は旧バージョンとして残る。同じキーへの上書きも
+          // 旧版を積み上げる。期限が無いと、消したはずの写真がいつまでも残り
+          // 容量も減らない（Issue #217）。
+          //
+          // 30 日は誤削除・誤上書きから戻す猶予。バージョニングを有効にした目的は
+          // それなので、期限はその分だけ残す
+          id: 'expire-noncurrent-versions',
+          enabled: true,
+          noncurrentVersionExpiration: cdk.Duration.days(30),
+          // 旧版が消えたあとに残る、何も指さない削除マーカーも片付ける
+          expiredObjectDeleteMarker: true,
+        },
       ],
       cors: [
         {
