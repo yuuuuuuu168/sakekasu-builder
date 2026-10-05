@@ -246,6 +246,9 @@ export function useImageUpload(
         fileName: thumbnailOf ?? file.name,
         temporary,
         thumbnail: thumbnailOf !== undefined,
+        // サーバーはこの大きさを署名に含める。下の PUT で送る本体と同じものを
+        // 測ること。ずれると S3 が 403 を返す
+        fileSize: file.size,
       },
     });
 
