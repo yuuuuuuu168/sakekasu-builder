@@ -92,7 +92,18 @@ jobs:
         # 両者が一致する（Issue #131 に記録のある落とし穴）
         env:
           CDK_DEFAULT_ACCOUNT: '232791540685'
-        run: npx cdk synth --all -q
+          # DevOps Agent のスタックは Agent Space の ARN があるときだけ合成される（bin/app.ts）。
+          # ARN は運用ツール用アカウントの ID を含むのでリポジトリに書かず、secrets から渡す。
+          # 未設定のまま合成すると、そのスタックだけ黙って更新されなくなるので止める
+          AGENT_SPACE_ARN: ${{ secrets.AGENT_SPACE_ARN }}
+        run: |
+          if [ -z "$AGENT_SPACE_ARN" ]; then
+            echo "::error::secrets.AGENT_SPACE_ARN が未設定。リポジトリの Settings → Secrets and variables → Actions に入れる（docs/devops-agent.md）"
+            exit 1
+          fi
+          # 運用ツール用アカウントの ID をログに出さない
+          echo "::add-mask::$(cut -d: -f5 <<< "$AGENT_SPACE_ARN")"
+          npx cdk synth --all -q
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::232791540685:role/sakekasu-github-actions-deploy

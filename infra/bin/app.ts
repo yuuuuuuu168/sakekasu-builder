@@ -52,8 +52,18 @@ if (app.node.tryGetContext('github-oidc')) {
 // Organization の管理アカウントにしか置けないため、通常のデプロイ先
 // （sakekasu-builder）とは分けて -c billing=true のときだけ合成する。
 // 環境（dev/staging/prod）にも紐づかない単一のスタック。
-// 使用例: npx cdk deploy sakekasu-billing-notifier -c billing=true
+// 使用例: npx cdk deploy sakekasu-billing-notifier -c billing=true -c billingAccount=<管理アカウント ID>
+//
+// 管理アカウントの ID はリポジトリに書かない（公開リポジトリから組織の要が辿れないように）。
+// -c billingAccount か環境変数 BILLING_ACCOUNT_ID で渡す
 if (app.node.tryGetContext('billing')) {
+  const billingAccount =
+    (app.node.tryGetContext('billingAccount') as string | undefined) ?? process.env.BILLING_ACCOUNT_ID;
+  if (!billingAccount || !/^\d{12}$/.test(billingAccount)) {
+    throw new Error(
+      '-c billing=true には管理アカウントの ID が要る。-c billingAccount=<12桁> か環境変数 BILLING_ACCOUNT_ID で渡す',
+    );
+  }
   new BillingNotifierStack(app, 'sakekasu-billing-notifier', {
     // 個別に内訳を出すアカウント。組織全体の合計は常に出るため、
     // 親アカウント単体の表示は不要という判断（Issue #92 のレビュー）
@@ -61,7 +71,7 @@ if (app.node.tryGetContext('billing')) {
       { id: '232791540685', label: 'sakekasu-builder（アプリ本体）' },
     ],
     // Organization の管理アカウント。デプロイ時はこのアカウントの認証情報が必要
-    env: { account: '<管理アカウント ID>', region: 'ap-northeast-1' },
+    env: { account: billingAccount, region: 'ap-northeast-1' },
   });
 } else {
   buildApplicationStacks(app);
@@ -141,9 +151,11 @@ function buildApplicationStacks(app: cdk.App): void {
 
   // DevOps Agent 連携（Issue #67）。Agent Space はプライマリアカウントの
   // コンソールで作るため、その ARN がコンテキストに入るまでは合成しない。
-  // コンソール作業が済んだら cdk.json の context に agentSpaceArn を書けば、
-  // 以降は他のスタックと同じく `cdk deploy --all` で更新される
-  const agentSpaceArn = app.node.tryGetContext('agentSpaceArn') as string | undefined;
+  // ARN は運用ツール用アカウントの ID を含むので、cdk.json には書かない。
+  // -c agentSpaceArn か環境変数 AGENT_SPACE_ARN で渡す。Actions ではリポジトリの
+  // secrets.AGENT_SPACE_ARN を環境変数に入れて合成している（deploy.yml / cdk-diff.yml）
+  const agentSpaceArn =
+    (app.node.tryGetContext('agentSpaceArn') as string | undefined) || process.env.AGENT_SPACE_ARN || undefined;
 
   if (agentSpaceArn) {
     // ARN は丸ごと形を見る。アカウント ID だけを見ていると
@@ -155,7 +167,7 @@ function buildApplicationStacks(app: cdk.App): void {
     if (!AGENT_SPACE_ARN.test(agentSpaceArn)) {
       throw new Error(
         `agentSpaceArn が Agent Space の ARN として不正です: "${agentSpaceArn}"。` +
-        ' 例: arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/xxxxxxxx'
+        ' 例: arn:aws:aidevops:ap-northeast-1:123456789012:agentspace/xxxxxxxx'
       );
     }
 

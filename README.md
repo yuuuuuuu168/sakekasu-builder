@@ -537,7 +537,7 @@ EventBridge（毎日 00:05 UTC）→ billing-notifier Lambda → Cost Explorer A
 
 ### 他のスタックとの違い
 
-アカウント別の内訳（`LINKED_ACCOUNT`）を Cost Explorer で見られるのは **Organization の管理アカウントだけ**のため、このスタック（`sakekasu-billing-notifier`）は他と違い**管理アカウント（<管理アカウント ID>）へデプロイする**。環境（dev/staging/prod）にも紐づかない単一のスタックで、通常の `cdk deploy --all` に混ざらないよう `-c billing=true` を付けたときだけ合成される。
+アカウント別の内訳（`LINKED_ACCOUNT`）を Cost Explorer で見られるのは **Organization の管理アカウントだけ**のため、このスタック（`sakekasu-billing-notifier`）は他と違い**管理アカウントへデプロイする**。管理アカウントの ID はリポジトリに書かず、`-c billingAccount`（または環境変数 `BILLING_ACCOUNT_ID`）で渡す。環境（dev/staging/prod）にも紐づかない単一のスタックで、通常の `cdk deploy --all` に混ざらないよう `-c billing=true` を付けたときだけ合成される。
 
 対象アカウントの一覧（表示ラベル含む）は `infra/bin/app.ts` の `targetAccounts` で変更できる。
 
@@ -548,12 +548,13 @@ EventBridge（毎日 00:05 UTC）→ billing-notifier Lambda → Cost Explorer A
 ### デプロイ手順（管理アカウント）
 
 ```bash
-# 1. 管理アカウントの認証情報で入っていることを確認する
-AWS_PROFILE=yuuuuuuuki7749 aws sts get-caller-identity
+# 1. 管理アカウントの認証情報で入っていることを確認し、その ID を控える（以降の手順で使う）
+BILLING_ACCOUNT_ID=$(AWS_PROFILE=yuuuuuuuki7749 aws sts get-caller-identity --query Account --output text)
+echo "$BILLING_ACCOUNT_ID"
 
 # 2. （初回のみ）管理アカウントを CDK bootstrap する
 cd infra
-AWS_PROFILE=yuuuuuuuki7749 npx cdk bootstrap aws://<管理アカウント ID>/ap-northeast-1 -c billing=true
+AWS_PROFILE=yuuuuuuuki7749 npx cdk bootstrap aws://$BILLING_ACCOUNT_ID/ap-northeast-1 -c billing=true -c billingAccount=$BILLING_ACCOUNT_ID
 
 # 3. Slack の Incoming Webhook URL を管理アカウント側に登録する
 AWS_PROFILE=yuuuuuuuki7749 aws ssm put-parameter \
@@ -563,7 +564,7 @@ AWS_PROFILE=yuuuuuuuki7749 aws ssm put-parameter \
   --region ap-northeast-1
 
 # 4. デプロイ
-AWS_PROFILE=yuuuuuuuki7749 npx cdk deploy sakekasu-billing-notifier -c billing=true
+AWS_PROFILE=yuuuuuuuki7749 npx cdk deploy sakekasu-billing-notifier -c billing=true -c billingAccount=$BILLING_ACCOUNT_ID
 
 # 5. 動作確認（手動で1回実行して Slack に届くか見る）
 AWS_PROFILE=yuuuuuuuki7749 aws lambda invoke \
@@ -586,7 +587,7 @@ SNS（dev-sakekasu-alerts）┬→ Slack 通知 Lambda → Slack（既存のア�
 
 既存の Slack 通知は変えていない。転送 Lambda は同じトピックをもう1つの購読者として受け取るだけなので、エージェント側が止まってもアラート自体は届く。
 
-Agent Space は運用ツール専用アカウント（`<運用アカウント ID>` / `ops-tooling`）に置き、調査対象はアプリ本体のアカウント（`232791540685`）。CDK が作るのはアプリ本体側の2つで、調査用のクロスアカウントロール（読み取り専用）と、アラームを Webhook へ転送する Lambda。Agent Space の作成・Slack 連携・GitHub 連携・Webhook の発行はコンソールでの手作業になる。
+Agent Space は運用ツール専用アカウント（`ops-tooling`）に置き、調査対象はアプリ本体のアカウント（`232791540685`）。CDK が作るのはアプリ本体側の2つで、調査用のクロスアカウントロール（読み取り専用）と、アラームを Webhook へ転送する Lambda。Agent Space の作成・Slack 連携・GitHub 連携・Webhook の発行はコンソールでの手作業になる。
 
 エージェントは秒課金なので、投げるものを絞っている。アラームは `ALARM` に変わったときだけ（復旧では投げない）、転送 Lambda 自身の失敗アラームは捨てる。AWS Health は共通基盤へ移したので、このトピックにはもう流れてこない。
 
@@ -594,7 +595,7 @@ Agent Space は運用ツール専用アカウント（`<運用アカウント ID
 
 エージェントに渡してある権限は読み取り専用のクロスアカウントロールだけなので、Slack から何を頼んでもアプリ側のリソースは変わらない。
 
-`agentSpaceArn` がコンテキストに入っているときだけスタックが合成される。コンソール作業が済むまでは `cdk deploy --all` に混ざらない。
+`agentSpaceArn` があるときだけスタックが合成される。ARN は運用ツール用アカウントの ID を含むので `cdk.json` には書かず、Actions では secret `AGENT_SPACE_ARN`、手元では `-c agentSpaceArn` か環境変数 `AGENT_SPACE_ARN` で渡す（[docs/devops-agent.md](docs/devops-agent.md)）。
 
 ```bash
 cd infra
