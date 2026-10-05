@@ -709,7 +709,7 @@ AWS_PROFILE=sakekasu-builder npx cdk diff --context env=dev
 - main に push（= PR マージ）されると GitHub Actions が対象を分けてデプロイする
   - `infra/**` → `.github/workflows/deploy.yml` が `cdk deploy --all`
   - `sommelier/**` → `.github/workflows/deploy-sommelier.yml` が AgentCore スタックを `aws-cdk deploy --all`
-- PR を開くと `cdk diff` の結果が自動でコメントされる（`.github/workflows/cdk-diff.yml`。対象は infra のみ）
+- PR を開くと `cdk diff` の結果が自動でコメントされる（`.github/workflows/cdk-diff.yml`。対象は infra のみ。フォークと Dependabot の PR では走らない）
 - 認証はどちらも OIDC（`sakekasu-github-oidc` スタックの deploy ロール）。リポジトリにアクセスキーは置かない
 
 ワークフローを2つに分けているのは、`paths` がワークフロー単位でしか効かないため。1つにまとめると、片方だけの変更でもう片方のデプロイまで走る。
