@@ -54,6 +54,15 @@ export function resolveModelId(): string {
  */
 const BEDROCK_IMAGE_BASE64_LIMIT = 5 * 1024 * 1024;
 
+/**
+ * base64 にして `BEDROCK_IMAGE_BASE64_LIMIT` に収まる原本の最大バイト数（3,932,160）。
+ *
+ * base64 の長さは `4 * ceil(n / 3)` なので、これを1バイトでも超えると上限を超える。
+ * 原本の大きさでの判定は、base64 にしてからの判定と結果が完全に一致する。
+ * フロント側（`imageCompressor.ts`）の `MAX_FILE_SIZE` も同じ値
+ */
+export const MAX_ORIGINAL_IMAGE_BYTES = (BEDROCK_IMAGE_BASE64_LIMIT / 4) * 3;
+
 interface OcrResult extends SpecFields {
   sakeName: string | null;
   category: SakeCategory | null;
@@ -465,6 +474,31 @@ export function assertImagesFitBedrockLimit(
   });
 }
 
+/**
+ * S3 の応答ヘッダの大きさで、本体を読む前に上限を見る（Issue sakekasu-builder-archive#172）。
+ *
+ * 本体を最後まで読んで base64 にしてから `assertImagesFitBedrockLimit()` で
+ * 落とすと、捨てると分かっているデータの転送と変換に時間とメモリを使う。
+ * フロントの圧縮を通らない経路（API を直接叩く、既存データの再解析）で効く。
+ *
+ * `ContentLength` はメタデータで本体の長さの保証ではないので、
+ * base64 にした後の `assertImagesFitBedrockLimit()` は最後の砦として残す。
+ * 長さが返らないときは判定できないので通し、そちらに任せる。
+ * 文言を揃えているのは、一括読み取り側が `Image too large for OCR` を見ているため
+ */
+export function assertStoredImageFitsBedrockLimit(
+  index: number,
+  contentLength: number | undefined,
+): void {
+  if (contentLength !== undefined && contentLength > MAX_ORIGINAL_IMAGE_BYTES) {
+    // キーには利用者の sub が入るのでログに出さない。位置だけ示す
+    console.error(
+      `[OCR] image too large for Bedrock: index=${index} bytes=${contentLength} limit=${MAX_ORIGINAL_IMAGE_BYTES}`,
+    );
+    throw new Error('Image too large for OCR');
+  }
+}
+
 export async function handler(event: AppSyncEvent): Promise<OcrResult> {
   const { imageKey, additionalImageKeys } = event.arguments;
   const { sub } = event.identity;
@@ -479,21 +513,36 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
 
   // S3 から画像を取得する
   const stored: { bytes: Uint8Array; contentType: string | undefined }[] = [];
-  try {
-    for (const key of imageKeys) {
-      const s3Response = await s3Client.send(
+  for (const [index, key] of imageKeys.entries()) {
+    let s3Response;
+    try {
+      s3Response = await s3Client.send(
         new GetObjectCommand({
           Bucket: BUCKET_NAME,
           Key: key,
         }),
       );
+    } catch {
+      throw new Error('Failed to retrieve image from storage');
+    }
+
+    // 大きすぎれば本体を読まずに落とす。取得の失敗と混同しないよう
+    // 上の catch の外で投げる。読まない本体は閉じて接続を返す
+    try {
+      assertStoredImageFitsBedrockLimit(index, s3Response.ContentLength);
+    } catch (error) {
+      (s3Response.Body as { destroy?: () => void } | undefined)?.destroy?.();
+      throw error;
+    }
+
+    try {
       stored.push({
         bytes: await s3Response.Body!.transformToByteArray(),
         contentType: s3Response.ContentType,
       });
+    } catch {
+      throw new Error('Failed to retrieve image from storage');
     }
-  } catch {
-    throw new Error('Failed to retrieve image from storage');
   }
 
   // 取得の失敗と混同しないよう catch の外で中身を見る。
