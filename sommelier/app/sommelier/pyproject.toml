@@ -8,12 +8,15 @@ version = "0.1.0"
 description = "Sakekasu sommelier agent (AgentCore Runtime, Strands SDK)"
 readme = "README.md"
 requires-python = ">=3.10"
+# デプロイの梱包は uv.lock を見ず、ここの指定から入れる（下の dev の説明を参照）。
+# 本番に載る版の歯止めは下限だけなので、既知の脆弱性が直った版を下限にしておく。
+# pyjwt はトークン検証の要（Issue sakekasu-builder-archive#216）
 dependencies = [
     "aws-opentelemetry-distro",
     "bedrock-agentcore>=1.18.1",
     "boto3 >= 1.35.0",
     "botocore[crt] >= 1.35.0",
-    "pyjwt[crypto] >= 2.9.0",
+    "pyjwt[crypto] >= 2.15.0",
     "strands-agents >= 1.13.0",
 ]
 
