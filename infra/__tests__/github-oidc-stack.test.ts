@@ -137,9 +137,14 @@ describe('GithubOidcStack', () => {
             Action: 'sts:AssumeRoleWithWebIdentity',
             Condition: {
               StringEquals: Match.objectLike({
-                'token.actions.githubusercontent.com:sub':
-                  `repo:${REPOSITORY}:ref:refs/heads/main`,
+                'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
               }),
+              StringLike: {
+                'token.actions.githubusercontent.com:sub': [
+                  `repo:yuuuuuuu168@*/sakekasu-builder@*:ref:refs/heads/main`,
+                  `repo:${REPOSITORY}:ref:refs/heads/main`,
+                ],
+              },
             },
           }),
         ]),
@@ -187,8 +192,14 @@ describe('GithubOidcStack', () => {
           Match.objectLike({
             Condition: {
               StringEquals: Match.objectLike({
-                'token.actions.githubusercontent.com:sub': `repo:${REPOSITORY}:pull_request`,
+                'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
               }),
+              StringLike: {
+                'token.actions.githubusercontent.com:sub': [
+                  `repo:yuuuuuuu168@*/sakekasu-builder@*:pull_request`,
+                  `repo:${REPOSITORY}:pull_request`,
+                ],
+              },
             },
           }),
         ]),
@@ -526,9 +537,14 @@ describe('GithubOidcStack', () => {
             Action: 'sts:AssumeRoleWithWebIdentity',
             Condition: {
               StringEquals: Match.objectLike({
-                'token.actions.githubusercontent.com:sub':
-                  `repo:${REPOSITORY}:ref:refs/heads/main`,
+                'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
               }),
+              StringLike: {
+                'token.actions.githubusercontent.com:sub': [
+                  `repo:yuuuuuuu168@*/sakekasu-builder@*:ref:refs/heads/main`,
+                  `repo:${REPOSITORY}:ref:refs/heads/main`,
+                ],
+              },
             },
           }),
         ]),

@@ -178,8 +178,8 @@ function synthAllTemplates(): {
 
   const devopsAgentStack = new DevOpsAgentStack(app, 'TestDevOpsAgent', {
     envName: SYNTH_ENV_NAME,
-    monitoringAccountId: '<運用アカウント ID>',
-    agentSpaceArn: 'arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/abc123',
+    monitoringAccountId: '444455556666',
+    agentSpaceArn: 'arn:aws:aidevops:ap-northeast-1:444455556666:agentspace/abc123',
     alertTopic: monitoringStack.alertTopic,
     env,
   });

@@ -83,6 +83,8 @@ aws iam simulate-principal-policy --profile verify-org --policy-source-arn $ROLE
 
 作成・割り当て済み（2026-08-17）。IAM Identity Center は CDK 管理外のため手動で作成した。
 
+管理アカウントと運用ツール用アカウントの ID、Identity Center のインスタンス ID は、公開リポジトリに置かないため伏せてある。管理アカウントのプロファイルで `aws sts get-caller-identity --query Account --output text` と `aws sso-admin list-instances --query 'Instances[0].InstanceArn' --output text` を流せば分かる。Permission Set の ARN は `aws sso-admin list-permission-sets --instance-arn $INST` で引く。
+
 | 項目 | 値 |
 |---|---|
 | インスタンス | `arn:aws:sso:::instance/<インスタンス ID>`（管理アカウント <管理アカウント ID> 所有） |
@@ -97,7 +99,7 @@ aws iam simulate-principal-policy --profile verify-org --policy-source-arn $ROLE
 ```sh
 export AWS_PROFILE=yuuuuuuuki7749 AWS_REGION=ap-northeast-1
 aws sts get-caller-identity --query Account --output text
-INST=arn:aws:sso:::instance/<インスタンス ID>
+INST=$(aws sso-admin list-instances --query 'Instances[0].InstanceArn' --output text)
 
 aws sso-admin create-permission-set --instance-arn $INST \
   --name AgentVerifyAccess \
@@ -127,8 +129,8 @@ aws sso-admin create-account-assignment --instance-arn $INST \
 ```sh
 export AWS_PROFILE=yuuuuuuuki7749 AWS_REGION=ap-northeast-1
 aws sts get-caller-identity --query Account --output text
-INST=arn:aws:sso:::instance/<インスタンス ID>
-PS=arn:aws:sso:::permissionSet/<インスタンス ID>/<Permission Set ID>
+INST=$(aws sso-admin list-instances --query 'Instances[0].InstanceArn' --output text)
+PS=<上の list-permission-sets で引いた AgentVerifyAccess の ARN>
 
 aws sso-admin get-inline-policy-for-permission-set --instance-arn $INST \
   --permission-set-arn $PS --query InlinePolicy --output text > /tmp/live.json
