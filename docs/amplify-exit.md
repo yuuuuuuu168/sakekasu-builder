@@ -4,7 +4,7 @@
 > apex と www は sake. へ転送している。Amplify アプリは削除済み。手順と記録は [sake-subdomain.md](sake-subdomain.md)。
 > 以下は移行前の検討の記録として残す。
 
-cdkd 移行（[#150](https://github.com/yuuuuuuu168/sakekasu-builder/issues/150)）の流れで「Amplify を全面的にやめる」案が出たので、可否を調べた。結論は「急いでやる理由は無い。ただし移行しないなら、コンソールにしか無い設定をこの文書に書き出しておく」。
+cdkd 移行（[#19](https://github.com/yuuuuuuu168/sakekasu-builder/issues/19)）の流れで「Amplify を全面的にやめる」案が出たので、可否を調べた。結論は「急いでやる理由は無い。ただし移行しないなら、コンソールにしか無い設定をこの文書に書き出しておく」。
 
 AWS 側の実測は 2026-08-28 に読み取り専用プロファイルで取ったもの。
 
@@ -149,7 +149,7 @@ cdkd 側の対応状況は、おおむね問題ない。[supported-resources.md]
 6. DNS を CloudFront へ向ける。ここが不可逆に近い唯一の地点。戻すのも DNS を戻すだけだが、TTL の分だけ時間がかかる
 7. しばらく様子を見てから Amplify アプリを削除する
 
-**フロントの配信物を CDK の `BucketDeployment` で置かない。** あれは `Custom::CDKBucketDeployment` という Lambda 製のカスタムリソースを作る。[#129](https://github.com/yuuuuuuu168/sakekasu-builder/issues/129) で `Custom::LogRetention` を6個消したのは、CloudFormation がカスタムリソースを IMPORT できず cdkd から戻せなくなるためだった。同じ性質のものをフロント側から持ち込むと、せっかく確保した退路が塞がる。ビルド成果物は Actions から CLI でバケットへ同期する形にする。
+**フロントの配信物を CDK の `BucketDeployment` で置かない。** あれは `Custom::CDKBucketDeployment` という Lambda 製のカスタムリソースを作る。[#129](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/129) で `Custom::LogRetention` を6個消したのは、CloudFormation がカスタムリソースを IMPORT できず cdkd から戻せなくなるためだった。同じ性質のものをフロント側から持ち込むと、せっかく確保した退路が塞がる。ビルド成果物は Actions から CLI でバケットへ同期する形にする。
 
 外形監視は変更が要らない。`infra/bin/app.ts` の `siteUrl` は `https://sakekasu-builder.com` で、監視しているのはドメインであって Amplify の URL ではない。DNS の向き先が変わるだけなので、`monitoring-stack.ts` の設定はそのまま通る。
 

@@ -17,7 +17,7 @@
 | 飲みきりステータス管理 | 未開封 / 飲み中 / 飲みきり。まとめ買いは1本ずつ飲みきれる |
 | 開封後経過日数の表示 | 飲み中のカードに「開封から◯日」を出す |
 | 購入記録からの飲酒登録連携 | 「これを飲む」で在庫と飲酒記録が紐づく |
-| 詳細スペックの記録 | 蔵元・産地・度数・容量・精米歩合・日本酒度・酸度・アミノ酸度・酒米・酵母・特定名称・紹介文。全項目任意で、フォームでは折りたたみ（[#87](https://github.com/yuuuuuuu168/sakekasu-builder/issues/87)） |
+| 詳細スペックの記録 | 蔵元・産地・度数・容量・精米歩合・日本酒度・酸度・アミノ酸度・酒米・酵母・特定名称・紹介文。全項目任意で、フォームでは折りたたみ（[#87](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/87)） |
 
 ### 見つける・振り返る
 
@@ -27,21 +27,21 @@
 | 検索・フィルタ | キーワード横断検索（蔵元・産地・酒米・酵母も対象）・評価フィルタ・価格帯フィルタ・日付範囲フィルタ・条件の保持・表記ゆれ吸収 |
 | 在庫本数サマリー | 一覧上部にウイスキー・日本酒の在庫本数を表示 |
 | 統計ダッシュボード | 月別飲酒量・カテゴリ別支出・お気に入り TOP。記録数が少なく実データでの表示確認は未実施 |
-| カレンダー表示 | 飲んだ日・買った日をドットで可視化（[#46](https://github.com/yuuuuuuu168/sakekasu-builder/issues/46)） |
+| カレンダー表示 | 飲んだ日・買った日をドットで可視化（[#46](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/46)） |
 | リピート判定リマインド | 購入時に同じ銘柄の過去評価を出す |
 
 ### AI
 
 | 機能 | 補足 |
 |------|------|
-| ラベル画像の OCR | 銘柄名・カテゴリに加え、裏ラベルの詳細スペック12項目を抽出。項目ごとの確信度つきで、低確信の項目は入力欄に「要確認」を出す（[#88](https://github.com/yuuuuuuu168/sakekasu-builder/issues/88)）。既存の記録は一覧から、付いている写真をまとめて読み取れる |
+| ラベル画像の OCR | 銘柄名・カテゴリに加え、裏ラベルの詳細スペック12項目を抽出。項目ごとの確信度つきで、低確信の項目は入力欄に「要確認」を出す（[#88](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/88)）。既存の記録は一覧から、付いている写真をまとめて読み取れる |
 | テイスティングノートの自動記載 | 購入登録の時点で備考に書き足す。ウイスキーは飲み方も。知らない銘柄は Tavily で調べてから書く。既存の記録は一覧から一括で追記できる |
-| 写真1枚で購入登録 | 画像を選ぶと自動で OCR が走る。価格・店名は手入力（[#49](https://github.com/yuuuuuuu168/sakekasu-builder/issues/49)） |
-| ソムリエ相談 | 在庫相談・ペアリング・銘柄レコメンド・酒知識 Q&A（[#51](https://github.com/yuuuuuuu168/sakekasu-builder/issues/51)） |
-| ソムリエへの写真添付 | 店の棚や品書きの写真から、好みに合う1〜3本を選んでもらう（[#44](https://github.com/yuuuuuuu168/sakekasu-builder/issues/44)） |
+| 写真1枚で購入登録 | 画像を選ぶと自動で OCR が走る。価格・店名は手入力（[#49](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/49)） |
+| ソムリエ相談 | 在庫相談・ペアリング・銘柄レコメンド・酒知識 Q&A（[#51](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/51)） |
+| ソムリエへの写真添付 | 店の棚や品書きの写真から、好みに合う1〜3本を選んでもらう（[#44](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/44)） |
 | 好み学習 | AgentCore Memory。セッションをまたいで好みが育つ |
-| 会話の記憶 | AgentCore Memory。履歴はサーバー側に持ち、クライアントからは送らない（[#93](https://github.com/yuuuuuuu168/sakekasu-builder/issues/93)） |
-| ソムリエの Web 検索 | 新酒の発売・蔵元・相場など記録の外の話は Tavily で調べて出典つきで答える（[#122](https://github.com/yuuuuuuu168/sakekasu-builder/issues/122)） |
+| 会話の記憶 | AgentCore Memory。履歴はサーバー側に持ち、クライアントからは送らない（[#93](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/93)） |
+| ソムリエの Web 検索 | 新酒の発売・蔵元・相場など記録の外の話は Tavily で調べて出典つきで答える（[#122](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/122)） |
 
 ### アカウント・セキュリティ
 
@@ -56,10 +56,10 @@
 | 機能 | 補足 |
 |------|------|
 | 監視とアラート通知 | 23アラーム（AI・サービス正常性・外形監視・SLO）を Slack へ。AWS Health の通知は共通基盤へ移した。デプロイ前に手動登録あり。ソムリエのカナリアは共通ログインでは動かせないので消した（[docs/shared-login.md](docs/shared-login.md)） |
-| 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuuu168/sakekasu-builder/issues/92)） |
-| DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。プライベートチャンネルではメンションで調査の開始や照会もできる。コンソール側の設定あり（[#67](https://github.com/yuuuuuuu168/sakekasu-builder/issues/67)） |
-| Application Signals による APM | OCR と画像アップロードの2関数を計装。OCR には SLO を2本置き、割ったらアラーム（[#86](https://github.com/yuuuuuuu168/sakekasu-builder/issues/86)） |
-| CDK デプロイの自動化 | main へのマージで GitHub Actions が `cdk deploy`（OIDC 認証、[#94](https://github.com/yuuuuuuu168/sakekasu-builder/issues/94)）。infra とソムリエで対象を分ける。cdkd への移行が進行中（[#150](https://github.com/yuuuuuuu168/sakekasu-builder/issues/150)） |
+| 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/92)） |
+| DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。プライベートチャンネルではメンションで調査の開始や照会もできる。コンソール側の設定あり（[#67](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/67)） |
+| Application Signals による APM | OCR と画像アップロードの2関数を計装。OCR には SLO を2本置き、割ったらアラーム（[#11](https://github.com/yuuuuuuu168/sakekasu-builder/issues/11)） |
+| CDK デプロイの自動化 | main へのマージで GitHub Actions が `cdk deploy`（OIDC 認証、[#94](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/94)）。infra とソムリエで対象を分ける。cdkd への移行が進行中（[#19](https://github.com/yuuuuuuu168/sakekasu-builder/issues/19)） |
 | 一覧画面の画像表示高速化 | サムネイル生成・Presigned URL キャッシュ・遅延読み込み |
 | PR ごとのテスト・lint・型検査 | GitHub Actions がフロント・infra・ソムリエの3系統を並べて走らせる |
 
@@ -72,8 +72,8 @@
 - **キーワード横断検索**: 酒名だけでなく、店名・場所名・飲み方・メモも検索対象にした。酒名は従来どおり曖昧検索（各文字が順番に出現すればヒット）で、うろ覚えや部分入力から辿れる。それ以外の項目は部分一致にしている。メモまで曖昧検索にすると、離れた位置の文字が拾われて無関係な記録が大量に混ざるため
 - **表記ゆれの吸収**: 「アラン」「あらん」「ｱﾗﾝ」「Allan」「Arran」のどれで打っても同じ記録に辿り着く（詳細は下記）
 - **評価フィルタ**: 「★4以上」のように星数のしきい値で絞る。評価を持つのは飲酒記録だけなので、選ぶと記録種別も自動で飲酒記録に切り替わる（飲みきりステータスを選ぶと購入記録に切り替わるのと同じ挙動）
-- **価格帯フィルタ**: 「1,000円未満」「10,000円以上」など5つの帯で絞る（[#47](https://github.com/yuuuuuuu168/sakekasu-builder/issues/47)）。帯どうしは重ならず隙間もない（`min` 以上 `max` 未満）ので、どの金額もちょうど1つの帯に入る。価格が未入力の記録は、価格帯を選んだ時点で外す。金額の分からない記録が「3,000円以上」に混ざると絞り込んだ意味が無くなるため
-- **日付範囲フィルタ**: 今月・直近3ヶ月・今年・カスタム範囲（[#47](https://github.com/yuuuuuuu168/sakekasu-builder/issues/47)）。カスタム範囲は片側だけの指定も許して「この日以降すべて」を出せるようにし、開始日に `max`・終了日に `min` を渡して逆転した範囲を選べないようにしてある
+- **価格帯フィルタ**: 「1,000円未満」「10,000円以上」など5つの帯で絞る（[#47](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/47)）。帯どうしは重ならず隙間もない（`min` 以上 `max` 未満）ので、どの金額もちょうど1つの帯に入る。価格が未入力の記録は、価格帯を選んだ時点で外す。金額の分からない記録が「3,000円以上」に混ざると絞り込んだ意味が無くなるため
+- **日付範囲フィルタ**: 今月・直近3ヶ月・今年・カスタム範囲（[#47](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/47)）。カスタム範囲は片側だけの指定も許して「この日以降すべて」を出せるようにし、開始日に `max`・終了日に `min` を渡して逆転した範囲を選べないようにしてある
   - 「今月」「今年」は暦の区間なので月末・年末までを含み、「直近3ヶ月」は今日から遡る区間なので上限が今日になる。先の日付を入れた記録の見え方が変わるが、どちらもラベルの読みどおりなので揃えていない
   - 基準日（今日）は `filterRecords` の引数にしてあり、テストからは固定日を渡す。3ヶ月前に同じ日が無い場合（5/31 → 2/28）は月末に丸める。`new Date(2026, 1, 31)` は 3/3 へ繰り上がってしまうため
 - **価格帯・日付範囲では記録種別を切り替えない**: どちらも購入記録・飲酒記録の両方が持つ項目なので、評価や飲みきりステータスのような自動切り替えはしない
@@ -123,7 +123,7 @@
 
 #### まとめ買いを1本ずつ飲みきる
 
-本数2以上の購入記録は、1本飲んでも残りが在庫に残る（[#159](https://github.com/yuuuuuuu168/sakekasu-builder/issues/159)）。
+本数2以上の購入記録は、1本飲んでも残りが在庫に残る（[#159](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/159)）。
 
 - 購入記録に**残本数**（`remainingQuantity`）を持たせ、飲みきり操作のたびに減らす。0本になったときにはじめて記録が「飲みきり」になる
 - ステータスは残っているうちの**先頭の1本**にかかる。本数3・残り3で飲み中なら「飲み中1本 / 未開封2本」
@@ -194,7 +194,7 @@ Bedrock では Anthropic のホスト型 Web 検索ツールが使えないた�
 - **Presigned URL のメモリキャッシュ**: 有効期限内は再利用し、同一キーへの同時リクエストを1本に束ねる
 - **既存画像のバックフィル**: `infra/scripts/backfill-thumbnails.py`（EXIF の向きを補正してから縮小する。忘れると写真が横倒しになる）
 
-ここから先（Presigned URL のバッチ取得、CloudFront + OAC でのエッジキャッシュ）は [Issue #54](https://github.com/yuuuuuuu168/sakekasu-builder/issues/54) に置いてある。
+ここから先（Presigned URL のバッチ取得、CloudFront + OAC でのエッジキャッシュ）は [Issue #7](https://github.com/yuuuuuuu168/sakekasu-builder/issues/7) に置いてある。
 
 ## AgentCore ソムリエエージェント
 
@@ -203,8 +203,8 @@ Bedrock では Anthropic のホスト型 Web 検索ツールが使えないた�
 | Phase | 内容 | 状態 |
 |-------|------|------|
 | 1 | 対話 UI + 記録参照（在庫相談・ペアリング・銘柄レコメンド・Q&A・好み学習） | ✅ 完了 |
-| 2 | 外部情報収集（新発売情報・レビュー要約） | Web 検索は導入済み（[#122](https://github.com/yuuuuuuu168/sakekasu-builder/issues/122)）。残りは [#52](https://github.com/yuuuuuuu168/sakekasu-builder/issues/52) |
-| 3 | 定期実行系（月次レポート・節酒プランナー・傾向分析） | [#53](https://github.com/yuuuuuuu168/sakekasu-builder/issues/53) |
+| 2 | 外部情報収集（新発売情報・レビュー要約） | Web 検索は導入済み（[#122](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/122)）。残りは [#5](https://github.com/yuuuuuuu168/sakekasu-builder/issues/5) |
+| 3 | 定期実行系（月次レポート・節酒プランナー・傾向分析） | [#6](https://github.com/yuuuuuuu168/sakekasu-builder/issues/6) |
 
 ### Phase 1 の構成
 
@@ -285,7 +285,7 @@ Tavily 検索 API（記録の外。API キーは Secrets Manager）
 
 #### Web 検索（Tavily）
 
-記録の中の話は DynamoDB のツールで足りるが、**新酒が出ているか・蔵元はどこか・いま買えるのか**といった記録の外の話は、モデルの学習知識に頼るとうろ覚えのまま断定してしまう。ここが一番ハルシネーションの害が大きいので、Tavily の検索 API をツール（`search_web`）として渡し、必要なときだけモデル自身に調べさせている（[#122](https://github.com/yuuuuuuu168/sakekasu-builder/issues/122)）。
+記録の中の話は DynamoDB のツールで足りるが、**新酒が出ているか・蔵元はどこか・いま買えるのか**といった記録の外の話は、モデルの学習知識に頼るとうろ覚えのまま断定してしまう。ここが一番ハルシネーションの害が大きいので、Tavily の検索 API をツール（`search_web`）として渡し、必要なときだけモデル自身に調べさせている（[#122](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/122)）。
 
 | 決めごと | 内容 |
 |---------|------|
@@ -609,9 +609,9 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev
 
 既存の監視は「異常が起きたこと」までは知らせてくれるが、そこから先の切り分けはログの突き合わせに頼っていた。リクエスト単位のトレースと、レイテンシー・エラー率・リクエスト数を自動で集めてそこを埋める。
 
-計装が入っているのは OCR（`ocr-analyzer`、2026-08-10）と画像アップロードの入口（`presigned-url`、2026-08-16）の2つ。一度は起動ラッパーとレイヤーの組み合わせを取り違えて関数を止め、切り戻してから1つずつ入れ直した（PR [#110](https://github.com/yuuuuuuu168/sakekasu-builder/pull/110) → [#114](https://github.com/yuuuuuuu168/sakekasu-builder/pull/114)）。アカウント側の設定（サービス検出・Transaction Search）はソムリエの GenAI Observability を入れたときから有効で、アカウントに1つの設定なので CDK では管理していない。
+計装が入っているのは OCR（`ocr-analyzer`、2026-08-10）と画像アップロードの入口（`presigned-url`、2026-08-16）の2つ。一度は起動ラッパーとレイヤーの組み合わせを取り違えて関数を止め、切り戻してから1つずつ入れ直した（PR [#110](https://github.com/yuuuuuuu168/sakekasu-builder-archive/pull/110) → [#114](https://github.com/yuuuuuuu168/sakekasu-builder-archive/pull/114)）。アカウント側の設定（サービス検出・Transaction Search）はソムリエの GenAI Observability を入れたときから有効で、アカウントに1つの設定なので CDK では管理していない。
 
-監視系の関数（health-check / slack-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。この2つは従来どおり Lambda 標準メトリクス由来のエラー率と実行時間までしか見えない。計装が無かった頃でもエラー率は追えたので、それで既存のバグを1件見つけている（[#115](https://github.com/yuuuuuuu168/sakekasu-builder/issues/115)）。
+監視系の関数（health-check / slack-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。この2つは従来どおり Lambda 標準メトリクス由来のエラー率と実行時間までしか見えない。計装が無かった頃でもエラー率は追えたので、それで既存のバグを1件見つけている（[#115](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/115)）。
 
 SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 90% と「90% が15秒未満」。しきい値は日次の実測（p50/p90/p99）から決めた。割ったらアラームが鳴り、そのしきい値は SLO の目標と同じ定数から取っている。別々に書くと、片方だけ動かしたときに「SLO は未達なのにアラームは鳴らない」が黙って生まれる。
 
@@ -730,7 +730,7 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc -c github-oidc=
 
 ### cdkd（CDK Direct）への移行
 
-CloudFormation を経由しない [cdkd](https://github.com/go-to-k/cdkd) への移行を進めている（[#150](https://github.com/yuuuuuuu168/sakekasu-builder/issues/150)）。いまはロールと依存を用意した段階で、ワークフローはまだ `cdk deploy` のまま。AWS 側の取り込み作業とワークフロー差し替えの手順は [docs/cdkd-migration.md](docs/cdkd-migration.md) にある。
+CloudFormation を経由しない [cdkd](https://github.com/go-to-k/cdkd) への移行を進めている（[#19](https://github.com/yuuuuuuu168/sakekasu-builder/issues/19)）。いまはロールと依存を用意した段階で、ワークフローはまだ `cdk deploy` のまま。AWS 側の取り込み作業とワークフロー差し替えの手順は [docs/cdkd-migration.md](docs/cdkd-migration.md) にある。
 
 ## テスト
 
