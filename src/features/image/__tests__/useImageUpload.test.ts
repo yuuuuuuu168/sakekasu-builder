@@ -302,6 +302,31 @@ describe('useImageUpload - 一時領域からの引き取り', () => {
     expect(putInit.headers['x-amz-tagging']).toBeUndefined();
   });
 
+  // サーバーは申告された大きさを署名に含める。PUT する本体と同じものを
+  // 測っていないと、S3 が 403 を返す（Issue sakekasu-builder-archive#173）
+  it('署名要求に、PUT する本体と同じ大きさを添える', async () => {
+    mockUpload(TEMP_KEY);
+    const file = new File(['x'.repeat(1234)], 'a.jpg', { type: 'image/jpeg' });
+
+    const { result } = renderHook(() => useImageUpload());
+
+    await act(async () => {
+      await result.current.handleImageSelect(file);
+    });
+    await act(async () => {
+      await result.current.preUploadImages('purchase');
+    });
+
+    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // 原画とサムネイルのそれぞれで、申告した大きさと PUT した本体が一致する
+    for (const [index, [, putInit]] of fetchMock.mock.calls.entries()) {
+      const { variables } = mockGraphql.mock.calls[index][0];
+      expect(variables.fileSize).toBe((putInit.body as File).size);
+    }
+    expect(mockGraphql.mock.calls[0][0].variables.fileSize).toBe(1234);
+  });
+
   it('保存時に一時領域のキーを正式な場所へ複製して返す', async () => {
     mockUpload(TEMP_KEY);
     mockCopyRecordImages.mockResolvedValue([FINAL_KEY]);

@@ -12,7 +12,13 @@ const getSignedUrlMock = vi.fn(async () => 'https://example.invalid/signed');
 
 class FakePutObjectCommand {
   constructor(
-    public input: { Bucket: string; Key: string; ContentType: string; Tagging?: string },
+    public input: {
+      Bucket: string;
+      Key: string;
+      ContentType: string;
+      Tagging?: string;
+      ContentLength?: number;
+    },
   ) {}
 }
 
@@ -56,6 +62,7 @@ async function callGenerateUploadUrl(args: {
   fileName?: string;
   temporary?: boolean;
   thumbnail?: boolean;
+  fileSize?: number | null;
 }): Promise<{ uploadUrl: string; key: string; taggingHeader: string | null }> {
   const result = await handler({
     info: { fieldName: 'generateUploadUrl' },
@@ -66,6 +73,7 @@ async function callGenerateUploadUrl(args: {
       fileName: args.fileName ?? 'a.jpg',
       ...(args.temporary === undefined ? {} : { temporary: args.temporary }),
       ...(args.thumbnail === undefined ? {} : { thumbnail: args.thumbnail }),
+      ...(args.fileSize === undefined ? {} : { fileSize: args.fileSize }),
     },
     identity: { sub: OWNER },
   } as Parameters<typeof handler>[0]);
@@ -216,5 +224,58 @@ describe('generateUploadUrl', () => {
         identity: null,
       } as Parameters<typeof handler>[0]),
     ).rejects.toThrow('Unauthorized');
+  });
+});
+
+// Issue sakekasu-builder-archive#173: 申告された大きさを署名に含め、
+// 署名済み URL でそれ以外の大きさを置けなくする
+describe('generateUploadUrl の大きさ', () => {
+  const MAX = 5 * 1024 * 1024;
+
+  beforeEach(() => {
+    getSignedUrlMock.mockClear();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  it('申告された大きさを ContentLength として署名に含める', async () => {
+    await callGenerateUploadUrl({ fileSize: 123_456 });
+
+    expect(signedPut().ContentLength).toBe(123_456);
+  });
+
+  it('上限ちょうど（5MB）は通す', async () => {
+    await callGenerateUploadUrl({ fileSize: MAX });
+
+    expect(signedPut().ContentLength).toBe(MAX);
+  });
+
+  it.each([
+    ['上限を1バイト超える', MAX + 1],
+    ['0 の', 0],
+    ['負の', -1],
+    ['整数でない', 1.5],
+  ])('%s大きさは署名せずに弾く', async (_label, fileSize) => {
+    await expect(callGenerateUploadUrl({ fileSize })).rejects.toThrow('Invalid fileSize');
+    expect(getSignedUrlMock).not.toHaveBeenCalled();
+  });
+
+  it('一時領域でも大きさを署名に含め、タグと併せて渡す', async () => {
+    await callGenerateUploadUrl({ temporary: true, fileSize: 1000 });
+
+    expect(signedPut().ContentLength).toBe(1000);
+    expect(signedPut().Tagging).toBe('lifecycle=temporary');
+  });
+
+  // 新しいフロントが行き渡るまでの移行措置。必須にしたらこのテストを差し替える
+  it.each([
+    ['省略', undefined],
+    ['null', null],
+  ])('大きさの%sは当面通すが、署名には入れず警告を残す', async (_label, fileSize) => {
+    const warn = vi.spyOn(console, 'warn');
+
+    await callGenerateUploadUrl({ fileSize });
+
+    expect(signedPut().ContentLength).toBeUndefined();
+    expect(warn.mock.calls.flat().join(' ')).toContain('fileSize not provided');
   });
 });
