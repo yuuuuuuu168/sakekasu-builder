@@ -207,3 +207,25 @@ describe('パイプの失敗検知', () => {
     expect(guards, 'always() を持つ if: のステップが無い').not.toEqual([]);
   });
 });
+
+// フォークと Dependabot の PR では、diff ロールの認証情報を取らせない
+// （Issue sakekasu-builder-archive#131）。条件が消えても diff は緑のまま動くので、
+// 文字列で固定しておく
+describe('cdk-diff.yml を走らせる PR', () => {
+  const lines = readFileSync(join(WORKFLOW_DIR, 'cdk-diff.yml'), 'utf8').split('\n');
+
+  it('ジョブの条件で、フォークと Dependabot の PR を外している', () => {
+    const jobIndex = lineIndexOf(lines, '  diff:', 'diff ジョブ');
+    const stepsIndex = lineIndexOf(lines, '    steps:', 'diff ジョブの steps');
+    // ジョブ直下の if: だけを見る。ステップの if: は 6 桁以上の字下げになる
+    const jobGuards = lines
+      .slice(jobIndex + 1, stepsIndex)
+      .filter((line) => /^ {4}if:/.test(line));
+
+    expect(jobGuards).toHaveLength(1);
+    expect(jobGuards[0]).toContain(
+      'github.event.pull_request.head.repo.full_name == github.repository',
+    );
+    expect(jobGuards[0]).toContain("github.actor != 'dependabot[bot]'");
+  });
+});

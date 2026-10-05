@@ -28,6 +28,21 @@ env:
 
 jobs:
   diff:
+    # 本人が push した PR だけで走らせる（Issue sakekasu-builder-archive#131）。
+    #
+    # フォークからの PR には GitHub が OIDC トークンを渡さないので、走っても AWS には
+    # 入れず落ちるだけ。条件で先に外し、赤い diff を残さない。
+    #
+    # Dependabot の PR は同じリポジトリのブランチから出るので、OIDC で diff ロールに
+    # 入れてしまう。依存を上げる PR は lockfile の resolved がレジストリのままなので
+    # 取得元の検査（下の check-lockfile-registry）を通り、乗っ取られた上流の版が
+    # 混ざれば認証後に動く cdkd の中でそのコードが走る。人が差分を見る前に
+    # 認証情報の付いた場所で動かさないため、Dependabot の PR では走らせない。
+    # 依存を上げるだけの PR はインフラの差分をほとんど生まないので、失うものも小さい。
+    #
+    # github.actor は最後に push した人。Dependabot のブランチに本人が commit を
+    # 足したときは本人の push として走る
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     defaults:
       run:
