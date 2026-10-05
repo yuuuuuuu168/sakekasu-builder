@@ -355,6 +355,19 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
       resources: [roleBoundaryArn(account)],
     }),
 
+    // 信頼ポリシーの書き換えは Allow に入れていない（ReadAndTagApplicationRoles の
+    // 説明）。ただ iam:PermissionsBoundary が渡らないアクションなので境界が効かず、
+    // 歯止めが「Allow に無いこと」だけになる。別のステートメントに iam:Update* の
+    // ようなワイルドカードが入った瞬間に通ってしまうため、Deny でも塞ぐ。
+    // cdkd に正当な用途は無い（assumedBy を変えたときは人間が手で直す）ので、
+    // sakekasu-* に限らず全ロールを対象にする（Issue #156）
+    new iam.PolicyStatement({
+      sid: 'DenyRewritingTrustPolicies',
+      effect: iam.Effect.DENY,
+      actions: ['iam:UpdateAssumeRolePolicy'],
+      resources: [`arn:aws:iam::${account}:role/*`],
+    }),
+
     // cdkd が対応表に持たない型（Logs MetricFilter / AppSync FunctionConfiguration。
     // 旧ユーザープールを外す前は Cognito UserPoolClient も）は Cloud Control API で作られる。
     // Cloud Control のアクションは cloudformation 名前空間にある

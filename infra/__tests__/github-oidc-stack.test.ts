@@ -368,6 +368,14 @@ describe('GithubOidcStack', () => {
     // DynamoDB や S3 には届いてしまう。iam:PermissionsBoundary はこの
     // アクションに渡らないため、条件で縛ることもできない
     expect(allows(statements, 'iam:UpdateAssumeRolePolicy')).toBe(false);
+
+    // 「Allow に無い」だけだと、誰かが Allow を広げた瞬間に消える。
+    // Deny で全ロールを塞いであることまで確かめる（Issue #156）
+    // OIDC 連携のロールだけを塞ぐ iam:* の Deny も当たるので、対象が全ロールのものを探す
+    const deniedResources = statements
+      .filter((s) => matches(s, 'Deny', 'iam:UpdateAssumeRolePolicy') && s.Condition === undefined)
+      .flatMap((s) => toArray(s.Resource));
+    expect(deniedResources).toContain(`arn:aws:iam::${ACCOUNT}:role/*`);
   });
 
   it('cdkd のデプロイロールは境界を外せない', () => {
@@ -599,9 +607,30 @@ describe('GithubOidcStack', () => {
 
     // このスタックがロールを増やしたら、Deny にも足す必要がある。
     // 足し忘れると、そのロールを cdkd のデプロイロールから書き換えられる
-    const roles = Object.values(template.findResources('AWS::IAM::Role'))
-      .map((r) => (r as { Properties: { RoleName?: unknown } }).Properties.RoleName)
-      .filter((n): n is string => typeof n === 'string');
+    //
+    // roleName を明示していないロールは名前が合成結果に出ず、Deny に入れようがない。
+    // 黙って飛ばすと網羅から漏れても緑のままなので、落とす（Issue #156）。
+    //
+    // 例外は OpenIdConnectProvider がカスタムリソースとして作る Lambda の実行ロールだけ。
+    // CDK が名前を決めるため付けられず、自動命名はスタック名（sakekasu-github-oidc-*）で
+    // 始まる。cdkd のデプロイロールの IAM 系の許可は sakekasu-dev-* などアプリの接頭辞に
+    // 限られ、それ以外はガードレールの DenyRolesOutsideApp が拒否するので、触れない
+    const UNNAMED_ROLES_OUT_OF_REACH = [/^CustomAWSCDKOpenIdConnectProviderCustomResourceProviderRole/];
+    const roles = Object.entries(template.findResources('AWS::IAM::Role')).flatMap(
+      ([logicalId, r]) => {
+        const name = (r as { Properties: { RoleName?: unknown } }).Properties.RoleName;
+        if (typeof name !== 'string' && UNNAMED_ROLES_OUT_OF_REACH.some((p) => p.test(logicalId))) {
+          return [];
+        }
+        if (typeof name !== 'string') {
+          throw new Error(
+            `roleName を明示していないロールがある: ${logicalId}。` +
+              'Deny の対象に入れられないので、名前を付けること',
+          );
+        }
+        return [name];
+      },
+    );
 
     expect(roles.length).toBeGreaterThan(0);
     for (const roleName of roles) {
