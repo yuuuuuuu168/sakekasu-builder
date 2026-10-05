@@ -10,6 +10,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   MAX_IMAGES_PER_RECORD,
+  MAX_UPLOAD_BYTES,
   TEMP_LOCATION,
   TEMP_OBJECT_TAGGING,
 } from '../../lib/image-constants';
@@ -51,6 +52,8 @@ interface AppSyncEvent {
     temporary?: boolean;
     /** 原画ではなくその一覧用サムネイルを置く。キーは fileName から導出する */
     thumbnail?: boolean;
+    /** これから置くファイルの大きさ（バイト）。署名に含め、この大きさでしか PUT できなくする */
+    fileSize?: number | null;
     key?: string;
     keys?: string[];
     sourceKeys?: string[];
@@ -198,8 +201,22 @@ function assertNewUploadFileName(fileName: string): void {
   }
 }
 
+/**
+ * アップロードする大きさを検証する（Issue sakekasu-builder-archive#173）。
+ *
+ * 検証した値は `ContentLength` として署名に含める。SDK はこれを
+ * `content-length` の署名対象ヘッダにするので、クライアントは申告した大きさで
+ * しか PUT できない（`presignContentLength.test.ts` で SDK の挙動を固定している）。
+ * 申告を偽って小さく言っても、実際の本体が違えば署名が合わず S3 が 403 を返す
+ */
+function assertUploadSize(fileSize: number): void {
+  if (!Number.isInteger(fileSize) || fileSize <= 0 || fileSize > MAX_UPLOAD_BYTES) {
+    throw new Error(`Invalid fileSize: must be an integer between 1 and ${MAX_UPLOAD_BYTES}`);
+  }
+}
+
 async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse> {
-  const { recordType, recordId, contentType, fileName, temporary, thumbnail } =
+  const { recordType, recordId, contentType, fileName, temporary, thumbnail, fileSize } =
     event.arguments;
   const ownerSub = requireOwnerSub(event);
 
@@ -220,6 +237,20 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
   }
   assertNewUploadFileName(fileName);
 
+  // 大きさを送らない呼び出しは、まだ通す。インフラとフロントはマージで同時に
+  // デプロイされ、どちらが先に入るかは決まらない。ここで必須にすると、新しい
+  // フロントが行き渡るまでの間、古いフロントのアップロードが全部落ちる。
+  // 行き渡ったら必須にする（その間は署名に大きさが入らず、上限も効かない）
+  if (fileSize !== undefined && fileSize !== null) {
+    assertUploadSize(fileSize);
+  } else {
+    console.warn(JSON.stringify({
+      level: 'WARN',
+      action: 'generateUploadUrl',
+      message: 'fileSize not provided; upload size is not signed',
+    }));
+  }
+
   const location = temporary ? TEMP_LOCATION : recordType;
   // サムネイルのキーはサーバー側で導出する。クライアントに `thumb_` 付きの
   // 名前を組み立てさせると、原画の名前として送られたときに区別できない
@@ -230,6 +261,8 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
     Bucket: BUCKET_NAME,
     Key: key,
     ContentType: contentType,
+    // 申告された大きさを署名する。この URL ではこの大きさでしか置けなくなる
+    ...(fileSize !== undefined && fileSize !== null ? { ContentLength: fileSize } : {}),
     // タグはライフサイクルの削除条件。SDK はこの値を署名済み URL の
     // クエリ（x-amz-tagging）に入れる。署名対象ヘッダには入らないので、
     // クライアントは同名のヘッダを送ってはいけない。送ると二重指定になり

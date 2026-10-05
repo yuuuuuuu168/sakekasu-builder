@@ -46,3 +46,17 @@ export const TEMP_OBJECT_TAGGING = `${TEMP_TAG_KEY}=${TEMP_TAG_VALUE}`;
  * getDownloadUrls の上限（100件）に当たって開けなくなる
  */
 export const MAX_IMAGES_PER_RECORD = 5;
+
+/**
+ * アップロード 1 回で置ける大きさの上限（5MB）。
+ *
+ * 署名済み URL に `content-length` を署名して、この大きさ以下でしか PUT できなく
+ * する（Issue sakekasu-builder-archive#173）。署名しないと、URL を受け取った側は
+ * S3 の上限（5TB）まで置ける。
+ *
+ * フロントが上げうる最大に合わせている。圧縮の目標は 3.75MB だが、Canvas で
+ * 読めない画像は縮小できないので 5MB まではそのまま保存を許している
+ * （`imageCompressor.ts` の `MAX_UNREADABLE_UPLOAD_SIZE`）。ここを 3.75MB にすると
+ * その画像が保存できなくなる
+ */
+export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
