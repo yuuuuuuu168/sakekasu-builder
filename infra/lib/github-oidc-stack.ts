@@ -37,6 +37,38 @@ export interface GithubOidcStackProps extends cdk.StackProps {
  * コンテキストフラグ付きの手動デプロイとする。
  * 使用例: npx cdk deploy sakekasu-github-oidc -c github-oidc=true
  */
+/**
+ * GitHub Actions の OIDC トークンの sub を照合する条件。
+ *
+ * GitHub が発行する sub には 2 つの形式があるので、StringLike で両方を受ける
+ * （sakekasu-kakeibo の infra/lib/github-principal.ts と同じ考え方）。
+ *
+ *   repo:yuuuuuuu168@173623628/sakekasu-builder@1405594425:ref:refs/heads/main  （新しい形式）
+ *   repo:yuuuuuuu168/sakekasu-builder:ref:refs/heads/main                       （古い形式）
+ *
+ * 新しい形式はオーナー名とリポジトリ名のうしろに数値 ID が付く。2026-10-05 にリポジトリを
+ * 作り直して公開したとき、新しいリポジトリの sub はこちらの形になり、古い形式だけを
+ * StringEquals で書いていた信頼条件では AssumeRoleWithWebIdentity が全部断られた。
+ *
+ * ID の部分をワイルドカードにしてあるのは、リポジトリを作り直したときに同じ落ち方を
+ * しないため。`@` の前を固定しているので、オーナー名とリポジトリ名は厳密に一致する必要が
+ * ある（どちらも `@` を含められない）。末尾（ref や pull_request）は固定なので、
+ * environment など別の文脈の sub は通らない。
+ */
+export function githubSubjectCondition(
+  githubDomain: string,
+  repository: string,
+  context: string,
+): Record<string, Record<string, string | string[]>> {
+  const [owner, repo] = repository.split('/');
+  return {
+    StringEquals: { [`${githubDomain}:aud`]: 'sts.amazonaws.com' },
+    StringLike: {
+      [`${githubDomain}:sub`]: [`repo:${owner}@*/${repo}@*:${context}`, `repo:${owner}/${repo}:${context}`],
+    },
+  };
+}
+
 export class GithubOidcStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: GithubOidcStackProps) {
     super(scope, id, props);
@@ -57,12 +89,10 @@ export class GithubOidcStack extends cdk.Stack {
       roleName: 'sakekasu-github-actions-deploy',
       // IAM の description は ASCII + Latin-1 のみ（日本語を入れるとデプロイが 400 で落ちる）
       description: 'CDK deploy from GitHub Actions (main branch only)',
-      assumedBy: new iam.WebIdentityPrincipal(provider.openIdConnectProviderArn, {
-        StringEquals: {
-          [`${githubDomain}:aud`]: 'sts.amazonaws.com',
-          [`${githubDomain}:sub`]: `repo:${props.repository}:ref:refs/heads/main`,
-        },
-      }),
+      assumedBy: new iam.WebIdentityPrincipal(
+        provider.openIdConnectProviderArn,
+        githubSubjectCondition(githubDomain, props.repository, 'ref:refs/heads/main'),
+      ),
     });
     deployRole.addToPolicy(
       new iam.PolicyStatement({
@@ -128,12 +158,10 @@ export class GithubOidcStack extends cdk.Stack {
     const diffRole = new iam.Role(this, 'DiffRole', {
       roleName: 'sakekasu-github-actions-diff',
       description: 'Read-only cdk diff from GitHub Actions (pull_request)',
-      assumedBy: new iam.WebIdentityPrincipal(provider.openIdConnectProviderArn, {
-        StringEquals: {
-          [`${githubDomain}:aud`]: 'sts.amazonaws.com',
-          [`${githubDomain}:sub`]: `repo:${props.repository}:pull_request`,
-        },
-      }),
+      assumedBy: new iam.WebIdentityPrincipal(
+        provider.openIdConnectProviderArn,
+        githubSubjectCondition(githubDomain, props.repository, 'pull_request'),
+      ),
     });
 
     // cdkd diff 用の読み取り権限（Issue #150）。
@@ -158,12 +186,10 @@ export class GithubOidcStack extends cdk.Stack {
     const siteRole = new iam.Role(this, 'SiteDeployRole', {
       roleName: 'sakekasu-github-actions-site',
       description: 'Upload the frontend build to the site bucket (main branch only)',
-      assumedBy: new iam.WebIdentityPrincipal(provider.openIdConnectProviderArn, {
-        StringEquals: {
-          [`${githubDomain}:aud`]: 'sts.amazonaws.com',
-          [`${githubDomain}:sub`]: `repo:${props.repository}:ref:refs/heads/main`,
-        },
-      }),
+      assumedBy: new iam.WebIdentityPrincipal(
+        provider.openIdConnectProviderArn,
+        githubSubjectCondition(githubDomain, props.repository, 'ref:refs/heads/main'),
+      ),
       maxSessionDuration: cdk.Duration.hours(1),
     });
     // バケット名は site-stack.ts の siteBucketName と同じ形。環境接頭辞は * で拾う
