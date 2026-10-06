@@ -430,6 +430,7 @@ describe('generateUploadUrl のキー検証', () => {
         recordId: RECORD_ID,
         contentType: 'image/jpeg',
         fileName: 'a.jpg',
+        fileSize: 1000,
         ...overrides,
       },
       identity: { sub: OWNER },
