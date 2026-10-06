@@ -2,7 +2,7 @@
   {
     "name": "dev",
     "description": "sakekasu-builder 開発環境（東京）",
-    "account": "<アプリのアカウント ID>",
+    "account": "000000000000",
     "region": "ap-northeast-1"
   }
 ]

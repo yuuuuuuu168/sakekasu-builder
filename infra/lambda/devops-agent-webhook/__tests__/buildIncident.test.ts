@@ -76,7 +76,7 @@ function alarmMessage(overrides: Record<string, unknown> = {}): string {
     NewStateReason: 'Threshold Crossed: 1 datapoint [7.0] was greater than the threshold (5.0).',
     StateChangeTime: '2026-08-09T02:59:30.000Z',
     Region: 'Asia Pacific (Tokyo)',
-    AWSAccountId: '<アプリのアカウント ID>',
+    AWSAccountId: '111111111111',
     Trigger: {
       MetricName: '5XXError',
       Namespace: 'AWS/AppSync',
@@ -124,7 +124,7 @@ describe('CloudWatch アラームの転送', () => {
     expect(sent!.incident.description).toContain('GraphQL API がサーバエラーを返しています');
     expect(sent!.incident.description).toContain('Threshold Crossed');
     expect(sent!.incident.description).toContain('AWS/AppSync / 5XXError');
-    expect(sent!.incident.description).toContain('<アプリのアカウント ID>');
+    expect(sent!.incident.description).toContain('111111111111');
     // 環境が分からないと調査先を間違えるため必ず添える
     expect(sent!.incident.description).toContain('dev 環境');
   });

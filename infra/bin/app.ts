@@ -43,8 +43,9 @@ if (app.node.tryGetContext('github-oidc')) {
   new GithubOidcStack(app, 'sakekasu-github-oidc', {
     repository: 'yuuuuuuu168/sakekasu-builder',
     siteZone,
-    // アプリ本体と同じ sakekasu-builder アカウント
-    env: { account: '<アプリのアカウント ID>', region: 'ap-northeast-1' },
+    // アプリ本体と同じ sakekasu-builder アカウント。ID はリポジトリに書かず、手元の
+    // `AWS_PROFILE=sakekasu-builder npx cdk deploy` で CDK CLI が認証情報から入れる値を使う
+    env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'ap-northeast-1' },
   });
 }
 
@@ -52,23 +53,21 @@ if (app.node.tryGetContext('github-oidc')) {
 // Organization の管理アカウントにしか置けないため、通常のデプロイ先
 // （sakekasu-builder）とは分けて -c billing=true のときだけ合成する。
 // 環境（dev/staging/prod）にも紐づかない単一のスタック。
-// 使用例: npx cdk deploy sakekasu-billing-notifier -c billing=true -c billingAccount=<管理アカウント ID>
+// 使用例: npx cdk deploy sakekasu-billing-notifier -c billing=true \
+//   -c billingAccount=<管理アカウント ID> -c appAccount=<アプリ本体のアカウント ID>
 //
 // 管理アカウントの ID はリポジトリに書かない（公開リポジトリから組織の要が辿れないように）。
 // -c billingAccount か環境変数 BILLING_ACCOUNT_ID で渡す
 if (app.node.tryGetContext('billing')) {
-  const billingAccount =
-    (app.node.tryGetContext('billingAccount') as string | undefined) ?? process.env.BILLING_ACCOUNT_ID;
-  if (!billingAccount || !/^\d{12}$/.test(billingAccount)) {
-    throw new Error(
-      '-c billing=true には管理アカウントの ID が要る。-c billingAccount=<12桁> か環境変数 BILLING_ACCOUNT_ID で渡す',
-    );
-  }
+  const billingAccount = requireAccountId(app, 'billingAccount', 'BILLING_ACCOUNT_ID');
   new BillingNotifierStack(app, 'sakekasu-billing-notifier', {
     // 個別に内訳を出すアカウント。組織全体の合計は常に出るため、
     // 親アカウント単体の表示は不要という判断（Issue #92 のレビュー）
+    // アプリ本体のアカウントの ID もリポジトリに書かない。-c appAccount か環境変数
+    // APP_ACCOUNT_ID で渡す（管理アカウントの認証情報で合成するので、
+    // CDK_DEFAULT_ACCOUNT は管理アカウントになり使えない）
     targetAccounts: [
-      { id: '<アプリのアカウント ID>', label: 'sakekasu-builder（アプリ本体）' },
+      { id: requireAccountId(app, 'appAccount', 'APP_ACCOUNT_ID'), label: 'sakekasu-builder（アプリ本体）' },
     ],
     // Organization の管理アカウント。デプロイ時はこのアカウントの認証情報が必要
     env: { account: billingAccount, region: 'ap-northeast-1' },
@@ -119,9 +118,11 @@ function buildApplicationStacks(app: cdk.App): void {
 
   // MonitoringStack: アラームと外形監視、Slack 通知
   // ソムリエ Runtime は agentcore CLI 側で管理しているため、ARN は文脈から渡す
+  //
+  // 既定の ARN はデプロイ先のアカウントから組み立てる（ID をリポジトリに書かないため）
   const sommelierRuntimeArn =
     (app.node.tryGetContext('sommelierRuntimeArn') as string | undefined) ??
-    'arn:aws:bedrock-agentcore:ap-northeast-1:<アプリのアカウント ID>:runtime/sommelier_sommelier-Cn5eM865GE';
+    `arn:aws:bedrock-agentcore:ap-northeast-1:${cdkEnv.account}:runtime/sommelier_sommelier-Cn5eM865GE`;
 
   const siteUrl =
     (app.node.tryGetContext('siteUrl') as string | undefined) ?? 'https://sake.sakekasu-builder.com';
@@ -199,7 +200,11 @@ function buildApplicationStacks(app: cdk.App): void {
  *
  *   siteZone だけ:              ゾーン（sakekasu-<env>-site-dns）だけを作る
  *   + siteHostedZoneId と
- *     siteCertificateArn:       委任と証明書が済んだ後。配信（sakekasu-<env>-site）も作る
+ *     siteCertificateId:        委任と証明書が済んだ後。配信（sakekasu-<env>-site）も作る
+ *
+ * 証明書は ID だけを cdk.json に置き、ARN はデプロイ先のアカウントと組み合わせて作る。
+ * ARN にはアカウント ID が入るため（公開リポジトリなので書かない）。
+ * -c siteCertificateArn で ARN を丸ごと渡せば、そちらを使う
  */
 function buildSiteStacks(
   app: cdk.App,
@@ -217,8 +222,17 @@ function buildSiteStacks(
   });
 
   const siteHostedZoneId = app.node.tryGetContext('siteHostedZoneId') as string | undefined;
-  const siteCertificateArn = app.node.tryGetContext('siteCertificateArn') as string | undefined;
+  const siteCertificateId = app.node.tryGetContext('siteCertificateId') as string | undefined;
+  const siteCertificateArn =
+    (app.node.tryGetContext('siteCertificateArn') as string | undefined) ??
+    (siteCertificateId ? `arn:aws:acm:us-east-1:${account}:certificate/${siteCertificateId}` : undefined);
   if (!siteHostedZoneId || !siteCertificateArn) return;
+  if (!account && !app.node.tryGetContext('siteCertificateArn')) {
+    throw new Error(
+      '証明書の ARN を組み立てるにはデプロイ先のアカウントが要る。認証情報付きで合成するか、' +
+        '環境変数 CDK_DEFAULT_ACCOUNT を入れる',
+    );
+  }
 
   // CSP に入れる AppSync の URL は、画面が実際に読む設定ファイルから取る。
   // api スタックの出力を参照でつなぐと us-east-1 から ap-northeast-1 への
@@ -242,4 +256,16 @@ function buildSiteStacks(
     // CloudFront の証明書は us-east-1 にしか置けない
     env: { account, region: 'us-east-1' },
   });
+}
+
+/**
+ * リポジトリに書かないアカウント ID を、context か環境変数から取り出す。
+ * 形が崩れていたら合成の時点で落とす
+ */
+function requireAccountId(app: cdk.App, contextKey: string, envName: string): string {
+  const value = (app.node.tryGetContext(contextKey) as string | undefined) ?? process.env[envName];
+  if (!value || !/^\d{12}$/.test(value)) {
+    throw new Error(`アカウント ID が要る。-c ${contextKey}=<12桁> か環境変数 ${envName} で渡す`);
+  }
+  return value;
 }
