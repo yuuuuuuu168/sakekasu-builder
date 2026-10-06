@@ -59,11 +59,11 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy --import-existing-resources sakekasu
 
 | スタック | アカウント | ロググループ | 状態 |
 | --- | --- | --- | --- |
-| `sakekasu-dev-auth` | 232791540685 | `/aws/lambda/dev-sakekasu-signup-notifier` | 取り込み済み（2026-08-18） |
-| `sakekasu-dev-api` | 232791540685 | `/aws/lambda/dev-sakekasu-presigned-url`<br>`/aws/lambda/dev-sakekasu-ocr-analyzer` | 取り込み済み（2026-08-18） |
-| `sakekasu-dev-monitoring` | 232791540685 | `/aws/lambda/dev-sakekasu-slack-notifier`<br>`/aws/lambda/dev-sakekasu-health-check`<br>`/aws/lambda/dev-sakekasu-sommelier-canary` | 取り込み済み（2026-08-18） |
+| `sakekasu-dev-auth` | <アプリのアカウント ID> | `/aws/lambda/dev-sakekasu-signup-notifier` | 取り込み済み（2026-08-18） |
+| `sakekasu-dev-api` | <アプリのアカウント ID> | `/aws/lambda/dev-sakekasu-presigned-url`<br>`/aws/lambda/dev-sakekasu-ocr-analyzer` | 取り込み済み（2026-08-18） |
+| `sakekasu-dev-monitoring` | <アプリのアカウント ID> | `/aws/lambda/dev-sakekasu-slack-notifier`<br>`/aws/lambda/dev-sakekasu-health-check`<br>`/aws/lambda/dev-sakekasu-sommelier-canary` | 取り込み済み（2026-08-18） |
 | `sakekasu-billing-notifier` | <管理アカウント ID> | `/aws/lambda/sakekasu-billing-notifier`<br>`/aws/lambda/sakekasu-billing-slack-notifier` | 取り込み済み（2026-08-19）<br>保持期間は手で設定 |
-| `sakekasu-dev-devops-agent` | 232791540685 | `/aws/lambda/dev-sakekasu-devops-agent-webhook` | 取り込み不要 |
+| `sakekasu-dev-devops-agent` | <アプリのアカウント ID> | `/aws/lambda/dev-sakekasu-devops-agent-webhook` | 取り込み不要 |
 
 `sakekasu-dev-devops-agent` は `agentSpaceArn` の context が入っているときだけ合成される。いまは入っておらずデプロイもされていないため、ロググループの実物が無い。初回デプロイのときに素直に作られる。
 

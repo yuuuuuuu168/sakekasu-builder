@@ -26,11 +26,11 @@ builder だけがトップレベルのドメイン（`sakekasu-builder.com`）�
 | スタック | リージョン | 合成される条件 | 中身 |
 | --- | --- | --- | --- |
 | `sakekasu-dev-site-dns` | ap-northeast-1 | context `siteZone` | `sake.sakekasu-builder.com` のゾーン（RETAIN） |
-| `sakekasu-dev-site` | us-east-1 | `siteZone`、`siteHostedZoneId`、`siteCertificateArn` | 配信バケット、CloudFront（OAC）、セキュリティヘッダ、A / AAAA |
+| `sakekasu-dev-site` | us-east-1 | `siteZone`、`siteHostedZoneId`、`siteCertificateId` | 配信バケット、CloudFront（OAC）、セキュリティヘッダ、A / AAAA |
 
 - 2 つに分けてあるのは、ゾーンを親から委任してもらう前に証明書を作ると、DNS 検証が
   通らないため（kakeibo で 45 分止めた）
-- 証明書（us-east-1）は cdkd では作らず、コンソールで作って ARN を `siteCertificateArn` で渡す。
+- 証明書（us-east-1）は cdkd では作らず、コンソールで作って ID を `siteCertificateId` で渡す。ARN はアカウント ID を含むので、`bin/app.ts` がデプロイ先のアカウントと組み合わせて作る（公開リポジトリに書かないため）。
   cdkd は CDK が付ける DNS 検証の設定を ACM に渡せず、`ValidationDomain` が null だとして
   弾かれる（2026-10-04 に実際に落ちた。共通基盤の auth の証明書も同じ扱い）
 - 配信スタックは us-east-1 に置く。CloudFront に付ける証明書がそこにしか置けないため
@@ -99,7 +99,7 @@ ACM が検証待ちのまま止まる。
 
 ### 5. 証明書を作る（人の作業、アプリのアカウント）
 
-アプリのアカウント（232791540685）のコンソールで、**リージョンを us-east-1（バージニア北部）に
+アプリのアカウント（<アプリのアカウント ID>）のコンソールで、**リージョンを us-east-1（バージニア北部）に
 切り替えてから** ACM を開く。
 
 1. 「証明書をリクエスト」→「パブリック証明書」
@@ -111,7 +111,7 @@ ACM が検証待ちのまま止まる。
 ### 6. 配信スタックを作り、配信物を置く
 
 `infra/cdk.json` に `"siteHostedZoneId": "<手順 3 のゾーン ID>"` と
-`"siteCertificateArn": "<手順 5 の ARN>"` を足す PR をマージする。deploy.yml が
+`"siteCertificateId": "<手順 5 の ARN の末尾、certificate/ の後ろの ID>"` を足す PR をマージする。deploy.yml が
 バケット・CloudFront・エイリアスを作る。CloudFront の展開に数分かかる。
 
 デプロイが終わったら、Actions の画面から **deploy-site** を手で実行する（workflow_dispatch）。
@@ -162,8 +162,8 @@ docs/apex-redirect.md にある。
 | 項目 | 値 |
 | --- | --- |
 | sake. のゾーン | `Z02665782L8OPX32KFGCD`（管理アカウントの親ゾーンから NS で委任） |
-| 証明書（us-east-1） | `arn:aws:acm:us-east-1:232791540685:certificate/df2e84f0-e69b-4124-bb1e-768f0aae6baf` |
-| 配信バケット | `dev-sakekasu-site-232791540685` |
+| 証明書（us-east-1） | `arn:aws:acm:us-east-1:<アプリのアカウント ID>:certificate/df2e84f0-e69b-4124-bb1e-768f0aae6baf` |
+| 配信バケット | `dev-sakekasu-site-<アプリのアカウント ID>` |
 
 途中で 2 回つまずいた。
 

@@ -23,7 +23,7 @@ CloudWatch アラーム ─┐
 | 役割 | アカウント | プロファイル |
 |------|-----------|-------------|
 | プライマリ（Agent Space を置く） | `<運用アカウント ID>` | `ops-tooling` |
-| セカンダリ（調査対象＝アプリ本体） | `232791540685` | `sakekasu-builder` |
+| セカンダリ（調査対象＝アプリ本体） | `<アプリのアカウント ID>` | `sakekasu-builder` |
 
 Agent Space は運用ツール専用のメンバーアカウント `ops-tooling` に集約する。DevOps Agent は Slack・GitHub・Webhook という外部との接点を持つワークロードで、Organization の管理アカウントは唯一 SCP の制約を受けない場所にあたるため、事故を組織のガードレールで止められる側に置く。AWS Security Agent も同じ理由で `ops-tooling` へ移す（Issue #107）。
 
@@ -129,7 +129,7 @@ AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
 コンソールの Capabilities タブ → Cloud → Secondary sources → Add から、調査用ロールを登録する。ウィザードはロールを自分で作らせようとするが、ここでは CDK が作ったものを渡す。
 
 ```
-arn:aws:iam::232791540685:role/sakekasu-dev-devops-agent-monitoring
+arn:aws:iam::<アプリのアカウント ID>:role/sakekasu-dev-devops-agent-monitoring
 ```
 
 cdkd は CloudFormation を通らないのでスタックの出力が無い。ロール名は固定なので ARN はこの形になる。
@@ -151,7 +151,7 @@ cdkd は CloudFormation を通らないのでスタックの出力が無い。�
 aws resource-explorer-2 list-indexes --profile verify --region ap-northeast-1
 ```
 
-`232791540685` の ap-northeast-1 にはインデックスがあって `ACTIVE`、既定ビューは `tags` を含みフィルタも空。ただし種別は `LOCAL` で、アカウント内に `AGGREGATOR` が1つも無い（2026-10-04 時点）。AWS のトラブルシュートは **Agent Space と同じリージョンに集約インデックスを置くこと**を求めている。トポロジにリソースが出てこないときは、Resource Explorer のコンソールで ap-northeast-1 のインデックスを集約インデックスに昇格させる。
+`<アプリのアカウント ID>` の ap-northeast-1 にはインデックスがあって `ACTIVE`、既定ビューは `tags` を含みフィルタも空。ただし種別は `LOCAL` で、アカウント内に `AGGREGATOR` が1つも無い（2026-10-04 時点）。AWS のトラブルシュートは **Agent Space と同じリージョンに集約インデックスを置くこと**を求めている。トポロジにリソースが出てこないときは、Resource Explorer のコンソールで ap-northeast-1 のインデックスを集約インデックスに昇格させる。
 
 #### タグの付け方
 
@@ -166,7 +166,7 @@ DevOps Agent 自身のリソース（webhook の Lambda・ロググループ・�
 ```sh
 PROFILE=sakekasu-builder
 REGION=ap-northeast-1
-ACCOUNT=232791540685
+ACCOUNT=<アプリのアカウント ID>
 API_ID=6mtw5cju3naydf7mxnaoulowta
 
 {
@@ -263,7 +263,7 @@ aws iam list-attached-role-policies \
 双方向のチャンネルで直接訊く。これが一番早い。
 
 ```
-@AWS DevOps Agent - AP (Tokyo) 232791540685 のアカウントで見えているリソースを教えて
+@AWS DevOps Agent - AP (Tokyo) <アプリのアカウント ID> のアカウントで見えているリソースを教えて
 ```
 
 2026-10-04 に試したところ、S3 バケット12個・Lambda 関数33個・DynamoDB テーブル5個などが

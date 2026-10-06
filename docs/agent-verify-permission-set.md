@@ -90,11 +90,11 @@ aws iam simulate-principal-policy --profile verify-org --policy-source-arn $ROLE
 | インスタンス | `arn:aws:sso:::instance/<インスタンス ID>`（管理アカウント <管理アカウント ID> 所有） |
 | Permission Set | `arn:aws:sso:::permissionSet/<インスタンス ID>/<Permission Set ID>` |
 | セッション時間 | `PT12H`（既存の `AdministratorAccess` / `ReadOnlyAccess` に揃えた） |
-| 割り当て先 | グループ `sakekasu`（既存もグループ割り当てのため揃えた）。アカウント 232791540685（アプリ、2026-08-17）、<管理アカウント ID>（管理）と <運用アカウント ID>（運用ツール）（2026-09-26 に追加） |
+| 割り当て先 | グループ `sakekasu`（既存もグループ割り当てのため揃えた）。アカウント <アプリのアカウント ID>（アプリ、2026-08-17）、<管理アカウント ID>（管理）と <運用アカウント ID>（運用ツール）（2026-09-26 に追加） |
 
 作り直す場合の手順は次のとおり。管理アカウント（<管理アカウント ID>）の認証が必要で、メンバーアカウントからは `sso:ListPermissionSets` すら通らない。
 
-**`sso-admin` のコマンドは、管理アカウントのプロファイル（ローカルの `yuuuuuuuki7749`）とリージョン `ap-northeast-1` で流す。** アプリのアカウント（232791540685）の `AdministratorAccess` で流すと、`the resource does not exist in this Region` を含む `AccessDeniedException` になる（2026-09-26 に実際に踏んだ）。ローカルの SSO が期限切れなら、先に `aws sso login --profile yuuuuuuuki7749` を流す。最初の `get-caller-identity` で `<管理アカウント ID>` が返ることを確かめてから先へ進む。zsh の対話モードでは `#` で始まる行がコメントにならない（`command not found: #` になる）ので、コードブロック中のコメント行は貼らずに飛ばす。
+**`sso-admin` のコマンドは、管理アカウントのプロファイル（ローカルの `yuuuuuuuki7749`）とリージョン `ap-northeast-1` で流す。** アプリのアカウント（<アプリのアカウント ID>）の `AdministratorAccess` で流すと、`the resource does not exist in this Region` を含む `AccessDeniedException` になる（2026-09-26 に実際に踏んだ）。ローカルの SSO が期限切れなら、先に `aws sso login --profile yuuuuuuuki7749` を流す。最初の `get-caller-identity` で `<管理アカウント ID>` が返ることを確かめてから先へ進む。zsh の対話モードでは `#` で始まる行がコメントにならない（`command not found: #` になる）ので、コードブロック中のコメント行は貼らずに飛ばす。
 
 ```sh
 export AWS_PROFILE=yuuuuuuuki7749 AWS_REGION=ap-northeast-1
@@ -116,7 +116,7 @@ aws sso-admin put-inline-policy-to-permission-set --instance-arn $INST \
 
 aws sso-admin create-account-assignment --instance-arn $INST \
   --permission-set-arn <PERMISSION_SET_ARN> \
-  --target-id 232791540685 --target-type AWS_ACCOUNT \
+  --target-id <アプリのアカウント ID> --target-type AWS_ACCOUNT \
   --principal-id 97242a68-30e1-70ce-49a7-0ba461fb1bf2 --principal-type GROUP
 ```
 
@@ -147,7 +147,7 @@ aws sso-admin provision-permission-set --instance-arn $INST \
 aws sso-admin describe-permission-set-provisioning-status --instance-arn $INST \
   --provision-permission-set-request-id <REQUEST_ID> --query 'PermissionSetProvisioningStatus.Status'
 
-# 対象アカウント（232791540685）側で、実体のロールに入っているか確かめる
+# 対象アカウント（<アプリのアカウント ID>）側で、実体のロールに入っているか確かめる
 aws iam get-role-policy --role-name AWSReservedSSO_AgentVerifyAccess_13e5a14e9d6af7d8 \
   --policy-name AwsSSOInlinePolicy --query 'PolicyDocument.Statement[].Sid'
 ```

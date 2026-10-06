@@ -153,7 +153,7 @@ cdkd 側は、権限を増やしうる IAM の API（`CreateRole` / `PutRolePoli
 
 ## 手順
 
-以下はすべて `infra/` で実行する。プロファイルは `sakekasu-builder`（アカウント 232791540685）。
+以下はすべて `infra/` で実行する。プロファイルは `sakekasu-builder`（アカウント <アプリのアカウント ID>）。
 
 ### 3. OIDC スタックを手動デプロイする
 
@@ -166,7 +166,7 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc -c github-oidc=
 
 アプリのスタックより先にこれを流す。境界が存在しない状態でアプリをデプロイすると、存在しないポリシーを参照しているとして落ちる。
 
-**`sakekasu-cdkd-deploy` に入れるのは `sakekasu-github-actions-deploy` だけ。** 人間が `AdministratorAccess` で入ろうとしても `sts:AssumeRole` が拒否される。CI 用に絞ったロールなので、手元から cdkd を打つときは `CDKD_ROLE_ARN` を渡さず、自分の権限で直接実行する（手順6・手順7 を参照）。state バケット `cdkd-state-232791540685` のバケットポリシーはアカウント外からのアクセスを拒否するだけなので、同一アカウントの管理者なら読み書きできる。
+**`sakekasu-cdkd-deploy` に入れるのは `sakekasu-github-actions-deploy` だけ。** 人間が `AdministratorAccess` で入ろうとしても `sts:AssumeRole` が拒否される。CI 用に絞ったロールなので、手元から cdkd を打つときは `CDKD_ROLE_ARN` を渡さず、自分の権限で直接実行する（手順6・手順7 を参照）。state バケット `cdkd-state-<アプリのアカウント ID>` のバケットポリシーはアカウント外からのアクセスを拒否するだけなので、同一アカウントの管理者なら読み書きできる。
 
 ### 3.5. アプリの全ロールに境界を付ける
 
@@ -188,11 +188,11 @@ AWS_PROFILE=sakekasu-builder AWS_REGION=ap-northeast-1 npx cdkd bootstrap
 AWS_PROFILE=sakekasu-builder AWS_REGION=us-east-1 npx cdkd bootstrap
 ```
 
-1回目で state バケット `cdkd-state-232791540685` と ap-northeast-1 のアセットストレージが、2回目で us-east-1（`sakekasu-dev-health-global` 用）のアセットストレージができる。2回目は state バケットがすでにあるため再設定はスキップされる。
+1回目で state バケット `cdkd-state-<アプリのアカウント ID>` と ap-northeast-1 のアセットストレージが、2回目で us-east-1（`sakekasu-dev-health-global` 用）のアセットストレージができる。2回目は state バケットがすでにあるため再設定はスキップされる。
 
 実行済み（2026-08-16）。両リージョンとも成功し、`cdkd state info` でアセットストレージが2リージョン分できていることを確認した。
 
-アセットの置き場所が CDK bootstrap のバケットから `cdkd-assets-232791540685-*` に変わるため、取り込み後の最初の `cdkd deploy` で Lambda のコード参照に一度だけ UPDATE が出る。中身は同じで、リソースの作り直しではない。
+アセットの置き場所が CDK bootstrap のバケットから `cdkd-assets-<アプリのアカウント ID>-*` に変わるため、取り込み後の最初の `cdkd deploy` で Lambda のコード参照に一度だけ UPDATE が出る。中身は同じで、リソースの作り直しではない。
 
 ### 5. pre-flight の確認
 
@@ -966,7 +966,7 @@ PR は取り込み（手順7）より先に用意しておき、手順8まで全
 
 - `npx cdk deploy --all --require-approval never` → `npx cdkd deploy --all --yes`
 - `npx cdk diff --all --no-color` → `npx cdkd diff --all`
-- `CDKD_ROLE_ARN` に `arn:aws:iam::232791540685:role/sakekasu-cdkd-deploy` を入れる
+- `CDKD_ROLE_ARN` に `arn:aws:iam::<アプリのアカウント ID>:role/sakekasu-cdkd-deploy` を入れる
 - `cdk-diff.yml` の diff ロールは `cdk-hnb659fds-lookup-role-*` への AssumeRole を消す（cdkd では使わない。読み取り権限は手順3の時点で付与済み）
 - 待ちモードは既定のまま。デプロイ後にカナリアとアラームが動く構成なので `--no-wait` は使わない
 
@@ -975,8 +975,8 @@ PR は取り込み（手順7）より先に用意しておき、手順8まで全
 **diff ロールに cdkd のアセット保管庫への `s3:ListBucket` が要る。** cdkd は `diff` でもリージョンのアセット保管庫が自分のものかを確かめる。`ExpectedBucketOwner` 付きの `HeadBucket` で問い合わせ、権限が無いと 403 が返る。cdkd は 403 を「他アカウントのバケット」と解釈して止まるため、権限不足が乗っ取りに見えるエラーになる。
 
 ```
-CdkdError: Asset bucket 'cdkd-assets-232791540685-ap-northeast-1' exists but is not owned by
-account 232791540685 (or access is denied). Refusing to use it.
+CdkdError: Asset bucket 'cdkd-assets-<アプリのアカウント ID>-ap-northeast-1' exists but is not owned by
+account <アプリのアカウント ID> (or access is denied). Refusing to use it.
 ```
 
 `HeadBucket` に要るのは `s3:ListBucket` だけで、中身を読む権限は要らない。ECR 側の `DescribeRepositories` は既存の `ecr:Describe*` で足りている。[cdkd-policies.ts](../infra/lib/cdkd-policies.ts) の `ProbeCdkdAssetStorage` がこれ。反映には `sakekasu-github-oidc` の手動デプロイが要る。
@@ -1100,7 +1100,7 @@ CloudFormation のスタックが無くなるので、コンソールのスタ�
 | ロールバック | CFn の自動ロールバック | `cdkd rollback <stack>` |
 | ロック解除 | 不要 | `cdkd force-unlock <stack>` |
 
-state の置き場所は `s3://cdkd-state-232791540685/cdkd/<stack>/<region>/state.json`。
+state の置き場所は `s3://cdkd-state-<アプリのアカウント ID>/cdkd/<stack>/<region>/state.json`。
 
 ## CloudFormation に戻す
 
@@ -1150,7 +1150,7 @@ cdkd 自体はまだ 0.x で、公式に「dev/test 用。production-ready で�
 1. エラーメッセージから足りないアクションを特定する
 2. `infra/lib/cdkd-policies.ts` の該当ステートメントに足す
 3. `npx cdk deploy sakekasu-github-oidc -c github-oidc=true` で反映する
-4. `npx cdkd deploy --dry-run --role-arn arn:aws:iam::232791540685:role/sakekasu-cdkd-deploy` で確認する
+4. `npx cdkd deploy --dry-run --role-arn arn:aws:iam::<アプリのアカウント ID>:role/sakekasu-cdkd-deploy` で確認する
 
 面倒でも AdministratorAccess を貼らずにこの手順を回す。貼った瞬間に「main への push から到達できる管理者権限」がひとつ増える。
 

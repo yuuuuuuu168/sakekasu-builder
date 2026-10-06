@@ -86,12 +86,18 @@ jobs:
         # 解決されるが、認証ありで合成した場合と別物のテンプレートになる。
         # 明示しておけば両者が一致する（Issue #131 に記録のある落とし穴）
         env:
-          CDK_DEFAULT_ACCOUNT: '232791540685'
+          # アカウント ID は secrets から渡す（deploy.yml と同じ）。このジョブは本人の PR でしか
+          # 走らないので（上の if:）、secrets は必ず渡る
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           # Agent Space の ARN は secrets から渡す（deploy.yml と同じ。bin/app.ts）。
           # フォークからの PR には secrets が渡らないので、そのときは DevOps Agent の
           # スタックを合成しないまま差分を取る
           AGENT_SPACE_ARN: ${{ secrets.AGENT_SPACE_ARN }}
         run: |
+          if [ -z "$CDK_DEFAULT_ACCOUNT" ]; then
+            echo "::error::secrets.AWS_ACCOUNT_ID が未設定。リポジトリの Settings → Secrets and variables → Actions に入れる（README の「デプロイ」）"
+            exit 1
+          fi
           if [ -n "$AGENT_SPACE_ARN" ]; then
             # 運用ツール用アカウントの ID をログに出さない
             echo "::add-mask::$(cut -d: -f5 <<< "$AGENT_SPACE_ARN")"
@@ -99,12 +105,13 @@ jobs:
           npx cdk synth --all -q
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: arn:aws:iam::232791540685:role/sakekasu-github-actions-diff
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sakekasu-github-actions-diff
           aws-region: ap-northeast-1
       - name: cdkd diff
         id: diff
         env:
           AGENT_SPACE_ARN: ${{ secrets.AGENT_SPACE_ARN }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         # --fail は付けない。差分があるだけで落ちてしまう。
         #
         # 一方で cdkd 自体が落ちたときは落ちてほしいので pipefail を立てる。
@@ -116,7 +123,8 @@ jobs:
           set -o pipefail
           npx cdkd diff --all 2>&1 | tee diff.txt
           # diff.txt は PR コメントに貼る。ログのマスクは PR コメントには効かないので、
-          # 運用ツール用アカウントの ID をここで伏せる
+          # アプリ用と運用ツール用のアカウントの ID をここで伏せる
+          sed -i "s/${AWS_ACCOUNT_ID}/<アカウント>/g" diff.txt
           if [ -n "$AGENT_SPACE_ARN" ]; then
             sed -i "s/$(cut -d: -f5 <<< "$AGENT_SPACE_ARN")/<運用アカウント>/g" diff.txt
           fi

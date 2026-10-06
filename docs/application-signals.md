@@ -565,7 +565,7 @@ AWS_PROFILE=sakekasu-builder aws cloudwatch get-metric-statistics \
 
 ## 費用
 
-### 実測（2026-10-03、アカウント 232791540685）
+### 実測（2026-10-03、アカウント <アプリのアカウント ID>）
 
 導入前（6〜7月）と導入後を並べたもの。金額は `UnblendedCost` の `Usage` レコードのみで、クレジットによる相殺前の実使用額。
 
@@ -588,7 +588,7 @@ AWS_PROFILE=sakekasu-builder aws cloudwatch get-metric-statistics \
 AWS_PROFILE=verify-org aws ce get-cost-and-usage --region us-east-1 \
   --time-period Start=2026-09-01,End=2026-10-01 --granularity MONTHLY \
   --metrics UnblendedCost UsageQuantity --group-by Type=DIMENSION,Key=USAGE_TYPE \
-  --filter '{"And":[{"Dimensions":{"Key":"LINKED_ACCOUNT","Values":["232791540685"]}},{"Dimensions":{"Key":"SERVICE","Values":["AmazonCloudWatch"]}},{"Dimensions":{"Key":"RECORD_TYPE","Values":["Usage"]}}]}'
+  --filter '{"And":[{"Dimensions":{"Key":"LINKED_ACCOUNT","Values":["<アプリのアカウント ID>"]}},{"Dimensions":{"Key":"SERVICE","Values":["AmazonCloudWatch"]}},{"Dimensions":{"Key":"RECORD_TYPE","Values":["Usage"]}}]}'
 ```
 
 費用は管理アカウント側にあるので `verify-org` プロファイルを使う。`LINKED_ACCOUNT` で絞らないと管理アカウント自身の分しか見えず、ゼロが並ぶ。

@@ -8,7 +8,7 @@ READMEの機能 #21〜#23 で構想した「パーソナル酒ソムリエ・エ
 
 | 項目 | 決定 | 根拠 |
 |------|------|------|
-| AWS アカウント | `sakekasu-builder`（232791540685） | 既存構成と揃える |
+| AWS アカウント | `sakekasu-builder`（<アプリのアカウント ID>） | 既存構成と揃える |
 | リージョン | 東京（ap-northeast-1） | Phase 1 全コンポーネントが東京対応確認済み |
 | 認証方式 | Cognito JWT Bearer Token（Inbound Auth） | 既存 Cognito UserPool を流用できる |
 | フレームワーク | Strands Agents（Python） | AgentCore CLI 推奨・サンプル豊富 |

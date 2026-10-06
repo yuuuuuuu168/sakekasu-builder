@@ -5,9 +5,16 @@ import { App, type Environment, Tags } from 'aws-cdk-lib';
 import * as path from 'path';
 import * as fs from 'fs';
 
+/**
+ * aws-targets.json の account に置くダミー。公開リポジトリなので本物の ID を書かず、
+ * デプロイ時は CDK CLI が認証情報から入れる CDK_DEFAULT_ACCOUNT を使う
+ * （agentcore の設定の読み込みは 12 桁の数字しか受け付けないため、空にはできない）
+ */
+const PLACEHOLDER_ACCOUNT = '000000000000';
+
 function toEnvironment(target: AwsDeploymentTarget): Environment {
   return {
-    account: target.account,
+    account: target.account === PLACEHOLDER_ACCOUNT ? process.env.CDK_DEFAULT_ACCOUNT : target.account,
     region: target.region,
   };
 }
