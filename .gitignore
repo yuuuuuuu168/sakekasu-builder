@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# 環境変数のファイル。*.local が .env.local を拾っていただけで、.env や
+# .env.production は素通りしていた（Issue sakekasu-builder-archive#106）。
+# 公開リポジトリなので、置いた瞬間にコミットできてしまう状態を残さない
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
