@@ -73,7 +73,13 @@ async function callGenerateUploadUrl(args: {
       fileName: args.fileName ?? 'a.jpg',
       ...(args.temporary === undefined ? {} : { temporary: args.temporary }),
       ...(args.thumbnail === undefined ? {} : { thumbnail: args.thumbnail }),
-      ...(args.fileSize === undefined ? {} : { fileSize: args.fileSize }),
+      // 大きさを見ないテストでは妥当な値を入れておく。省略を試すときは
+      // fileSize: undefined を明示して渡す
+      ...('fileSize' in args
+        ? args.fileSize === undefined
+          ? {}
+          : { fileSize: args.fileSize }
+        : { fileSize: 1000 }),
     },
     identity: { sub: OWNER },
   } as Parameters<typeof handler>[0]);
@@ -234,7 +240,6 @@ describe('generateUploadUrl の大きさ', () => {
 
   beforeEach(() => {
     getSignedUrlMock.mockClear();
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   it('申告された大きさを ContentLength として署名に含める', async () => {
@@ -266,16 +271,15 @@ describe('generateUploadUrl の大きさ', () => {
     expect(signedPut().Tagging).toBe('lifecycle=temporary');
   });
 
-  // 新しいフロントが行き渡るまでの移行措置。必須にしたらこのテストを差し替える
+  // PR #30 では移行のため省略を通していた。新しいフロントが本番に出て
+  // 大きさを送ることを確かめたので必須にした
   it.each([
     ['省略', undefined],
     ['null', null],
-  ])('大きさの%sは当面通すが、署名には入れず警告を残す', async (_label, fileSize) => {
-    const warn = vi.spyOn(console, 'warn');
-
-    await callGenerateUploadUrl({ fileSize });
-
-    expect(signedPut().ContentLength).toBeUndefined();
-    expect(warn.mock.calls.flat().join(' ')).toContain('fileSize not provided');
+  ])('大きさの%sは署名せずに弾く', async (_label, fileSize) => {
+    await expect(callGenerateUploadUrl({ fileSize })).rejects.toThrow(
+      'Missing required argument: fileSize',
+    );
+    expect(getSignedUrlMock).not.toHaveBeenCalled();
   });
 });
