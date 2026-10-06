@@ -12,7 +12,7 @@ function synth(): Template {
   const app = new cdk.App();
   // トピックは監視スタックが持つものを想定しているため、別スタックから渡す
   const topicStack = new cdk.Stack(app, 'TestTopicStack', {
-    env: { account: '<アプリのアカウント ID>', region: 'ap-northeast-1' },
+    env: { account: '111111111111', region: 'ap-northeast-1' },
   });
   const alertTopic = new sns.Topic(topicStack, 'AlertTopic', { topicName: 'dev-sakekasu-alerts' });
 
@@ -21,7 +21,7 @@ function synth(): Template {
     monitoringAccountId: MONITORING_ACCOUNT_ID,
     agentSpaceArn: AGENT_SPACE_ARN,
     alertTopic,
-    env: { account: '<アプリのアカウント ID>', region: 'ap-northeast-1' },
+    env: { account: '111111111111', region: 'ap-northeast-1' },
   });
   return Template.fromStack(stack);
 }
@@ -93,7 +93,7 @@ describe('DevOpsAgentStack', () => {
             Sid: 'AllowCreateServiceLinkedRoles',
             Action: 'iam:CreateServiceLinkedRole',
             Resource:
-              'arn:aws:iam::<アプリのアカウント ID>:role/aws-service-role/' +
+              'arn:aws:iam::111111111111:role/aws-service-role/' +
               'resource-explorer-2.amazonaws.com/AWSServiceRoleForResourceExplorer',
           }),
         ]),
@@ -120,7 +120,7 @@ describe('DevOpsAgentStack', () => {
           Match.objectLike({
             Action: 'secretsmanager:GetSecretValue',
             Resource:
-              'arn:aws:secretsmanager:ap-northeast-1:<アプリのアカウント ID>:secret:dev-sakekasu/devops-agent/webhook-*',
+              'arn:aws:secretsmanager:ap-northeast-1:111111111111:secret:dev-sakekasu/devops-agent/webhook-*',
           }),
         ]),
       },

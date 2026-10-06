@@ -72,7 +72,7 @@ jobs:
       - run: npm test
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: arn:aws:iam::<アプリのアカウント ID>:role/sakekasu-github-actions-deploy
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sakekasu-github-actions-deploy
           aws-region: ap-northeast-1
       # `agentcore deploy` ではなく CDK を直接叩く。
       # `agentcore deploy` は本体の処理に入る前に cdk/ の依存を最新へ書き換えて

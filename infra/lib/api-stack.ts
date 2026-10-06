@@ -59,7 +59,7 @@ const APPLICATION_SIGNALS_NODEJS_LAYER_ARN =
  * **プロファイル本体と振り先の foundation-model の両方**を見るため、
  * プロファイルの ARN だけを許可すると AccessDeniedException で OCR が止まる。
  *
- * 振り先は実機で取得した（2026-08-10、アカウント <アプリのアカウント ID> / ap-northeast-1）。
+ * 振り先は実機で取得した（2026-08-10、アプリ本体のアカウント / ap-northeast-1）。
  *
  * ```
  * aws bedrock list-inference-profiles --region ap-northeast-1 \

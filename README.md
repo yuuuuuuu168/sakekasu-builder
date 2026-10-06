@@ -563,8 +563,10 @@ AWS_PROFILE=yuuuuuuuki7749 aws ssm put-parameter \
   --value 'https://hooks.slack.com/services/XXX/YYY/ZZZ' \
   --region ap-northeast-1
 
-# 4. デプロイ
-AWS_PROFILE=yuuuuuuuki7749 npx cdk deploy sakekasu-billing-notifier -c billing=true -c billingAccount=$BILLING_ACCOUNT_ID
+# 4. デプロイ（内訳に出すアプリ本体のアカウントの ID も、リポジトリに書かず渡す）
+APP_ACCOUNT_ID=$(AWS_PROFILE=sakekasu-builder aws sts get-caller-identity --query Account --output text)
+AWS_PROFILE=yuuuuuuuki7749 npx cdk deploy sakekasu-billing-notifier -c billing=true \
+  -c billingAccount=$BILLING_ACCOUNT_ID -c appAccount=$APP_ACCOUNT_ID
 
 # 5. 動作確認（手動で1回実行して Slack に届くか見る）
 AWS_PROFILE=yuuuuuuuki7749 aws lambda invoke \
@@ -700,6 +702,8 @@ AWS_PROFILE=sakekasu-builder npx cdk diff --context env=dev
 
 デプロイ後に AppSync のエンドポイント等が変わったときは、`infra/scripts/generate-outputs.ts` を実行して `amplify_outputs.json` を作り直す。認証の値（共通ログイン）は `infra/cdk.json` の `sharedAuth` から書く。
 
+手元の画面からソムリエを使うときは、Runtime の ARN を `.env.local` に `VITE_SOMMELIER_RUNTIME_ARN=<ARN>` で置く。ARN はアカウント ID を含むのでリポジトリには書いていない（本番のビルドでは `deploy-site.yml` が組み立てる）。値は agentcore CLI がローカルに書く `sommelier/agentcore/.cli/deployed-state.json` の `runtimeArn` と同じ。
+
 ローカルの画面（`npm run dev`）も共通ログインでログインする。戻り先として登録してあるのは `http://localhost:5173/` だけなので、ポートを変えるとログインできない。
 
 ## デプロイ（CDK）
@@ -713,6 +717,19 @@ AWS_PROFILE=sakekasu-builder npx cdk diff --context env=dev
 - 認証はどちらも OIDC（`sakekasu-github-oidc` スタックの deploy ロール）。リポジトリにアクセスキーは置かない
 
 ワークフローを2つに分けているのは、`paths` がワークフロー単位でしか効かないため。1つにまとめると、片方だけの変更でもう片方のデプロイまで走る。
+
+### アカウント ID の渡し方
+
+公開リポジトリなので、AWS アカウント ID はリポジトリに書かない（[sakekasu-builder-archive#106](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/106)）。`infra/__tests__/no-account-ids.test.ts` が、ダミー以外の 12 桁の数字が入ると落ちる。
+
+| 使う場所 | 渡し方 |
+| --- | --- |
+| Actions（deploy / cdk-diff / deploy-site / deploy-sommelier） | リポジトリの secret `AWS_ACCOUNT_ID`（Settings → Secrets and variables → Actions） |
+| CDK（`infra/`、`sommelier/agentcore/cdk/`） | `CDK_DEFAULT_ACCOUNT`。手元の `cdk deploy` / `cdk diff` では CDK CLI が認証情報から入れる |
+| 証明書（`infra/cdk.json`） | `siteCertificateId` に ID だけを置き、ARN はアカウントと組み合わせて作る |
+| 画面のソムリエ | ビルド時の `VITE_SOMMELIER_RUNTIME_ARN`（`deploy-site.yml` が secret から組み立てる） |
+| AWS 確認用の verify プロファイル | クラウド環境の Environment variables の `SSO_ACCOUNT_ID`（`scripts/aws-verify.conf`） |
+| `sakekasu-billing-notifier` | `-c appAccount` か環境変数 `APP_ACCOUNT_ID` |
 
 例外として、以下は今までどおり手動デプロイする:
 

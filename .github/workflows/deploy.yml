@@ -30,7 +30,11 @@ env:
   # cdkd が直接読む。AWS への操作はこのロールで行われる。
   # CDK CLI の cdk-hnb659fds-* ロールは cdkd では使えない（CloudFormation を
   # 経由せず生の API を叩くため、必要な権限が別物になる）
-  CDKD_ROLE_ARN: arn:aws:iam::<アプリのアカウント ID>:role/sakekasu-cdkd-deploy
+  #
+  # アカウント ID はリポジトリに書かず、secrets.AWS_ACCOUNT_ID から組み立てる
+  # （公開リポジトリなので。Issue sakekasu-builder-archive#106）。secrets の値は
+  # Actions のログで自動的に伏せられる
+  CDKD_ROLE_ARN: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sakekasu-cdkd-deploy
   # 認証情報を入れる前に済ませた合成結果を使わせる。これを外すと cdkd が
   # 自分で合成し直し、CDK アプリのコードが認証情報付きで走ることになる
   CDKD_APP: cdk.out
@@ -91,12 +95,16 @@ jobs:
         # 認証ありで合成した場合と別物のテンプレートになる。明示しておけば
         # 両者が一致する（Issue #131 に記録のある落とし穴）
         env:
-          CDK_DEFAULT_ACCOUNT: '<アプリのアカウント ID>'
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           # DevOps Agent のスタックは Agent Space の ARN があるときだけ合成される（bin/app.ts）。
           # ARN は運用ツール用アカウントの ID を含むのでリポジトリに書かず、secrets から渡す。
           # 未設定のまま合成すると、そのスタックだけ黙って更新されなくなるので止める
           AGENT_SPACE_ARN: ${{ secrets.AGENT_SPACE_ARN }}
         run: |
+          if [ -z "$CDK_DEFAULT_ACCOUNT" ]; then
+            echo "::error::secrets.AWS_ACCOUNT_ID が未設定。リポジトリの Settings → Secrets and variables → Actions に入れる（README の「デプロイ」）"
+            exit 1
+          fi
           if [ -z "$AGENT_SPACE_ARN" ]; then
             echo "::error::secrets.AGENT_SPACE_ARN が未設定。リポジトリの Settings → Secrets and variables → Actions に入れる（docs/devops-agent.md）"
             exit 1
@@ -106,7 +114,7 @@ jobs:
           npx cdk synth --all -q
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: arn:aws:iam::<アプリのアカウント ID>:role/sakekasu-github-actions-deploy
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sakekasu-github-actions-deploy
           aws-region: ap-northeast-1
       # CloudFormation 管理のまま残っているスタックがあれば cdkd へ取り込む。
       # 取り込み済みなら何もしない（冪等）。前検査で1つでも引っかかれば、

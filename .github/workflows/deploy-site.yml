@@ -38,7 +38,8 @@ concurrency:
 
 env:
   # infra/lib/site-stack.ts の siteBucketName と同じ形
-  SITE_BUCKET: dev-sakekasu-site-<アプリのアカウント ID>
+  # アカウント ID はリポジトリに書かず、secrets から組み立てる（deploy.yml と同じ）
+  SITE_BUCKET: dev-sakekasu-site-${{ secrets.AWS_ACCOUNT_ID }}
 
 jobs:
   deploy:
@@ -71,14 +72,27 @@ jobs:
         if: steps.gate.outputs.enabled == 'true'
       - run: npx vitest run src/
         if: steps.gate.outputs.enabled == 'true'
-      - run: npm run build
+      # ソムリエの Runtime の ARN はアカウント ID を含むので、リポジトリに書かずここで
+      # 組み立ててビルドに渡す（src/features/sommelier/config.ts）。Runtime の ID は
+      # sommelier/agentcore/.cli/deployed-state.json（ローカル）か、AgentCore の
+      # コンソールで分かる。作り直したらここを直す
+      - name: ビルド
         if: steps.gate.outputs.enabled == 'true'
+        env:
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+        run: |
+          if [ -z "$AWS_ACCOUNT_ID" ]; then
+            echo "::error::secrets.AWS_ACCOUNT_ID が未設定。リポジトリの Settings → Secrets and variables → Actions に入れる（README の「デプロイ」）"
+            exit 1
+          fi
+          export VITE_SOMMELIER_RUNTIME_ARN="arn:aws:bedrock-agentcore:ap-northeast-1:${AWS_ACCOUNT_ID}:runtime/sommelier_sommelier-Cn5eM865GE"
+          npm run build
       # 配信バケットへ置くだけのロール。cdkd のロールにも CloudFront にも届かない
       # （infra/lib/github-oidc-stack.ts の SiteDeployRole）
       - uses: aws-actions/configure-aws-credentials@v6
         if: steps.gate.outputs.enabled == 'true'
         with:
-          role-to-assume: arn:aws:iam::<アプリのアカウント ID>:role/sakekasu-github-actions-site
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sakekasu-github-actions-site
           aws-region: us-east-1
       # 置く順番に意味がある。
       #
