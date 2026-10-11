@@ -145,4 +145,50 @@ describe('AuthProvider の signOut', () => {
     expect(mockSignOut).toHaveBeenCalledTimes(1);
     expect(result.current.user).toBeNull();
   });
+
+  // テスト環境の window は localhost。手元では自分の / に戻す
+  it('localhost では戻り先に自分の / を渡す', async () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isAuthenticated).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.signOut();
+    });
+
+    expect(mockSignOut).toHaveBeenCalledWith({
+      global: false,
+      oauth: { redirectUrl: `${window.location.origin}/` },
+    });
+  });
+
+  // 本番では Cognito の /logout を経て共通の入口へ帰す。別オリジンの戻り先は
+  // 明示しないと Amplify が選ばない（invalidOriginException）ので、signOut に渡す
+  it('本番では戻り先に共通の入口を渡す', async () => {
+    const original = window.location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: new URL('https://sake.sakekasu-builder.com/'),
+    });
+    try {
+      const { result } = renderHook(() => useAuth(), { wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isAuthenticated).toBe(true);
+      });
+
+      await act(async () => {
+        await result.current.signOut();
+      });
+
+      expect(mockSignOut).toHaveBeenCalledWith({
+        global: false,
+        oauth: { redirectUrl: 'https://sakekasu-builder.com/' },
+      });
+    } finally {
+      Object.defineProperty(window, 'location', { configurable: true, value: original });
+    }
+  });
 });

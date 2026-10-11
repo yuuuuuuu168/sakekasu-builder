@@ -20,6 +20,7 @@ import {
 import { clearFilterState } from '@/features/records/lib/filterStorage';
 import { clearDownloadUrlCache } from '@/features/image/lib/downloadUrlCache';
 import { consumeSsoHint } from './ssoHint';
+import { signOutRedirectUrl } from './amplifyConfig';
 
 /**
  * 認証済みユーザーの型。
@@ -178,10 +179,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       // OAuth の設定があるので、トークンを捨てたあとマネージドログインの
-      // /logout へ移り、戻り先（このオリジンの /）へ帰ってくる。
-      // マネージドログイン側のセッションも切れるので、同じブラウザで開いている
-      // 他のアプリも、次にトークンを取り直すときはログインからやり直しになる
-      await amplifySignOut();
+      // /logout へ移る。マネージドログイン側のセッションも切れるので、同じブラウザで
+      // 開いている他のアプリも、次にトークンを取り直すときはログインからやり直しになる。
+      // だから戻り先は、本番ではこのアプリではなく共通の入口にする（手元は自分の /）。
+      // 別オリジンの戻り先は明示しないと Amplify が選ばないので、ここで渡す
+      await amplifySignOut({
+        global: false,
+        oauth: { redirectUrl: signOutRedirectUrl(window.location.origin) },
+      });
     } finally {
       // 上の通信を待つ間に書き戻されたものを、画面を落とす直前にもう一度消す。
       // 絞り込み条件は画面側の effect が、相談の表示キャッシュとセッション ID は
