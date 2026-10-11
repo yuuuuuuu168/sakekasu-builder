@@ -36,7 +36,9 @@
         { "name": "ANTHROPIC_FEDERATION_RULE_ID", "value": "fdrl_01Tqxpf4VMtFM2fiCuGndsw3" },
         { "name": "ANTHROPIC_ORGANIZATION_ID", "value": "c155ee76-4f2a-4282-aae0-a453dd5145af" },
         { "name": "ANTHROPIC_SERVICE_ACCOUNT_ID", "value": "svac_01AZtWEtET1fTHKpwvVcMkQS" },
-        { "name": "ANTHROPIC_WORKSPACE_ID", "value": "wrkspc_01RTpiayq3B1SM6Ap151XkLY" }
+        { "name": "ANTHROPIC_WORKSPACE_ID", "value": "wrkspc_01RTpiayq3B1SM6Ap151XkLY" },
+        { "name": "CHAT_QUOTA_TABLE_NAME", "value": "dev-sakekasu-sommelier-chat-quota" },
+        { "name": "CHAT_DAILY_LIMIT", "value": "50" }
       ]
     }
   ],

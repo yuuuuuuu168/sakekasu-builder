@@ -47,6 +47,7 @@ from conversation_memory import (
     load_conversation_memory,
 )
 from model.load import fallback_reason, load_models, root_error
+from quota import QuotaResult, consume as consume_quota, daily_limit
 from web_search import MAX_SNIPPET_LENGTH, MAX_TITLE_LENGTH, load_web_search
 
 app = BedrockAgentCoreApp()
@@ -1121,6 +1122,17 @@ async def invoke(payload, context):
         if len(prompt) > MAX_PROMPT_LENGTH:
             yield f"相談内容が長すぎます。{MAX_PROMPT_LENGTH}文字以内でお願いします。"
             return
+
+    # モデルを呼ぶ前に、今日の相談の回数を数える（quota.py）。入力の誤りで断った相談は数えない
+    quota = await asyncio.to_thread(consume_quota, owner_sub)
+    if quota is QuotaResult.EXCEEDED:
+        log.info("1 日の上限に達したため断りました")
+        yield f"今日の相談回数の上限（{daily_limit()}回）に達しました。明日（日本時間の 0 時以降）にまたお試しください。"
+        return
+    if quota is QuotaResult.UNAVAILABLE:
+        # 数えられないときは上限を守れないので、モデルを呼ばない（費用の上限を優先する）
+        yield "ただいま相談を受け付けられません。時間をおいてもう一度お試しください。"
+        return
 
     # ツールとシステムプロンプトは同じ判断で組み立てる。それぞれが別々に
     # 設定を読むと、「検索ツールは渡したが、検索結果を指示として扱わない
