@@ -26,8 +26,9 @@ const app = new cdk.App();
 //
 // Application Signals の SLO にも付けない。cdkd は SLO を Cloud Control API で更新し、その途中で
 // application-signals:GetServiceLevelObjective を呼ぶが、cdkd 用ロールにその権限が無く断られる
-// （2026-10-04、sakekasu-dev-monitoring のデプロイが失敗してロールバックした）。ロールの権限を
-// 足すには OIDC スタックを手でデプロイする必要があるので、タグのためにはそこまでしない
+// （2026-10-04、sakekasu-dev-monitoring のデプロイが失敗してロールバックした）。
+// 権限が無かったのは、cdkd-policies.ts が接頭辞を `applicationsignals:` と書いていたため（2026-10 に直した）。
+// 直した権限は OIDC スタックを手でデプロイしたあとに効く。それを確かめるまで、ここは外したままにする
 cdk.Tags.of(app).add('App', 'builder', {
   excludeResourceTypes: ['AWS::IAM::Role', 'AWS::ApplicationSignals::ServiceLevelObjective'],
 });
