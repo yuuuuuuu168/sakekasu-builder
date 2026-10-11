@@ -23,7 +23,9 @@
 
 import asyncio
 import base64
+import copy
 import html
+import json
 import os
 import threading
 import time
@@ -44,7 +46,7 @@ from conversation_memory import (
     MAX_PREFERENCE_TEXT_LENGTH,
     load_conversation_memory,
 )
-from model.load import load_model
+from model.load import fallback_reason, load_models, root_error
 from web_search import MAX_SNIPPET_LENGTH, MAX_TITLE_LENGTH, load_web_search
 
 app = BedrockAgentCoreApp()
@@ -577,12 +579,46 @@ def _build_system_prompt(
     Web 検索の節は、実際にツールを渡すときだけ足す。search_enabled を
     省略したときは今の設定（API キーの有無）に従う。
     """
+    return _static_system_prompt(search_enabled, today) + _preference_section(preferences)
+
+
+def _build_system_prompt_blocks(
+    preferences: list, search_enabled: Optional[bool] = None, today=None
+) -> list:
+    """Claude API 向けに、システムプロンプトをキャッシュの区切りつきの塊で返す。
+
+    中身は _build_system_prompt と同じ。毎回同じ前半（指示・今日の日付・検索の節）の後ろに
+    cachePoint を置き、相談ごとに変わる好みはその後ろに回す。区切りより前は日付が変わるまで
+    同じなので、記録を引く tool を挟んでモデルを呼び直すたびにキャッシュから読まれる。
+
+    Bedrock には渡さない（控えの旧モデルはこの長さではキャッシュが効かず、形を変える理由が無い）
+    """
+    blocks = [
+        {"text": _static_system_prompt(search_enabled, today)},
+        {"cachePoint": {"type": "default"}},
+    ]
+    section = _preference_section(preferences)
+    if section:
+        blocks.append({"text": section})
+    return blocks
+
+
+def _static_system_prompt(search_enabled: Optional[bool] = None, today=None) -> str:
+    """システムプロンプトのうち、相談の内容によらない前半（指示・今日の日付・検索の節）"""
     if search_enabled is None:
         search_enabled = _web_search.enabled
     base = SYSTEM_PROMPT + _today_section(today)
     if search_enabled:
         base += _SEARCH_PROMPT_SECTION
+    return base
 
+
+def _preference_section(preferences: list) -> str:
+    """学習済みの好みの節。好みが無ければ空文字。
+
+    好みは LLM がユーザー入力から抽出した文章なので、ツール結果と同じ
+    無害化を通し、1行に畳んでから <user_data> で囲んで渡す。
+    """
     lines = []
     for preference in preferences:
         if not isinstance(preference, str):
@@ -600,8 +636,8 @@ def _build_system_prompt(
         lines.append(f"- <user_data>{safe[:MAX_PREFERENCE_TEXT_LENGTH]}</user_data>")
 
     if not lines:
-        return base
-    return base + _PREFERENCE_PROMPT_HEADER + "\n".join(lines) + "\n"
+        return ""
+    return _PREFERENCE_PROMPT_HEADER + "\n".join(lines) + "\n"
 
 
 def _to_plain(value):
@@ -966,6 +1002,66 @@ def _build_history(raw) -> list:
     return messages
 
 
+def _model_id(model) -> Optional[str]:
+    """ログに出すモデル ID。Strands のモデルなら get_config で取れる"""
+    try:
+        return model.get_config().get("model_id")
+    except Exception:
+        return None
+
+
+def _log_usage(provider: str, model, result, started: float) -> None:
+    """1 回の相談で使ったトークン数を 1 行の JSON で残す。
+
+    CloudWatch Logs Insights で呼び先ごとのトークン数・キャッシュの効き・時間を集計するため。
+    相談の中身と応答は出さない。数字が取れなければ何も出さない（相談には影響させない）
+    """
+    try:
+        usage = result.metrics.accumulated_usage
+        entry = {
+            "feature": "sommelier",
+            "provider": provider,
+            "model": _model_id(model),
+            "ms": int((time.monotonic() - started) * 1000),
+            "stopReason": str(getattr(result, "stop_reason", None)),
+            "usage": {
+                "input": usage.get("inputTokens", 0),
+                "output": usage.get("outputTokens", 0),
+                "cacheRead": usage.get("cacheReadInputTokens", 0),
+                "cacheWrite": usage.get("cacheWriteInputTokens", 0),
+            },
+        }
+    except Exception:
+        return
+    log.info("[llm] usage %s", json.dumps(entry, ensure_ascii=False))
+
+
+def _log_fallback(provider: str, reason: str, error: BaseException) -> None:
+    """Claude API から Bedrock へ回したことを残す。
+
+    文言は OCR・テイスティングノート（infra/lambda/shared/llm.ts）と揃える。CloudWatch Logs の
+    メトリクスフィルタで「[llm] fallback」を数えられるよう、fallback=true を含む 1 行の JSON にする
+    """
+    error = root_error(error)
+    status = getattr(error, "status_code", None)
+    log.warning(
+        "[llm] fallback %s",
+        json.dumps(
+            {
+                "fallback": True,
+                "feature": "sommelier",
+                "from": provider,
+                "to": "bedrock",
+                "errorType": reason,
+                "status": status if isinstance(status, int) else None,
+                # 本文が長いエラーもあるので切る。相談の中身は SDK のエラーには入らない
+                "message": str(error)[:300],
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+
 @app.entrypoint
 async def invoke(payload, context):
     log.info("Invoking sommelier agent")
@@ -1049,15 +1145,8 @@ async def invoke(payload, context):
     )
     history = _build_history(history_messages)
 
-    agent = Agent(
-        model=load_model(),
-        system_prompt=_build_system_prompt(preferences, search_enabled=search_enabled),
-        tools=tools,
-        messages=history,
-    )
-
-    # 画像がある場合は Converse 形式の content block 列として渡す
-    # （Strands の BedrockModel は image ブロックをそのまま扱える）
+    # 画像がある場合は Strands の content block 列として渡す
+    # （BedrockModel も AnthropicModel も image ブロックをそのまま扱える）
     if image_blocks:
         agent_input = [{"text": prompt}, *image_blocks]
     else:
@@ -1068,14 +1157,50 @@ async def invoke(payload, context):
     reply_parts = []
     reply_length = 0
 
-    stream = agent.stream_async(agent_input)
-    async for event in stream:
-        if "data" in event and isinstance(event["data"], str):
-            chunk = event["data"]
-            if reply_length < MAX_EVENT_TEXT_LENGTH:
-                reply_parts.append(chunk)
-                reply_length += len(chunk)
-            yield chunk
+    # 呼び先は Claude API が先、Bedrock が控え（model/load.py）。Claude API が
+    # クレジット切れ・認証・障害で失敗したら、同じ相談を Bedrock でやり直す。
+    #
+    # やり直すのは応答を 1 文字も返していないときだけ。途中まで返した後にやり直すと、
+    # 利用者には同じ答えが二重に届く。途中で切れたものは従来どおり失敗として終える。
+    # 記録を引く tool は読み取り専用なので、やり直しで 2 回呼ばれても害は無い。
+    # 検索の回数の上限は tools ごとに数えているので、やり直しをまたいでも増えない
+    models = load_models()
+    for attempt, (provider, model) in enumerate(models):
+        agent = Agent(
+            model=model,
+            system_prompt=(
+                _build_system_prompt_blocks(preferences, search_enabled=search_enabled)
+                if provider == "anthropic"
+                else _build_system_prompt(preferences, search_enabled=search_enabled)
+            ),
+            tools=tools,
+            # Agent は渡した履歴に今回のやり取りを書き足す。やり直す側に
+            # 失敗した側の書きかけが混ざらないよう、毎回写しを渡す
+            messages=copy.deepcopy(history),
+            # Claude API では Strands の再試行（429 で最大 6 回、数分待つ）を止める。
+            # 待つより Bedrock でやり直したほうが早く答えられる
+            **({"retry_strategy": None} if provider == "anthropic" else {}),
+        )
+        started = time.monotonic()
+        streamed = False
+        try:
+            async for event in agent.stream_async(agent_input):
+                if "data" in event and isinstance(event["data"], str):
+                    chunk = event["data"]
+                    streamed = True
+                    if reply_length < MAX_EVENT_TEXT_LENGTH:
+                        reply_parts.append(chunk)
+                        reply_length += len(chunk)
+                    yield chunk
+                elif "result" in event:
+                    _log_usage(provider, model, event["result"], started)
+            break
+        except Exception as err:
+            is_last = attempt == len(models) - 1
+            reason = None if streamed or is_last else fallback_reason(err)
+            if reason is None:
+                raise
+            _log_fallback(provider, reason, err)
 
     # 今回のやり取りを記憶に残す（次のリクエストで読み戻す会話履歴と、
     # 次の相談で引き当てる好みの、両方の材料になる）。

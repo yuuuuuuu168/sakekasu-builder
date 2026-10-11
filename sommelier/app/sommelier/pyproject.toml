@@ -11,13 +11,21 @@ requires-python = ">=3.10"
 # デプロイの梱包は uv.lock を見ず、ここの指定から入れる（下の dev の説明を参照）。
 # 本番に載る版の歯止めは下限だけなので、既知の脆弱性が直った版を下限にしておく。
 # pyjwt はトークン検証の要（Issue sakekasu-builder-archive#216）
+#
+# Claude API への切り替えで下限を上げたもの（model/load.py）:
+# - strands-agents[anthropic]: AnthropicModel のプロンプトキャッシュ（CacheConfig）と、
+#   再試行を止める retry_strategy=None
+# - anthropic: API キーを持たずに入る WorkloadIdentityCredentials。strands-agents[anthropic] が
+#   1.0 未満に固定しているので、0.x の中で ID 連携が入っている版を下限にする
+# - boto3 / botocore: STS の GetWebIdentityToken
 dependencies = [
+    "anthropic >= 0.125.0",
     "aws-opentelemetry-distro",
     "bedrock-agentcore>=1.18.1",
-    "boto3 >= 1.35.0",
-    "botocore[crt] >= 1.35.0",
+    "boto3 >= 1.43.0",
+    "botocore[crt] >= 1.43.0",
     "pyjwt[crypto] >= 2.15.0",
-    "strands-agents >= 1.13.0",
+    "strands-agents[anthropic] >= 1.59.0",
 ]
 
 [dependency-groups]

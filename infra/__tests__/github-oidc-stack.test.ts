@@ -360,6 +360,32 @@ describe('GithubOidcStack', () => {
     }
   });
 
+  // cdkd はロールを消すとき、GetRole → 管理ポリシーを外す → インラインポリシーを消す →
+  // インスタンスプロファイルから外す → DeleteRole の順に呼ぶ。どれか 1 つでも許可が欠けると、
+  // ロールを作り替えたデプロイが古いロールを消す段で止まる。その時点で古いロールの権限は
+  // 先に消えていて巻き戻せないため、関数がロールの権限なしで残る
+  // （2026-10-11、iam:ListInstanceProfilesForRole が無くて実際に起きた）
+  it('cdkd のデプロイロールはアプリのロールを最後まで消せる', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+    for (const action of [
+      'iam:GetRole',
+      'iam:ListAttachedRolePolicies',
+      'iam:DetachRolePolicy',
+      'iam:ListRolePolicies',
+      'iam:DeleteRolePolicy',
+      'iam:ListInstanceProfilesForRole',
+      'iam:DeleteRole',
+    ]) {
+      const granting = statements.filter(
+        (s) =>
+          s.Effect === 'Allow' &&
+          toArray(s.Action).includes(action) &&
+          toArray(s.Resource).includes(`arn:aws:iam::${ACCOUNT}:role/sakekasu-*`),
+      );
+      expect(granting.length, `${action} がアプリのロールに許可されていない`).toBeGreaterThan(0);
+    }
+  });
+
   it('cdkd のデプロイロールは信頼ポリシーを書き換えられない', () => {
     const statements = statementsFor(template, /^CdkdDeployRole/);
 

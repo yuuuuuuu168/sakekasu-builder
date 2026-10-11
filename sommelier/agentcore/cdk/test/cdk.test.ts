@@ -313,3 +313,71 @@ describe('Web 検索の API キー', () => {
     ).toEqual([]);
   });
 });
+
+// Claude API への切り替え。Claude Console のフェデレーションルールはロールの ARN の前方一致
+// （sakekasu-dev-llm-）で照合するので、名前がずれるとエラーにならないまま毎回 Bedrock へ回る。
+// ID トークンの権限は、ID 連携の値を渡したときだけ、宛先を Anthropic に絞って付ける
+describe('Claude API の呼び出し', () => {
+  test('実行ロールの名前を sakekasu-dev-llm-sommelier に固定する', () => {
+    const roles = synthesizeProject().findResources('AWS::BedrockAgentCore::Runtime');
+    const [runtime] = Object.values(roles) as { Properties: { RoleArn: { 'Fn::GetAtt': [string, string] } } }[];
+    const roleLogicalId = runtime.Properties.RoleArn['Fn::GetAtt'][0];
+    const role = synthesizeProject().findResources('AWS::IAM::Role')[roleLogicalId] as {
+      Properties: { RoleName?: string };
+    };
+    expect(role.Properties.RoleName).toBe('sakekasu-dev-llm-sommelier');
+  });
+
+  test('呼び先とモデルをエージェントの環境変数として渡す', () => {
+    const runtimes = synthesizeProject().findResources('AWS::BedrockAgentCore::Runtime');
+    const [envVars] = Object.values(runtimes).map(
+      (runtime) => (runtime as { Properties?: { EnvironmentVariables?: Record<string, unknown> } })
+        .Properties?.EnvironmentVariables ?? {}
+    );
+    // model/load.py の read_llm_config が読む名前と一致させること
+    expect(envVars).toMatchObject({
+      LLM_PROVIDER: 'anthropic',
+      ANTHROPIC_MODEL_CHAT: 'claude-haiku-5-5',
+      BEDROCK_MODEL_ID: 'jp.anthropic.claude-haiku-4-5-20251001-v1:0',
+    });
+  });
+
+  test('ID 連携の値が無ければ ID トークンの権限を付けない', () => {
+    const spec = readProjectSpec();
+    const hasFederation = spec.runtimes?.some(r => r.envVars?.some(v => v.name === 'ANTHROPIC_FEDERATION_RULE_ID'));
+    const statements = statementsAllowing('sts:GetWebIdentityToken');
+    if (hasFederation) {
+      expect(statements).toHaveLength(1);
+    } else {
+      expect(statements).toEqual([]);
+    }
+  });
+
+  test('ID 連携の値があれば、Anthropic 宛ての ID トークンだけを取れる', () => {
+    const spec = readProjectSpec();
+    for (const runtime of spec.runtimes ?? []) {
+      runtime.envVars = [
+        ...(runtime.envVars ?? []).filter(v => !v.name.startsWith('ANTHROPIC_FEDERATION')),
+        { name: 'ANTHROPIC_FEDERATION_RULE_ID', value: 'fdrl_test' },
+      ];
+    }
+    const template = Template.fromStack(new AgentCoreStack(new cdk.App(), 'FederationStack', { spec }));
+    const statements = Object.values(template.findResources('AWS::IAM::Policy') as Record<string, IamResource>)
+      .flatMap((resource) => resource.Properties?.PolicyDocument?.Statement ?? [])
+      .filter((s) => s.Effect === 'Allow' && actionsOf(s).some((a) => grants(a, 'sts:GetWebIdentityToken')));
+
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toMatchObject({
+      Action: 'sts:GetWebIdentityToken',
+      Condition: {
+        'ForAllValues:StringEquals': { 'sts:IdentityTokenAudience': ['https://api.anthropic.com'] },
+        NumericLessThanEquals: { 'sts:DurationSeconds': 300 },
+        StringEquals: { 'sts:SigningAlgorithm': 'RS256' },
+      },
+    });
+    // AssumeRole など、別のロールに成り代わる権限は付けない
+    for (const action of ['sts:AssumeRole', 'sts:GetFederationToken', 'sts:GetSessionToken']) {
+      expect(statements.filter((s) => actionsOf(s).some((a) => grants(a, action)))).toEqual([]);
+    }
+  });
+});

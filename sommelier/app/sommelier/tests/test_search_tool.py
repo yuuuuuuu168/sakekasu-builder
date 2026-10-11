@@ -245,7 +245,7 @@ class Testツールと注意書きの一致:
         from tests.test_invoke_memory import FakeAgent, FakeContext
 
         monkeypatch.setattr(main, "Agent", FakeAgent)
-        monkeypatch.setattr(main, "load_model", lambda: object())
+        monkeypatch.setattr(main, "load_models", lambda: [("bedrock", object())])
         monkeypatch.setattr(main, "_get_owner_sub", lambda context: OWNER_SUB)
         monkeypatch.setattr(main, "_web_search", FakeWebSearch())
 

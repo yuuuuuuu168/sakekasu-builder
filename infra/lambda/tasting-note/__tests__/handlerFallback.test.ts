@@ -11,15 +11,10 @@ const { mockSend, mockSearchSake } = vi.hoisted(() => ({
   mockSearchSake: vi.fn(),
 }));
 
-vi.mock('@aws-sdk/client-bedrock-runtime', () => ({
-  BedrockRuntimeClient: class {
-    send = mockSend;
-  },
-  InvokeModelCommand: class {
-    constructor(input: Record<string, unknown>) {
-      Object.assign(this, input);
-    }
-  },
+// Claude API か Bedrock かは呼び出し口（lambda/shared/llm.ts）の中の話で、そちらのテストで見る。
+// ここでは「何回、どんな頼み方で呼んだか」だけを見る
+vi.mock('../../shared/llm', () => ({
+  createLlmClient: () => ({ callTool: mockSend }),
 }));
 
 vi.mock('../webSearch.js', () => ({
@@ -28,15 +23,13 @@ vi.mock('../webSearch.js', () => ({
 
 import { buildSearchQueries, handler } from '../index.js';
 
-/** Bedrock の応答を組み立てる */
-function bedrockResponse(input: Record<string, unknown>) {
+/** モデルの応答を組み立てる */
+function modelResponse(input: Record<string, unknown>) {
   return {
-    body: new TextEncoder().encode(
-      JSON.stringify({
-        content: [{ type: 'tool_use', name: 'record_tasting_note', input }],
-        stop_reason: 'tool_use',
-      }),
-    ),
+    content: [{ type: 'tool_use', name: 'record_tasting_note', input }],
+    stopReason: 'tool_use',
+    provider: 'anthropic',
+    model: 'claude-haiku-5-5',
   };
 }
 
@@ -59,11 +52,10 @@ function event(sakeName: string, category: string) {
 describe('handler の Web 検索フォールバック', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.BEDROCK_MODEL_ID = 'jp.anthropic.claude-haiku-4-5-20251001-v1:0';
   });
 
   it('学習知識で書けたら検索しない', async () => {
-    mockSend.mockResolvedValueOnce(bedrockResponse(KNOWN));
+    mockSend.mockResolvedValueOnce(modelResponse(KNOWN));
 
     const result = await handler(event('山崎 12年', 'WHISKY'));
 
@@ -74,9 +66,9 @@ describe('handler の Web 検索フォールバック', () => {
 
   it('知らない銘柄では検索して書き直す', async () => {
     mockSend
-      .mockResolvedValueOnce(bedrockResponse(UNKNOWN))
+      .mockResolvedValueOnce(modelResponse(UNKNOWN))
       .mockResolvedValueOnce(
-        bedrockResponse({
+        modelResponse({
           isKnown: true,
           tastingNote: '華やかな吟醸香と、米の甘み',
           recommendedServing: null,
@@ -94,13 +86,13 @@ describe('handler の Web 検索フォールバック', () => {
   // 検索結果はプロンプトに <web_data> で囲んで入れる。指示ではなく資料として渡す
   it('検索結果をプロンプトへ資料として入れる', async () => {
     mockSend
-      .mockResolvedValueOnce(bedrockResponse(UNKNOWN))
-      .mockResolvedValueOnce(bedrockResponse(UNKNOWN));
+      .mockResolvedValueOnce(modelResponse(UNKNOWN))
+      .mockResolvedValueOnce(modelResponse(UNKNOWN));
     mockSearchSake.mockResolvedValueOnce([{ title: '蔵元', snippet: '山廃仕込みの純米酒' }]);
 
     await handler(event('地酒', 'NIHONSHU'));
 
-    const secondCall = JSON.parse(mockSend.mock.calls[1][0].body as string);
+    const secondCall = mockSend.mock.calls[1][0];
     const prompt = secondCall.messages[0].content[0].text as string;
     expect(prompt).toContain('<web_data>');
     expect(prompt).toContain('山廃仕込みの純米酒');
@@ -110,8 +102,8 @@ describe('handler の Web 検索フォールバック', () => {
   // 1本目で取れなかったときの受け皿。検索側が順に試す
   it('検索には条件の違うクエリを2本渡す', async () => {
     mockSend
-      .mockResolvedValueOnce(bedrockResponse(UNKNOWN))
-      .mockResolvedValueOnce(bedrockResponse(UNKNOWN));
+      .mockResolvedValueOnce(modelResponse(UNKNOWN))
+      .mockResolvedValueOnce(modelResponse(UNKNOWN));
     mockSearchSake.mockResolvedValueOnce([{ title: 't', snippet: 's' }]);
 
     await handler(event('山崎 12年', 'WHISKY'));
@@ -123,7 +115,7 @@ describe('handler の Web 検索フォールバック', () => {
   });
 
   it('検索できなければ1回目の結果をそのまま返す', async () => {
-    mockSend.mockResolvedValueOnce(bedrockResponse(UNKNOWN));
+    mockSend.mockResolvedValueOnce(modelResponse(UNKNOWN));
     mockSearchSake.mockResolvedValueOnce([]);
 
     const result = await handler(event('地酒', 'NIHONSHU'));
@@ -134,8 +126,8 @@ describe('handler の Web 検索フォールバック', () => {
 
   it('検索しても書けなければ空で返す（作り話をしない）', async () => {
     mockSend
-      .mockResolvedValueOnce(bedrockResponse(UNKNOWN))
-      .mockResolvedValueOnce(bedrockResponse(UNKNOWN));
+      .mockResolvedValueOnce(modelResponse(UNKNOWN))
+      .mockResolvedValueOnce(modelResponse(UNKNOWN));
     mockSearchSake.mockResolvedValueOnce([{ title: '別の酒', snippet: '関係のない話' }]);
 
     const result = await handler(event('地酒', 'NIHONSHU'));
@@ -143,7 +135,7 @@ describe('handler の Web 検索フォールバック', () => {
     expect(result).toEqual({ tastingNote: null, recommendedServing: null });
   });
 
-  // 対象外カテゴリは Bedrock も検索も呼ばずに落とす（1回が課金につながるため）
+  // 対象外カテゴリはモデルも検索も呼ばずに落とす（1回が課金につながるため）
   it('対象外カテゴリでは何も呼ばない', async () => {
     await expect(handler(event('よなよなエール', 'BEER'))).rejects.toThrow(
       'Tasting notes are only available for WHISKY and NIHONSHU',

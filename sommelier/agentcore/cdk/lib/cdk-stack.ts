@@ -33,6 +33,31 @@ const SEARCH_API_KEY_SECRET_ENV_NAME = 'TAVILY_API_KEY_SECRET_ID';
  */
 const SECRET_NAME_PATTERN = /^[a-zA-Z0-9/_+=.@-]{1,512}$/;
 
+/**
+ * Runtime の実行ロールの名前の頭。Claude Console のフェデレーションルールが、ロールの ARN の
+ * 前方一致（`arn:aws:iam::<アカウントID>:role/sakekasu-dev-llm-`）で照合する。
+ * infra 側の OCR・テイスティングノートのロール（infra/lib/anthropic-federation.ts の
+ * llmRoleNamePrefix）と頭を揃え、1 つのルールで 3 つとも通す。
+ *
+ * L3 コンストラクトに任せると名前の末尾が乱数になり、作り直しで変わるので固定する。
+ * `dev` を決め打ちしているのは、このプロジェクトが dev のテーブル（agentcore.json の
+ * PURCHASE_TABLE_NAME など）だけを指す 1 環境の構成だから
+ */
+const LLM_ROLE_NAME_PREFIX = 'sakekasu-dev-llm-';
+
+/**
+ * Claude API に入るための ID 連携のルール ID を渡す環境変数名（model/load.py が読む）。
+ * agentcore.json にこれがあるときだけ、STS の ID トークンの権限を付ける
+ */
+const FEDERATION_RULE_ENV_NAME = 'ANTHROPIC_FEDERATION_RULE_ID';
+
+/**
+ * STS に頼む ID トークン（JWT）の宛先と寿命。model/load.py の IDENTITY_TOKEN_AUDIENCE /
+ * IDENTITY_TOKEN_SECONDS と揃える。ずれると交換に使う JWT が取れず、毎回 Bedrock へ回る
+ */
+const IDENTITY_TOKEN_AUDIENCE = 'https://api.anthropic.com';
+const IDENTITY_TOKEN_SECONDS = 300;
+
 export interface AgentCoreStackProps extends StackProps {
   /**
    * The AgentCore project specification containing agents, memories, and credentials.
@@ -120,6 +145,37 @@ export class AgentCoreStack extends Stack {
             // GSI 経由で読むためインデックスも対象にするが、実際に使う
             // owner-index だけに限定する（今後 GSI が増えても自動で広がらない）
             resources: [tableArn, `${tableArn}/index/${OWNER_INDEX_NAME}`],
+          })
+        );
+      }
+
+      // 実行ロールの名前を固定する（LLM_ROLE_NAME_PREFIX の説明を参照）。
+      // L3 コンストラクトは名前を受け取らないので、下の CfnRole に直接書く
+      const cfnRole = environment.runtime.role.node.defaultChild;
+      if (!(cfnRole instanceof iam.CfnRole)) {
+        throw new Error(
+          `エージェント "${agent.name}" の実行ロールが外から渡されているため、名前を固定できません` +
+            '（Claude Console のルールがロール名で照合するので、名前の決まったロールが要る）'
+        );
+      }
+      cfnRole.roleName = `${LLM_ROLE_NAME_PREFIX}${agent.name}`;
+
+      // Claude API に入るための ID トークン（JWT）を STS からもらう権限。宛先は Anthropic だけ、
+      // 寿命は model/load.py が頼む長さまで、署名は RS256 に絞る。JWT は短命で、Anthropic の側でも
+      // ルール（発行者・ロールの ARN・宛先）に合うものしか交換されない。
+      // ID 連携の値が無い構成では付けない（Bedrock だけで動くので要らない）。
+      // Bedrock の呼び出し権限は L3 コンストラクトが付けたまま残す（フォールバック用）
+      if (agent.envVars?.some(v => v.name === FEDERATION_RULE_ENV_NAME)) {
+        environment.runtime.role.addToPrincipalPolicy(
+          new iam.PolicyStatement({
+            actions: ['sts:GetWebIdentityToken'],
+            // GetWebIdentityToken はリソースを取らない
+            resources: ['*'],
+            conditions: {
+              'ForAllValues:StringEquals': { 'sts:IdentityTokenAudience': [IDENTITY_TOKEN_AUDIENCE] },
+              NumericLessThanEquals: { 'sts:DurationSeconds': IDENTITY_TOKEN_SECONDS },
+              StringEquals: { 'sts:SigningAlgorithm': 'RS256' },
+            },
           })
         );
       }

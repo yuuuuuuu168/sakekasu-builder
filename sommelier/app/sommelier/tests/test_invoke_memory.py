@@ -47,7 +47,7 @@ def agent_stub(monkeypatch):
     """認証とモデル呼び出しを差し替え、AWS へ出ない状態にする。"""
     FakeAgent.last_kwargs = None
     monkeypatch.setattr(main, "Agent", FakeAgent)
-    monkeypatch.setattr(main, "load_model", lambda: object())
+    monkeypatch.setattr(main, "load_models", lambda: [("bedrock", object())])
     monkeypatch.setattr(main, "_get_owner_sub", lambda context: OWNER_SUB)
     monkeypatch.setattr(main, "_build_tools", lambda owner_sub, search_enabled=None: [])
     return FakeAgent
