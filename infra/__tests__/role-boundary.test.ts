@@ -36,7 +36,6 @@ function buildApplicationStacks(): Array<{ name: string; template: Template }> {
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
     sommelierRuntimeArn:
       'arn:aws:bedrock-agentcore:ap-northeast-1:111111111111:runtime/sommelier_test-AAAAAAAAAA',
-    siteUrl: 'https://example.com',
     env,
   });
 

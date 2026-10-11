@@ -59,7 +59,7 @@ Agent Space は運用ツール専用のメンバーアカウント `ops-tooling`
 
 | 優先度 | 対象 |
 |--------|------|
-| CRITICAL | サイトが開けない、GraphQL が 5xx（`health-check-frontend`, `appsync-5xx`） |
+| CRITICAL | GraphQL が 5xx（`appsync-5xx`）。サイトが開けないことは共通基盤の外形監視が見ていて、ここには来ない |
 | HIGH | ソムリエ・OCR・記録の読み書きの故障、その他の外形監視 |
 | MEDIUM | 利用者から見えない失敗（通知の失敗、画像削除の失敗、監視の停止） |
 
