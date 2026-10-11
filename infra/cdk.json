@@ -19,6 +19,12 @@
       "domain": "auth.sakekasu-builder.com",
       "userPoolId": "ap-northeast-1_yw1VDKtxW",
       "clientId": "iuv75jactiu7ffumrj71khmen"
+    },
+    "anthropicFederation": {
+      "ruleId": "fdrl_01Tqxpf4VMtFM2fiCuGndsw3",
+      "organizationId": "c155ee76-4f2a-4282-aae0-a453dd5145af",
+      "serviceAccountId": "svac_01AZtWEtET1fTHKpwvVcMkQS",
+      "workspaceId": "wrkspc_01RTpiayq3B1SM6Ap151XkLY"
     }
   }
 }
