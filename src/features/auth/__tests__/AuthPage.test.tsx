@@ -6,7 +6,12 @@ const mockSignIn = vi.fn();
 let mockError: string | null = null;
 
 vi.mock('../AuthContext', () => ({
-  useAuth: () => ({ signIn: mockSignIn, error: mockError }),
+  useAuth: () => ({
+    signIn: mockSignIn,
+    error: mockError,
+    ssoAutoSignIn: false,
+    takeSsoAutoSignIn: () => false,
+  }),
 }));
 
 import { AuthPage } from '../components/AuthPage';
