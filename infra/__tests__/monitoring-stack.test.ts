@@ -21,38 +21,6 @@ function flattenJoin(value: unknown): string {
     .join(separator);
 }
 
-/**
- * トピックポリシーから、CloudWatch アラームの publish を許可している文を拾う。
- *
- * `Sid` では探さない。`Sid` を変えただけで「文が無い」と誤判定してしまい、
- * 本題と関係ない理由でテストが落ちるため。効くのは principal と action なので、
- * ポリシーの評価と同じ見方で拾う。
- */
-function cloudwatchPublishStatements(
-  template: Template,
-): Record<string, unknown>[] {
-  const policies = template.findResources("AWS::SNS::TopicPolicy");
-  return Object.values(policies)
-    .flatMap(
-      (p) =>
-        (p.Properties?.PolicyDocument?.Statement ?? []) as Record<
-          string,
-          unknown
-        >[],
-    )
-    .filter((st) => {
-      const principal = (st.Principal as { Service?: string | string[] })
-        ?.Service;
-      const services = Array.isArray(principal) ? principal : [principal];
-      const actions = Array.isArray(st.Action) ? st.Action : [st.Action];
-      return (
-        st.Effect === "Allow" &&
-        services.includes("cloudwatch.amazonaws.com") &&
-        actions.includes("sns:Publish")
-      );
-    });
-}
-
 function synth() {
   const app = new cdk.App();
   const env = { account: TEST_ACCOUNT, region: TEST_REGION };
@@ -70,7 +38,6 @@ function synth() {
     ocrFunction: apiStack.ocrAnalyzerFunction,
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
     sommelierRuntimeArn: RUNTIME_ARN,
-    siteUrl: "https://example.com",
     env,
   });
 
@@ -86,104 +53,30 @@ describe("MonitoringStack", () => {
     template = synth().template;
   });
 
-  it("アラートを流す SNS トピックがある", () => {
-    template.hasResourceProperties("AWS::SNS::Topic", {
-      TopicName: "dev-sakekasu-alerts",
-    });
+  it("自分の SNS トピックとトピックポリシーを持たない（送り先は共通基盤のトピック）", () => {
+    template.resourceCountIs("AWS::SNS::Topic", 0);
+    template.resourceCountIs("AWS::SNS::TopicPolicy", 0);
+    template.resourceCountIs("AWS::SNS::Subscription", 0);
   });
 
   /**
-   * トピックポリシーに明示的な文を1つでも置くと、SNS が暗黙に持っている
-   * 「所有アカウントからの publish を許可する」既定ポリシーが丸ごと消える。
-   * 以前は AWS Health のルールが events.amazonaws.com の文を作っていて、
-   * この置き換えが必ず起きていた。
+   * アラームの送り先は 4 アプリ共通のトピック（共通基盤の sakekasu-integrated-alerts）。
+   * Slack 通知と DevOps Agent への転送はそちらが持つ。CloudWatch からの publish を許すトピックポリシーも
+   * 共通基盤の側にある（共通基盤の lib/monitoring-stack.ts）。
    *
-   * 実際に一度これで壊れた。全アラームが鳴っても Slack に何も届かず、
-   * EventBridge 経由の AWS Health 通知だけが生きていたので気づけなかった。
-   * Health のルールは共通基盤へ移したが、また別の宛先を足したときに同じ壊れ方を
-   * しないよう、明示の許可は残してある。アラーム経路が無言で死ぬ壊れ方なので、
-   * テストで固定する。
+   * ARN は名前から組み立てる（共通基盤のスタックの出力を参照しない）。名前を書き違えると
+   * 合成もデプロイも通るのに、どこにも届かない
    */
-  it("トピックポリシーが CloudWatch アラームからの publish を許可している", () => {
-    expect(cloudwatchPublishStatements(template)).toHaveLength(1);
-  });
-
-  /**
-   * 条件はキー名だけでなく、演算子と値まで見る。
-   *
-   * キー名しか見ないと、次のどれも素通りしてしまう。
-   *
-   * - `aws:SourceAccount` が `*`（どのアカウントからでも publish できる）
-   * - 値が空文字（条件が実質無い）
-   * - `aws:SourceArn` を `ArnLike` ではなく `StringEquals` で書く
-   *
-   * 最後のものが特に厄介で、末尾の `*` がワイルドカードではなくただの文字に
-   * なるため、どのアラームにも一致せず配信が止まる。権限が無いのと同じ
-   * 「鳴っているのに届かない」状態、つまりこのテストが防ぎたい壊れ方そのもの。
-   *
-   * 逆に条件を足しすぎても届かなくなるので、過不足なく一致することを見る。
-   * ここを変えるときは、そのキーを CloudWatch が本当に渡すのかを確認すること。
-   */
-  it("CloudWatch への許可が、届く形の条件で絞られている", () => {
-    const [statement] = cloudwatchPublishStatements(template);
-    expect(statement).toBeDefined();
-
-    expect(statement.Condition).toEqual({
-      StringEquals: { "aws:SourceAccount": TEST_ACCOUNT },
-      ArnLike: {
-        "aws:SourceArn": `arn:aws:cloudwatch:${TEST_REGION}:${TEST_ACCOUNT}:alarm:*`,
-      },
-    });
-  });
-
-  /**
-   * 上の2つは、アラームが本当にこのトピックへ飛ぶ場合にだけ意味がある。
-   * 宛先が別トピックに差し替わったら、許可を足しても届かない。
-   */
-  it("アラームの通知先がそのトピックである", () => {
+  it("アラームの通知先が共通基盤のトピックである（発報も復旧も）", () => {
     const alarms = template.findResources("AWS::CloudWatch::Alarm");
     const alarmList = Object.values(alarms);
     expect(alarmList.length).toBeGreaterThan(0);
 
+    const shared = `arn:aws:sns:${TEST_REGION}:${TEST_ACCOUNT}:sakekasu-integrated-alerts`;
     for (const alarm of alarmList) {
-      expect(JSON.stringify(alarm.Properties?.AlarmActions)).toContain(
-        "AlertTopic",
-      );
+      expect(alarm.Properties?.AlarmActions).toEqual([shared]);
+      expect(alarm.Properties?.OKActions).toEqual([shared]);
     }
-  });
-
-  it("Slack 通知 Lambda がトピックを購読している", () => {
-    template.hasResourceProperties("AWS::SNS::Subscription", {
-      Protocol: "lambda",
-    });
-    template.hasResourceProperties("AWS::Lambda::Function", {
-      FunctionName: "dev-sakekasu-slack-notifier",
-    });
-  });
-
-  it("Webhook URL はコードに持たず SSM パラメータ名だけを渡す", () => {
-    template.hasResourceProperties("AWS::Lambda::Function", {
-      FunctionName: "dev-sakekasu-slack-notifier",
-      Environment: {
-        Variables: {
-          WEBHOOK_PARAMETER_NAME: "/dev-sakekasu/monitoring/slack-webhook-url",
-        },
-      },
-    });
-  });
-
-  it("Slack 通知 Lambda の SSM 参照は該当パラメータだけに絞る", () => {
-    template.hasResourceProperties("AWS::IAM::Policy", {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Action: "ssm:GetParameter",
-            Resource:
-              "arn:aws:ssm:ap-northeast-1:111122223333:parameter/dev-sakekasu/monitoring/slack-webhook-url",
-          }),
-        ]),
-      },
-    });
   });
 
   // 今回の障害を検知できる本命のアラーム
@@ -193,7 +86,7 @@ describe("MonitoringStack", () => {
       "InvalidInboundTokenException",
     ]) {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-        AlarmName: `dev-sakekasu-sommelier-auth-failure-${exceptionType}`,
+        AlarmName: `sakekasu-builder-dev-sommelier-auth-failure-${exceptionType}`,
         Namespace: "AWS/Bedrock-AgentCore",
         MetricName: "InboundAuthorizationFailure",
         Dimensions: Match.arrayWith([
@@ -206,10 +99,10 @@ describe("MonitoringStack", () => {
 
   it("AI 機能（ソムリエ・OCR）のエラーとスロットルを監視する", () => {
     for (const alarmName of [
-      "dev-sakekasu-sommelier-system-errors",
-      "dev-sakekasu-sommelier-throttles",
-      "dev-sakekasu-ocr-errors",
-      "dev-sakekasu-ocr-throttles",
+      "sakekasu-builder-dev-sommelier-system-errors",
+      "sakekasu-builder-dev-sommelier-throttles",
+      "sakekasu-builder-dev-ocr-errors",
+      "sakekasu-builder-dev-ocr-throttles",
     ]) {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: alarmName,
@@ -219,7 +112,7 @@ describe("MonitoringStack", () => {
 
   it("サービス正常性（AppSync・DynamoDB）を監視する", () => {
     template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      AlarmName: "dev-sakekasu-appsync-5xx",
+      AlarmName: "sakekasu-builder-dev-appsync-5xx",
       Namespace: "AWS/AppSync",
       MetricName: "5XXError",
     });
@@ -237,7 +130,7 @@ describe("MonitoringStack", () => {
   it("DynamoDB のスロットリングはテーブル単位で出る指標で見る", () => {
     const alarms = Object.values(
       template.findResources("AWS::CloudWatch::Alarm", {
-        Properties: { AlarmName: Match.stringLikeRegexp("^dev-sakekasu-dynamodb-throttle-") },
+        Properties: { AlarmName: Match.stringLikeRegexp("^sakekasu-builder-dev-dynamodb-throttle-") },
       }),
     ) as Array<{ Properties: { MetricName?: string; Metrics: AlarmMetricEntry[] } }>;
     expect(alarms.length).toBeGreaterThan(0);
@@ -265,17 +158,10 @@ describe("MonitoringStack", () => {
     expect(JSON.stringify(template.toJSON())).not.toContain("ThrottledRequests");
   });
 
-  // 通知経路そのものが壊れると誰も気づけない
-  it("Slack 通知 Lambda の失敗も監視する", () => {
-    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      AlarmName: "dev-sakekasu-slack-notifier-failure",
-    });
-  });
-
   // 以前は ApiStack にあり通知先が無かった
   it("画像削除失敗アラームを引き継ぎ、通知先を持たせる", () => {
     template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      AlarmName: "dev-sakekasu-image-delete-fail",
+      AlarmName: "sakekasu-builder-dev-image-delete-fail",
       MetricName: "ImageDeleteFailCount",
     });
   });
@@ -302,11 +188,11 @@ describe("MonitoringStack", () => {
     // - SLO の達成率: 30日の rolling で動きが遅い。値が出なくなったときに
     //   「異常なし」と扱うと、未達のまま復旧したことになってしまう
     const exceptions = new Set([
-      "dev-sakekasu-watcher-silent-health-check",
-      "dev-sakekasu-ocr-slo-availability",
-      "dev-sakekasu-ocr-slo-latency",
-      "dev-sakekasu-presigned-url-slo-availability",
-      "dev-sakekasu-presigned-url-slo-latency",
+      "sakekasu-builder-dev-watcher-silent-health-check",
+      "sakekasu-builder-dev-ocr-slo-availability",
+      "sakekasu-builder-dev-ocr-slo-latency",
+      "sakekasu-builder-dev-presigned-url-slo-availability",
+      "sakekasu-builder-dev-presigned-url-slo-latency",
     ]);
 
     const alarms = template.findResources("AWS::CloudWatch::Alarm");
@@ -324,7 +210,7 @@ describe("MonitoringStack", () => {
   // 実際に発報させているのは欠損の扱い（breaching）のほう
   it("外形監視が「動いていないこと」自体を検知する", () => {
     for (const [name, window] of [
-      ["dev-sakekasu-watcher-silent-health-check", 3600],
+      ["sakekasu-builder-dev-watcher-silent-health-check", 3600],
     ] as const) {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: name,
@@ -343,7 +229,7 @@ describe("MonitoringStack", () => {
   // 監視が動かなくなると異常に気づけない
   it("外形監視の実行失敗そのものを監視する", () => {
     for (const alarmName of [
-      "dev-sakekasu-watcher-failure-health-check",
+      "sakekasu-builder-dev-watcher-failure-health-check",
     ]) {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: alarmName,
@@ -353,7 +239,7 @@ describe("MonitoringStack", () => {
 
   it("外形監視を5分ごとに回す", () => {
     template.hasResourceProperties("AWS::Events::Rule", {
-      Name: "dev-sakekasu-health-check-schedule",
+      Name: "sakekasu-builder-dev-health-check-schedule",
       ScheduleExpression: "rate(5 minutes)",
     });
   });
@@ -361,7 +247,7 @@ describe("MonitoringStack", () => {
   it("外形監視は認証なしで叩いて拒否が返ることを正常とみなす", () => {
     const functions = template.findResources("AWS::Lambda::Function");
     const healthCheck = Object.values(functions).find(
-      (fn) => fn.Properties?.FunctionName === "dev-sakekasu-health-check",
+      (fn) => fn.Properties?.FunctionName === "sakekasu-builder-dev-health-check",
     );
     expect(healthCheck).toBeDefined();
 
@@ -371,8 +257,8 @@ describe("MonitoringStack", () => {
       healthCheck!.Properties.Environment.Variables.HEALTH_CHECK_TARGETS,
     );
 
-    expect(targets).toContain('"name":"frontend"');
-    expect(targets).toContain('"expectStatus":[200]');
+    // サイトは共通基盤の外形監視が見るので、ここには置かない
+    expect(targets).not.toContain('"name":"frontend"');
     // 認証なしで叩き、拒否されることを正常とみなす
     expect(targets).toContain('"name":"sommelier-runtime"');
     expect(targets).toContain('"expectStatus":[401,403]');
@@ -383,7 +269,7 @@ describe("MonitoringStack", () => {
 
   it("外形監視は2回続けて失敗したときだけ通知する", () => {
     template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      AlarmName: "dev-sakekasu-health-check-frontend",
+      AlarmName: "sakekasu-builder-dev-health-check-appsync",
       EvaluationPeriods: 2,
     });
   });
@@ -563,16 +449,16 @@ describe("MonitoringStack", () => {
     // まま居座り、監視が入っているように見えて何も鳴らない
     it.each([
       [
-        "dev-sakekasu-ocr-slo-availability",
+        "sakekasu-builder-dev-ocr-slo-availability",
         "dev-sakekasu-ocr-analyzer-availability",
       ],
-      ["dev-sakekasu-ocr-slo-latency", "dev-sakekasu-ocr-analyzer-latency"],
+      ["sakekasu-builder-dev-ocr-slo-latency", "dev-sakekasu-ocr-analyzer-latency"],
       [
-        "dev-sakekasu-presigned-url-slo-availability",
+        "sakekasu-builder-dev-presigned-url-slo-availability",
         "dev-sakekasu-presigned-url-availability",
       ],
       [
-        "dev-sakekasu-presigned-url-slo-latency",
+        "sakekasu-builder-dev-presigned-url-slo-latency",
         "dev-sakekasu-presigned-url-latency",
       ],
     ])("%s は %s の達成率を見ている", (alarmName, sloName) => {
@@ -587,10 +473,10 @@ describe("MonitoringStack", () => {
     // 「下回ったら異常」。既定は「以上で異常」なので、指定を落とすと
     // 達成率が高いときに鳴る逆立ちしたアラームになる
     it.each([
-      "dev-sakekasu-ocr-slo-availability",
-      "dev-sakekasu-ocr-slo-latency",
-      "dev-sakekasu-presigned-url-slo-availability",
-      "dev-sakekasu-presigned-url-slo-latency",
+      "sakekasu-builder-dev-ocr-slo-availability",
+      "sakekasu-builder-dev-ocr-slo-latency",
+      "sakekasu-builder-dev-presigned-url-slo-availability",
+      "sakekasu-builder-dev-presigned-url-slo-latency",
     ])("%s は目標を下回ったときに鳴る", (alarmName) => {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: alarmName,

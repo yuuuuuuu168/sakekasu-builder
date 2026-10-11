@@ -47,6 +47,7 @@ from conversation_memory import (
     load_conversation_memory,
 )
 from model.load import fallback_reason, load_models, root_error
+from quota import QuotaResult, consume as consume_quota, daily_limit
 from web_search import MAX_SNIPPET_LENGTH, MAX_TITLE_LENGTH, load_web_search
 
 app = BedrockAgentCoreApp()
@@ -92,6 +93,10 @@ if not IS_LOCAL_DEV and (not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_IDS)
         "COGNITO_USER_POOL_ID / COGNITO_APP_CLIENT_ID が未設定、または空白のみなど"
         "使用できない値です（LOCAL_DEV=1 以外では必須）"
     )
+# 相談の回数の上限（quota.py）。テーブル名が無いと上限が黙って効かなくなるので、
+# 手元での確認（LOCAL_DEV=1）以外では起動を止める
+if not IS_LOCAL_DEV and not os.getenv("CHAT_QUOTA_TABLE_NAME", "").strip():
+    raise RuntimeError("CHAT_QUOTA_TABLE_NAME が未設定です（LOCAL_DEV=1 以外では必須）")
 
 # 悪用時のコスト増幅・リソース枯渇を抑える上限
 MAX_PROMPT_LENGTH = 4000
@@ -1121,6 +1126,17 @@ async def invoke(payload, context):
         if len(prompt) > MAX_PROMPT_LENGTH:
             yield f"相談内容が長すぎます。{MAX_PROMPT_LENGTH}文字以内でお願いします。"
             return
+
+    # モデルを呼ぶ前に、今日の相談の回数を数える（quota.py）。入力の誤りで断った相談は数えない
+    quota = await asyncio.to_thread(consume_quota, owner_sub)
+    if quota is QuotaResult.EXCEEDED:
+        log.info("1 日の上限に達したため断りました")
+        yield f"今日の相談回数の上限（{daily_limit()}回）に達しました。明日（日本時間の 0 時以降）にまたお試しください。"
+        return
+    if quota is QuotaResult.UNAVAILABLE:
+        # 数えられないときは上限を守れないので、モデルを呼ばない（費用の上限を優先する）
+        yield "ただいま相談を受け付けられません。時間をおいてもう一度お試しください。"
+        return
 
     # ツールとシステムプロンプトは同じ判断で組み立てる。それぞれが別々に
     # 設定を読むと、「検索ツールは渡したが、検索結果を指示として扱わない

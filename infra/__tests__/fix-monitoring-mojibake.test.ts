@@ -188,7 +188,6 @@ describe('合成結果との突き合わせ', { timeout: 60_000 }, () => {
       imageDeleteFailMetricFilter: api.imageDeleteFailMetricFilter,
       sommelierRuntimeArn:
         'arn:aws:bedrock-agentcore:ap-northeast-1:111122223333:runtime/sommelier_test-ABC123',
-      siteUrl: 'https://example.com',
       env,
     });
 

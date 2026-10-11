@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   useCallback,
   type ReactNode,
@@ -18,6 +19,9 @@ import {
 } from '@/features/sommelier/lib/chatStorage';
 import { clearFilterState } from '@/features/records/lib/filterStorage';
 import { clearDownloadUrlCache } from '@/features/image/lib/downloadUrlCache';
+import { consumeSsoHint, type LandingUrl } from './ssoHint';
+import { canAutoSignIn, clearAutoSignInMark, markAutoSignIn } from './autoSignIn';
+import { signOutRedirectUrl } from './amplifyConfig';
 
 /**
  * 認証済みユーザーの型。
@@ -41,6 +45,17 @@ export interface AuthContextValue {
   /** 共通ログインのマネージドログインへ移る（ページごと遷移する） */
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * 読み込みを終えた時点で未サインインで、このタブではまだ自動で送っていない。
+   * AuthPage はこのとき見本の画面を見せずに「移動中」の表示で始める
+   */
+  autoSignIn: boolean;
+  /**
+   * 自動サインインを始めてよいかを一度だけ答える（2回目以降は常に false）。
+   * 印は autoSignIn を立てる時点で置いてある（autoSignIn.ts）。true を返したら、
+   * 呼び手がボタンと同じ signIn を呼ぶ
+   */
+  takeAutoSignIn: () => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -59,9 +74,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 開いた URL から読んだこと。null はまだ読んでいない。StrictMode で effect が
+  // 2回走っても URL は1回目で書き換わるので、読んだ結果を ref に持っておく
+  const landingRef = useRef<LandingUrl | null>(null);
+  // 自動で送ってよいと決めたか。決めるのは最初の読み込みのときだけで、
+  // サインアウトやリフレッシュの失敗で未サインインに戻ったときは送らない
+  // （サインアウトは自分でマネージドログインの /logout へ移るので、ここから
+  // 送るとその移動を潰す）
+  const autoSignInRef = useRef(false);
+  const [autoSignIn, setAutoSignIn] = useState(false);
 
   useEffect(() => {
     let active = true;
+
+    // ポータルの目印はサインイン済みかどうかによらず、読み込みの最初に URL から消す
+    if (landingRef.current === null) {
+      landingRef.current = consumeSsoHint();
+    }
+    const landing = landingRef.current;
 
     // マネージドログインから ?code=... 付きで戻ってきたときは、Amplify が
     // configure の直後にトークン交換を始める。getCurrentUser はその完了を
@@ -74,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           fetchAuthUser()
             .then((authUser) => {
               if (!active) return;
+              clearAutoSignInMark();
               setUser(authUser);
               setError(null);
             })
@@ -86,6 +117,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (active) {
             setUser(null);
             setError(REDIRECT_FAILURE_MESSAGE);
+            autoSignInRef.current = false;
+            setAutoSignIn(false);
           }
           break;
         case 'signedOut':
@@ -98,10 +131,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     fetchAuthUser()
       .then((authUser) => {
-        if (active) setUser(authUser);
+        if (!active) return;
+        // サインインできているので、このタブの印は役目を終えた
+        clearAutoSignInMark();
+        setUser(authUser);
       })
       .catch(() => {
-        if (active) setUser(null);
+        if (!active) return;
+        setUser(null);
+        // `?error=` で戻ってきたときは、Amplify の失敗のイベントを待たずに文言を出す。
+        // イベントはこの effect が受け口を張る前に流れてしまうことがある
+        if (landing.oauthError) setError(REDIRECT_FAILURE_MESSAGE);
+        // 印は送ると決めた時点で置く。置けなければ一度だけを守れないので、
+        // 自動では送らずに画面を出す
+        if (canAutoSignIn(landing) && markAutoSignIn()) {
+          autoSignInRef.current = true;
+          setAutoSignIn(true);
+        }
       })
       .finally(() => {
         if (active) setIsLoading(false);
@@ -127,6 +173,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const takeAutoSignIn = useCallback(() => {
+    if (!autoSignInRef.current) return false;
+    autoSignInRef.current = false;
+    setAutoSignIn(false);
+    return true;
+  }, []);
+
   const signOut = useCallback(async () => {
     // 端末に残る利用者固有のデータを消してからサインアウトする。
     // 相談の表示キャッシュや検索語には購入・飲酒の内容が含まれるため、
@@ -144,10 +197,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       // OAuth の設定があるので、トークンを捨てたあとマネージドログインの
-      // /logout へ移り、戻り先（このオリジンの /）へ帰ってくる。
-      // マネージドログイン側のセッションも切れるので、同じブラウザで開いている
-      // 他のアプリも、次にトークンを取り直すときはログインからやり直しになる
-      await amplifySignOut();
+      // /logout へ移る。マネージドログイン側のセッションも切れるので、同じブラウザで
+      // 開いている他のアプリも、次にトークンを取り直すときはログインからやり直しになる。
+      // だから戻り先は、本番ではこのアプリではなく共通の入口にする（手元は自分の /）。
+      // 別オリジンの戻り先は明示しないと Amplify が選ばないので、ここで渡す
+      await amplifySignOut({
+        global: false,
+        oauth: { redirectUrl: signOutRedirectUrl(window.location.origin) },
+      });
     } finally {
       // 上の通信を待つ間に書き戻されたものを、画面を落とす直前にもう一度消す。
       // 絞り込み条件は画面側の effect が、相談の表示キャッシュとセッション ID は
@@ -174,6 +231,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     error,
     signIn,
     signOut,
+    autoSignIn,
+    takeAutoSignIn,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

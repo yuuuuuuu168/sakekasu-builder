@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildAmplifyConfig, type AppOutputs } from '../amplifyConfig';
+import {
+  buildAmplifyConfig,
+  signOutRedirectUrl,
+  PORTAL_SIGN_OUT_URL,
+  type AppOutputs,
+} from '../amplifyConfig';
 import outputs from '../../../../amplify_outputs.json';
 
 const OUTPUTS: AppOutputs = {
@@ -42,10 +47,32 @@ describe('buildAmplifyConfig', () => {
     ['https://sake.sakekasu-builder.com', 'https://sake.sakekasu-builder.com/'],
     ['http://localhost:5173', 'http://localhost:5173/'],
     ['http://localhost:5173/', 'http://localhost:5173/'],
-  ])('戻り先はオリジン + / にする（%s）', (origin, expected) => {
+  ])('ログイン後の戻り先はオリジン + / にする（%s）', (origin, expected) => {
     const oauth = buildAmplifyConfig(OUTPUTS, origin).Auth?.Cognito.loginWith?.oauth;
     expect(oauth?.redirectSignIn).toEqual([expected]);
+  });
+
+  // 本番のサインアウトは共通の入口へ帰す。共通ログインの builder の logoutUrls に
+  // 登録してある値と末尾の / まで一致していないと、Cognito が戻さない
+  it('本番のサインアウト後の戻り先は共通の入口にする', () => {
+    expect(PORTAL_SIGN_OUT_URL).toBe('https://sakekasu-builder.com/');
+    const oauth = buildAmplifyConfig(OUTPUTS, 'https://sake.sakekasu-builder.com')
+      .Auth?.Cognito.loginWith?.oauth;
+    expect(oauth?.redirectSignOut).toEqual(['https://sakekasu-builder.com/']);
+    expect(signOutRedirectUrl('https://sake.sakekasu-builder.com')).toBe(
+      'https://sakekasu-builder.com/',
+    );
+  });
+
+  // 手元の開発ではポータルへ飛ばさず、これまでどおり自分の / に戻る
+  it.each([
+    ['http://localhost:5173', 'http://localhost:5173/'],
+    ['http://localhost:5173/', 'http://localhost:5173/'],
+    ['http://127.0.0.1:5173', 'http://127.0.0.1:5173/'],
+  ])('localhost のサインアウト後の戻り先は自分の / のまま（%s）', (origin, expected) => {
+    const oauth = buildAmplifyConfig(OUTPUTS, origin).Auth?.Cognito.loginWith?.oauth;
     expect(oauth?.redirectSignOut).toEqual([expected]);
+    expect(signOutRedirectUrl(origin)).toBe(expected);
   });
 
   it('AppSync は共通ログインのトークンで呼ぶ', () => {

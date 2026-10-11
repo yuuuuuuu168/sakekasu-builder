@@ -2,7 +2,6 @@ import * as cdk from 'aws-cdk-lib';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as actions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as sns from 'aws-cdk-lib/aws-sns';
-import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -93,18 +92,20 @@ export interface MonitoringStackProps extends cdk.StackProps {
   llmFallbackMetricFilters?: logs.MetricFilter[];
   /** ソムリエ Runtime の ARN */
   sommelierRuntimeArn: string;
-  /** フロントの公開 URL（外形監視の対象） */
-  siteUrl: string;
 }
 
 /**
  * 監視とアラート通知をまとめたスタック。
  *
- * 通知先の Slack Webhook URL はリポジトリに置けないため、デプロイ前に
- * 手動で登録した SSM パラメータを名前で参照する（README の手順を参照）。
+ * アラームは共通基盤（sakekasu-integrated_environment）のトピックへ送り、
+ * Slack 通知と DevOps Agent への転送はそちらが持つ。
  */
 export class MonitoringStack extends cdk.Stack {
-  public readonly alertTopic: sns.Topic;
+  /**
+   * アラームの送り先。4 アプリ共通の通知先トピック（sakekasu-integrated_environment の
+   * sakekasu-integrated-alerts）で、Slack 通知と DevOps Agent への転送はそちらが持つ
+   */
+  private readonly sharedAlertTopic: sns.ITopic;
 
   /** 外形監視が書き込むカスタムメトリクスの名前空間 */
   private readonly metricNamespace: string;
@@ -118,10 +119,12 @@ export class MonitoringStack extends cdk.Stack {
     // 詳細は lib/role-boundary.ts
     applyRoleBoundary(this);
 
+    // メトリクスの名前空間は旧い名前（`dev-sakekasu-*`）のまま。
+    // リソースではないが、変えると過去の指標と切れる
     const prefix = `${props.envName}-sakekasu`;
+    // それ以外（関数、ルール、アラーム）は 5 アプリで揃えた `sakekasu-<アプリ>-<env>-*` にする
+    const namePrefix = `sakekasu-builder-${props.envName}`;
     this.metricNamespace = `${prefix}-monitoring`;
-
-    const webhookParameterName = `/${prefix}/monitoring/slack-webhook-url`;
 
     // --- Application Signals（Issue #86）---
     //
@@ -145,109 +148,19 @@ export class MonitoringStack extends cdk.Stack {
 
     // --- 通知経路 ---
 
-    this.alertTopic = new sns.Topic(this, 'AlertTopic', {
-      topicName: `${prefix}-alerts`,
-      displayName: '酒カス 監視アラート',
-    });
-
-    // CloudWatch アラームからの publish を明示的に許可する。
-    //
-    // ## なぜ要るか
-    //
-    // SNS はトピック作成時に「所有アカウントからの publish を許可する」既定ポリシーを
-    // 暗黙に持っていて、アラーム通知はこれに乗っている。だがこの既定は
-    // 明示的なトピックポリシーを置いた瞬間に丸ごと置き換わる。
-    // 以前は AWS Health のルール（EventBridge）がこのトピックを宛先にしていて、
-    // CDK が events.amazonaws.com を許可する AWS::SNS::TopicPolicy を生成し、
-    // その副作用でアラーム側の権限が落ちた。
-    //
-    // Health のルールは共通基盤へ移して無くなったが、この文は外さない。
-    // 暗黙の既定に戻すのではなく明示しておけば、将来また別のサービス
-    // （EventBridge など）を宛先に足しても、この文だけは残る。
-    // ここを消してから何かを宛先に足すと、同じ無音の事故がもう一度起きる。
-    //
-    // ## 実際に一度壊した（2026-08-06 〜 08-17）
-    //
-    // AWS Health のルール（当時は AwsHealthRule）を入れた 08-06 から、このスタックの
-    // アラーム全部が無音になった。鳴ってはいるが誰にも届かない状態で、9日間気づけなかった。
-    // EventBridge 経由の AWS Health 通知だけは許可が残っていて届き続けたため、
-    // 通知が来ること自体は日常的に起きていたのが、気づけなかった理由。
-    //
-    // 失われた通知の実例として、08-08 12:46 の signup-notify-fail がある。
-    // 表に出たのは 08-17、Application Signals の SLO アラーム（Issue #86）が
-    // 初めて遷移したときだった。
-    //
-    // ## 壊れているかの見分け方
-    //
-    // アラームの状態ではなく、アクションの履歴を見る。状態は正常に遷移するので、
-    // describe-alarms では気づけない。
-    //
-    //   aws cloudwatch describe-alarm-history --alarm-name <name> \
-    //     --history-item-type Action --query 'AlarmHistoryItems[].[Timestamp,HistorySummary]'
-    //
-    // Failed to execute action が出ていれば拒否されている。
-    // 経路を試すなら set-alarm-state で状態を手で動かすのが早い（実通知が飛ぶ）。
-    //
-    // 対処の出典:
-    // https://repost.aws/knowledge-center/cloudwatch-receive-sns-for-alarm-trigger
-    this.alertTopic.addToResourcePolicy(
-      new iam.PolicyStatement({
-        sid: 'AllowCloudWatchAlarmsToPublish',
-        effect: iam.Effect.ALLOW,
-        principals: [new iam.ServicePrincipal('cloudwatch.amazonaws.com')],
-        actions: ['sns:Publish'],
-        resources: [this.alertTopic.topicArn],
-        // 混乱した代理人対策。ただし条件は、CloudWatch が渡すと AWS の手順書に
-        // 明記されているキーだけに留める。推測で絞ると「鳴っているのに届かない」
-        // という、いま踏んだのと同じ壊れ方をする
-        conditions: {
-          StringEquals: { 'aws:SourceAccount': this.account },
-          ArnLike: {
-            'aws:SourceArn': `arn:aws:cloudwatch:${this.region}:${this.account}:alarm:*`,
-          },
-        },
-      }),
+    /*
+     * アラームは共通基盤のトピックへ送る（共通基盤の docs/monitoring.md の「各アプリからアラームを送る」）。
+     * 他の 3 アプリはすでにそちらへ送っていて、builder だけが自分のトピックを持っていた。
+     * DevOps Agent への転送を共通基盤へ移したのに合わせて揃えた（docs/devops-agent.md）。
+     *
+     * 名前から ARN を組み立てる。スタックの出力を参照すると、共通基盤のスタックを作り直せなくなる。
+     * Slack の見出しのアプリ名は、アラーム名の接頭辞（sakekasu-builder-）から共通基盤が引く
+     */
+    this.sharedAlertTopic = sns.Topic.fromTopicArn(
+      this,
+      'SharedAlertTopic',
+      `arn:aws:sns:${this.region}:${this.account}:sakekasu-integrated-alerts`,
     );
-
-    const slackNotifierFunctionName = `${prefix}-slack-notifier`;
-    const slackNotifier = new NodejsFunction(this, 'SlackNotifierFunction', {
-      functionName: slackNotifierFunctionName,
-      runtime: Runtime.NODEJS_22_X,
-      logGroup: lambdaLogGroup(this, 'SlackNotifierLogGroup', slackNotifierFunctionName),
-      entry: path.join(here, '../lambda/slack-notifier/index.ts'),
-      handler: 'handler',
-      timeout: cdk.Duration.seconds(15),
-      environment: {
-        WEBHOOK_PARAMETER_NAME: webhookParameterName,
-      },
-      bundling: {
-        format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
-        mainFields: ['module', 'main'],
-        banner:
-          "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
-      },
-    });
-
-    // Webhook URL は手動登録のため、パラメータ名で権限を絞る
-    slackNotifier.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['ssm:GetParameter'],
-        resources: [
-          `arn:aws:ssm:${this.region}:${this.account}:parameter${webhookParameterName}`,
-        ],
-      }),
-    );
-
-    this.alertTopic.addSubscription(new subscriptions.LambdaSubscription(slackNotifier));
-
-    // Slack への通知自体が失敗すると誰も気づけないため、そこも監視する
-    this.addAlarm('SlackNotifierFailure', {
-      alarmName: `${prefix}-slack-notifier-failure`,
-      description: 'Slack への通知に失敗しています。アラートが届かない状態です',
-      metric: slackNotifier.metricErrors({ period: cdk.Duration.minutes(5), statistic: 'Sum' }),
-      threshold: 1,
-      evaluationPeriods: 1,
-    });
 
     // AWS Health の通知は共通基盤（sakekasu-integrated_environment）へ移した。
     // アカウント全体の話なので 1 か所だけが持つ。ここにも残すと同じ通知が 2 通届く
@@ -262,7 +175,7 @@ export class MonitoringStack extends cdk.Stack {
       'InvalidInboundTokenException',
     ]) {
       this.addAlarm(`SommelierAuthFailure${exceptionType}`, {
-        alarmName: `${prefix}-sommelier-auth-failure-${exceptionType}`,
+        alarmName: `${namePrefix}-sommelier-auth-failure-${exceptionType}`,
         description:
           'ソムリエの認証が拒否されています。利用者はチャットで「サインインの有効期限が切れたかも」と表示されます',
         metric: new cloudwatch.Metric({
@@ -278,7 +191,7 @@ export class MonitoringStack extends cdk.Stack {
     }
 
     this.addAlarm('SommelierSystemErrors', {
-      alarmName: `${prefix}-sommelier-system-errors`,
+      alarmName: `${namePrefix}-sommelier-system-errors`,
       description: 'ソムリエ Runtime がシステムエラーを返しています',
       metric: new cloudwatch.Metric({
         namespace: 'AWS/Bedrock-AgentCore',
@@ -292,7 +205,7 @@ export class MonitoringStack extends cdk.Stack {
     });
 
     this.addAlarm('SommelierThrottles', {
-      alarmName: `${prefix}-sommelier-throttles`,
+      alarmName: `${namePrefix}-sommelier-throttles`,
       description: 'ソムリエ Runtime がスロットリングされています',
       metric: new cloudwatch.Metric({
         namespace: 'AWS/Bedrock-AgentCore',
@@ -308,7 +221,7 @@ export class MonitoringStack extends cdk.Stack {
     // --- AI: OCR（ラベル読み取り）---
 
     this.addAlarm('OcrErrors', {
-      alarmName: `${prefix}-ocr-errors`,
+      alarmName: `${namePrefix}-ocr-errors`,
       description: 'ラベル画像の OCR が失敗しています（銘柄名の自動入力が効きません）',
       metric: props.ocrFunction.metricErrors({
         period: cdk.Duration.minutes(15),
@@ -319,7 +232,7 @@ export class MonitoringStack extends cdk.Stack {
     });
 
     this.addAlarm('OcrThrottles', {
-      alarmName: `${prefix}-ocr-throttles`,
+      alarmName: `${namePrefix}-ocr-throttles`,
       description: 'OCR Lambda がスロットリングされています',
       metric: props.ocrFunction.metricThrottles({
         period: cdk.Duration.minutes(15),
@@ -338,7 +251,7 @@ export class MonitoringStack extends cdk.Stack {
     const llmFallbackFilter = props.llmFallbackMetricFilters?.[0];
     if (llmFallbackFilter) {
       this.addAlarm('LlmFallback', {
-        alarmName: `${prefix}-llm-fallback`,
+        alarmName: `${namePrefix}-llm-fallback`,
         description:
           'OCR かテイスティングノートが Claude API で失敗し、Bedrock でやり直しています（機能は動いている）。' +
           'CloudWatch Logs で「[llm] fallback」を探し、errorType を見る。' +
@@ -354,12 +267,12 @@ export class MonitoringStack extends cdk.Stack {
       });
     }
 
-    this.addSloAlarms(prefix, props.envName);
+    this.addSloAlarms(namePrefix, props.envName);
 
     // --- サービス正常性 ---
 
     this.addAlarm('AppSync5XX', {
-      alarmName: `${prefix}-appsync-5xx`,
+      alarmName: `${namePrefix}-appsync-5xx`,
       description: 'GraphQL API がサーバエラーを返しています（記録の閲覧・登録に影響します）',
       metric: new cloudwatch.Metric({
         namespace: 'AWS/AppSync',
@@ -374,7 +287,7 @@ export class MonitoringStack extends cdk.Stack {
 
     for (const fn of props.functions) {
       this.addAlarm(`LambdaErrors${fn.node.id}`, {
-        alarmName: `${prefix}-lambda-errors-${fn.node.id.toLowerCase()}`,
+        alarmName: `${namePrefix}-lambda-errors-${fn.node.id.toLowerCase()}`,
         description: `${fn.node.id} がエラーを返しています`,
         metric: fn.metricErrors({ period: cdk.Duration.minutes(15), statistic: 'Sum' }),
         threshold: 5,
@@ -400,7 +313,7 @@ export class MonitoringStack extends cdk.Stack {
       });
     for (const table of props.tables) {
       this.addAlarm(`DynamoThrottle${table.node.id}`, {
-        alarmName: `${prefix}-dynamodb-throttle-${table.node.id.toLowerCase()}`,
+        alarmName: `${namePrefix}-dynamodb-throttle-${table.node.id.toLowerCase()}`,
         description: `${table.node.id} が読み書きをスロットリングされています`,
         metric: new cloudwatch.MathExpression({
           expression: 'FILL(r, 0) + FILL(w, 0)',
@@ -418,7 +331,7 @@ export class MonitoringStack extends cdk.Stack {
 
     // 以前は ApiStack 側にあり通知先が無かったため、鳴っても気づけなかった
     this.addAlarm('ImageDeleteFailAlarm', {
-      alarmName: `${prefix}-image-delete-fail`,
+      alarmName: `${namePrefix}-image-delete-fail`,
       description: 'S3 の画像削除に繰り返し失敗しています（消したはずの画像が残ります）',
       metric: props.imageDeleteFailMetricFilter.metric({
         statistic: 'Sum',
@@ -429,13 +342,11 @@ export class MonitoringStack extends cdk.Stack {
     });
 
     // --- 外形監視: 到達性（5分ごと）---
+    //
+    // サイト（sake.sakekasu-builder.com）そのものは共通基盤（sakekasu-integrated_environment）の
+    // 外形監視が見ている。同じ URL を両方で見て二重に鳴らないよう、ここでは置かない
 
     const healthCheckTargets = [
-      {
-        name: 'frontend',
-        url: props.siteUrl,
-        expectStatus: [200],
-      },
       {
         // 認証なしで叩き「拒否されること」を確認する。
         // 認証情報を持たずに、到達性と認証の働きを同時に見られる
@@ -457,7 +368,7 @@ export class MonitoringStack extends cdk.Stack {
       },
     ];
 
-    const healthCheckFunctionName = `${prefix}-health-check`;
+    const healthCheckFunctionName = `${namePrefix}-health-check`;
     const healthCheck = new NodejsFunction(this, 'HealthCheckFunction', {
       functionName: healthCheckFunctionName,
       runtime: Runtime.NODEJS_22_X,
@@ -487,7 +398,7 @@ export class MonitoringStack extends cdk.Stack {
     );
 
     new events.Rule(this, 'HealthCheckSchedule', {
-      ruleName: `${prefix}-health-check-schedule`,
+      ruleName: `${namePrefix}-health-check-schedule`,
       schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
       targets: [new targets.LambdaFunction(healthCheck)],
     });
@@ -495,7 +406,7 @@ export class MonitoringStack extends cdk.Stack {
     // 一時的な失敗で鳴らさないよう、2回続けて失敗したら通知する
     for (const target of healthCheckTargets) {
       this.addAlarm(`HealthCheckFailed${target.name}`, {
-        alarmName: `${prefix}-health-check-${target.name}`,
+        alarmName: `${namePrefix}-health-check-${target.name}`,
         description: `外形監視で ${target.name} に到達できません`,
         metric: new cloudwatch.Metric({
           namespace: this.metricNamespace,
@@ -522,7 +433,7 @@ export class MonitoringStack extends cdk.Stack {
       },
     ]) {
       this.addAlarm(`WatcherFailure-${watcher.key}`, {
-        alarmName: `${prefix}-watcher-failure-${watcher.key}`,
+        alarmName: `${namePrefix}-watcher-failure-${watcher.key}`,
         description: `${watcher.label}の実行自体が失敗しています。異常を検知できない状態です`,
         metric: watcher.fn.metricErrors({
           period: cdk.Duration.hours(1),
@@ -533,7 +444,7 @@ export class MonitoringStack extends cdk.Stack {
       });
 
       this.addAlarm(`WatcherSilent-${watcher.key}`, {
-        alarmName: `${prefix}-watcher-silent-${watcher.key}`,
+        alarmName: `${namePrefix}-watcher-silent-${watcher.key}`,
         description:
           `${watcher.label}が動いていません。スケジュールの停止や権限の失効が疑われます`,
         metric: watcher.fn.metricInvocations({
@@ -550,15 +461,6 @@ export class MonitoringStack extends cdk.Stack {
         treatMissingData: cloudwatch.TreatMissingData.BREACHING,
       });
     }
-
-    new cdk.CfnOutput(this, 'AlertTopicArn', {
-      value: this.alertTopic.topicArn,
-      description: '監視アラートの SNS トピック',
-    });
-    new cdk.CfnOutput(this, 'SlackWebhookParameterName', {
-      value: webhookParameterName,
-      description: 'Slack Webhook URL を入れる SSM パラメータ名（手動登録）',
-    });
   }
 
   /**
@@ -723,14 +625,14 @@ export class MonitoringStack extends cdk.Stack {
    * 居座る。監視が入っているように見えて何も鳴らない状態になるので、
    * 名前は `sloNames()` からしか作らない。
    */
-  private addSloAlarms(prefix: string, envName: string): void {
+  private addSloAlarms(namePrefix: string, envName: string): void {
     const slos = SLO_TARGETS.flatMap((target) => {
       const { availability, latency } = MonitoringStack.sloNames(envName, target);
       return [
         {
           id: `${target.idPrefix}AvailabilitySloBreach`,
           sloName: availability,
-          alarmName: `${prefix}-${target.alarmSlug}-slo-availability`,
+          alarmName: `${namePrefix}-${target.alarmSlug}-slo-availability`,
           description:
             `${target.subject}成功率が30日で ${SLO_ATTAINMENT_GOAL}% を割りました` +
             '（1回きりの失敗ではなく、失敗が積み上がっています）',
@@ -738,7 +640,7 @@ export class MonitoringStack extends cdk.Stack {
         {
           id: `${target.idPrefix}LatencySloBreach`,
           sloName: latency,
-          alarmName: `${prefix}-${target.alarmSlug}-slo-latency`,
+          alarmName: `${namePrefix}-${target.alarmSlug}-slo-latency`,
           description:
             `${target.subject}所要時間が30日で ${SLO_ATTAINMENT_GOAL}% の呼び出しで ` +
             `${target.latencyThresholdMs / 1000} 秒を超えています`,
@@ -793,9 +695,9 @@ export class MonitoringStack extends cdk.Stack {
     // コンストラクタ内の代入順までは見てくれないので、ここで弾く。
     // 落ちること自体は合成時に分かるが、素の TypeError だと原因が読み取れない
     // （PR #165 のレビュー指摘）
-    if (!this.alertTopic) {
+    if (!this.sharedAlertTopic) {
       throw new Error(
-        `${id}: 通知先（alertTopic）を作る前にアラームを追加している。` +
+        `${id}: 通知先（sharedAlertTopic）を作る前にアラームを追加している。` +
           'addAlarm の呼び出しをトピックの生成より後ろに移すこと',
       );
     }
@@ -813,8 +715,8 @@ export class MonitoringStack extends cdk.Stack {
       treatMissingData: options.treatMissingData ?? cloudwatch.TreatMissingData.NOT_BREACHING,
     });
 
-    alarm.addAlarmAction(new actions.SnsAction(this.alertTopic));
-    alarm.addOkAction(new actions.SnsAction(this.alertTopic));
+    alarm.addAlarmAction(new actions.SnsAction(this.sharedAlertTopic));
+    alarm.addOkAction(new actions.SnsAction(this.sharedAlertTopic));
     return alarm;
   }
 }

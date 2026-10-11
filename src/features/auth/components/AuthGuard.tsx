@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { useAuth } from '../AuthContext';
+import { AuthLoading } from './AuthLoading';
 import { AuthPage } from './AuthPage';
 
 interface AuthGuardProps {
@@ -20,17 +21,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
   // ローディング中
   if (isLoading) {
-    return (
-      <div
-        className="min-h-screen flex items-center justify-center bg-background"
-        data-testid="auth-loading"
-      >
-        <div className="text-center space-y-3">
-          <div className="text-3xl">🍶</div>
-          <p className="text-sm text-muted-foreground">読み込み中...</p>
-        </div>
-      </div>
-    );
+    return <AuthLoading />;
   }
 
   // 未認証 → 認証ページを表示

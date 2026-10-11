@@ -16,7 +16,6 @@ import * as cdk from 'aws-cdk-lib';
 import { ApiStack } from '../lib/api-stack.js';
 import { MonitoringStack } from '../lib/monitoring-stack.js';
 import { BillingNotifierStack } from '../lib/billing-notifier-stack.js';
-import { DevOpsAgentStack } from '../lib/devops-agent-stack.js';
 import { TEST_SHARED_AUTH } from './shared-auth-fixture.js';
 
 /**
@@ -147,10 +146,9 @@ const STACKS_WITH_LAMBDA: Record<string, string> = {
   'api-stack.ts': 'api',
   'monitoring-stack.ts': 'monitoring',
   'billing-notifier-stack.ts': 'billing',
-  'devops-agent-stack.ts': 'devopsAgent',
 };
 
-/** アプリ本体・課金通知・DevOps Agent のすべてを合成する */
+/** Lambda を持つスタック（アプリ本体・課金通知）のすべてを合成する */
 function synthAllTemplates(): {
   templates: Record<string, Template>;
   /** スタックのキー → デプロイ先アカウント ID */
@@ -172,17 +170,9 @@ function synthAllTemplates(): {
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
     sommelierRuntimeArn:
       'arn:aws:bedrock-agentcore:ap-northeast-1:111122223333:runtime/sommelier_test-ABC123',
-    siteUrl: 'https://example.com',
     env,
   });
 
-  const devopsAgentStack = new DevOpsAgentStack(app, 'TestDevOpsAgent', {
-    envName: SYNTH_ENV_NAME,
-    monitoringAccountId: '444455556666',
-    agentSpaceArn: 'arn:aws:aidevops:ap-northeast-1:444455556666:agentspace/abc123',
-    alertTopic: monitoringStack.alertTopic,
-    env,
-  });
 
   // 課金通知は管理アカウント側の別スタック。App を分けないと
   // 同一 App 内で env が食い違うため、こちらは独立して合成する
@@ -195,7 +185,6 @@ function synthAllTemplates(): {
   const stacks = {
     api: apiStack,
     monitoring: monitoringStack,
-    devopsAgent: devopsAgentStack,
     billing: billingStack,
   };
 
@@ -515,15 +504,13 @@ describe('Lambda のランタイム', () => {
    * 予約を入れている関数と、その数。
    *
    * 合計だけを見張っても、1 つ消えて別の 1 つが残っていれば気づけない。
-   * それぞれ別の理由で入れている（OCR とテイスティングノートは Bedrock の費用、
-   * DevOps Agent は調査が一斉に立ち上がるのを防ぐため）ので、消えたら落ちる
-   * ようにする。
+   * それぞれ別の理由で入れている（OCR とテイスティングノートは Bedrock の費用）ので、
+   * 消えたら落ちるようにする。DevOps Agent への転送の予約（2）は、転送ごと共通基盤へ移した。
    * 予約を足したり外したりするときは、ここも一緒に直すこと
    */
   const EXPECTED_RESERVATIONS: Record<string, number> = {
     [`${SYNTH_ENV_NAME}-sakekasu-ocr-analyzer`]: 20,
     [`${SYNTH_ENV_NAME}-sakekasu-tasting-note`]: 5,
-    [`${SYNTH_ENV_NAME}-sakekasu-devops-agent-webhook`]: 2,
   };
 
   // 振り分けが壊れると、以降の検査が「対象ゼロ」で素通りしてしまう。

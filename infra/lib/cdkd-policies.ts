@@ -75,10 +75,10 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
     // Application Signals は SLO の操作だけに絞る（Issue #86）。
     //
     // SLO は Cloud Control API 経由で作られるが、その先で
-    // applicationsignals:CreateServiceLevelObjective が呼ばれるため、
+    // application-signals:CreateServiceLevelObjective が呼ばれるため、
     // UseCloudControlApi の cloudformation:CreateResource だけでは足りない。
     //
-    // **`applicationsignals:*` にはしない。** サービス検出の有効化
+    // **`application-signals:*` にはしない。** サービス検出の有効化
     // （StartDiscovery）が入ってしまうため。これはアカウントに1つの設定で、
     // 一度スタックに載せて失敗したときにロールバックがそれを消しにいき、
     // ソムリエの可観測性を道連れにしかけた（monitoring-stack.ts のコメント）。
@@ -87,17 +87,21 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
     //
     // 足りない操作が出たらデプロイが AccessDenied で落ちる。落ちれば分かるので、
     // 分からないまま広い権限を渡すよりよい
+    //
+    // IAM の接頭辞は `application-signals`（ハイフンあり）。CloudFormation の型名や CDK の
+    // モジュール名につられて `applicationsignals:` と書くと、IAM は黙って何も許さない。
+    // 2026-10 まではその綴りで、この文も下の Deny も効いていなかった
     new iam.PolicyStatement({
       sid: 'ManageServiceLevelObjectives',
       actions: [
-        'applicationsignals:CreateServiceLevelObjective',
-        'applicationsignals:UpdateServiceLevelObjective',
-        'applicationsignals:DeleteServiceLevelObjective',
-        'applicationsignals:GetServiceLevelObjective',
-        'applicationsignals:ListServiceLevelObjectives',
-        'applicationsignals:TagResource',
-        'applicationsignals:UntagResource',
-        'applicationsignals:ListTagsForResource',
+        'application-signals:CreateServiceLevelObjective',
+        'application-signals:UpdateServiceLevelObjective',
+        'application-signals:DeleteServiceLevelObjective',
+        'application-signals:GetServiceLevelObjective',
+        'application-signals:ListServiceLevelObjectives',
+        'application-signals:TagResource',
+        'application-signals:UntagResource',
+        'application-signals:ListTagsForResource',
       ],
       resources: ['*'],
     }),
@@ -107,7 +111,7 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
     new iam.PolicyStatement({
       sid: 'DenyApplicationSignalsAccountSettings',
       effect: iam.Effect.DENY,
-      actions: ['applicationsignals:StartDiscovery'],
+      actions: ['application-signals:StartDiscovery'],
       resources: ['*'],
     }),
 
@@ -553,9 +557,9 @@ export function cdkdDiffStatements(account: string): iam.PolicyStatement[] {
         // 無いと SLO をデプロイした後の cdkd diff が AccessDenied で落ちる。
         // Cognito UserPoolClient に cognito-idp:DescribeUserPoolClient を
         // 足してあるのと同じ形（PR #161 のレビュー指摘）
-        'applicationsignals:GetServiceLevelObjective',
-        'applicationsignals:ListServiceLevelObjectives',
-        'applicationsignals:ListTagsForResource',
+        'application-signals:GetServiceLevelObjective',
+        'application-signals:ListServiceLevelObjectives',
+        'application-signals:ListTagsForResource',
         'appsync:Get*',
         'appsync:List*',
         'lambda:Get*',

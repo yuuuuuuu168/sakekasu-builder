@@ -4,7 +4,7 @@ import {
   type AgentCoreProjectSpec,
   type AgentCoreMcpSpec,
 } from '@aws/agentcore-cdk';
-import { ArnFormat, CfnOutput, Stack, aws_iam as iam, type StackProps } from 'aws-cdk-lib';
+import { ArnFormat, CfnOutput, RemovalPolicy, Stack, aws_dynamodb as dynamodb, aws_iam as iam, type StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
 /** エージェントに渡すテーブル名の環境変数名（読み取り権限を付与する対象） */
@@ -12,6 +12,14 @@ const TABLE_ENV_NAMES = ['PURCHASE_TABLE_NAME', 'DRINKING_TABLE_NAME'] as const;
 
 /** エージェントが参照する各テーブルの GSI 名（main.py と一致させる） */
 const OWNER_INDEX_NAME = 'owner-index';
+
+/**
+ * 相談の回数（ユーザーごと・1 日ごと）を数えるテーブルの名前を渡す環境変数。
+ * 数えるのは app/sommelier/quota.py。テーブルはこのスタックで作る。infra/ の本体のスタックに置くと、
+ * 本体（cdkd）とこのスタック（deploy-sommelier.yml）のデプロイの順番しだいで、テーブルが無いうちに
+ * エージェントが数えに行き、数えられずに相談を断ってしまうため
+ */
+const QUOTA_TABLE_ENV_NAME = 'CHAT_QUOTA_TABLE_NAME';
 
 /** DynamoDB のテーブル名として許可する形式（ワイルドカードや区切り文字を弾く） */
 const DYNAMODB_TABLE_NAME_PATTERN = /^[a-zA-Z0-9_.-]{3,255}$/;
@@ -147,6 +155,25 @@ export class AgentCoreStack extends Stack {
             resources: [tableArn, `${tableArn}/index/${OWNER_INDEX_NAME}`],
           })
         );
+      }
+
+      // 相談の回数を数えるテーブル。数を足すだけなので、権限は UpdateItem だけにする。
+      // 中身は日ごとの回数で、TTL で消える。消えても困らないのでスタックと一緒に消す
+      const quotaTableName = agent.envVars?.find(v => v.name === QUOTA_TABLE_ENV_NAME)?.value;
+      if (quotaTableName) {
+        if (!DYNAMODB_TABLE_NAME_PATTERN.test(quotaTableName)) {
+          throw new Error(
+            `${QUOTA_TABLE_ENV_NAME} の値が不正です: "${quotaTableName}"（使用できるのは英数字と _ . - の3〜255文字）`
+          );
+        }
+        const quotaTable = new dynamodb.TableV2(this, `ChatQuotaTable-${agent.name}`, {
+          tableName: quotaTableName,
+          partitionKey: { name: 'userKey', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'day', type: dynamodb.AttributeType.STRING },
+          timeToLiveAttribute: 'expiresAt',
+          removalPolicy: RemovalPolicy.DESTROY,
+        });
+        quotaTable.grant(environment.runtime.role, 'dynamodb:UpdateItem');
       }
 
       // 実行ロールの名前を固定する（LLM_ROLE_NAME_PREFIX の説明を参照）。

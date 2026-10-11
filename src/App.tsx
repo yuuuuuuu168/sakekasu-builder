@@ -11,6 +11,7 @@ import { CalendarPage } from '@/features/calendar/components/CalendarPage';
 import { SommelierChat } from '@/features/sommelier/components/SommelierChat';
 import { AuthProvider, useAuth } from '@/features/auth/AuthContext';
 import { AuthGuard } from '@/features/auth/components/AuthGuard';
+import { PortalAppsLink } from '@/features/auth/components/PortalAppsLink';
 import { buildAmplifyConfig, type AppOutputs } from '@/features/auth/amplifyConfig';
 import type { StockDrinkDraft } from '@/features/drinking/types';
 import type { UnifiedRecord } from '@/features/records/types';
@@ -21,7 +22,7 @@ Amplify.configure(buildAmplifyConfig(outputs as AppOutputs, window.location.orig
 
 type Page = 'purchase' | 'drinking' | 'records' | 'calendar' | 'stats';
 
-/** ナビゲーションバー（認証情報 + ページ切り替え） */
+/** ナビゲーションバー（アプリ一覧・サインアウト + ページ切り替え） */
 function NavigationBar({
   currentPage,
   onPageChange,
@@ -33,10 +34,11 @@ function NavigationBar({
 
   return (
     <nav className="sticky top-0 z-50 border-b border-gray-200 bg-white/80 backdrop-blur-md dark:border-white/10 dark:bg-dark-bg/80">
-      {/* サインアウトだけ（誰がログインしているかは出さない）。
+      {/* 4 アプリの入口の一覧へ戻るリンクとサインアウトだけ（誰がログインしているかは出さない）。
           MFA の登録と入力は共通ログインの画面が受け持つので、ここには置かない */}
       <div className="mx-auto flex max-w-md items-center justify-end px-4 py-2 text-xs">
         <div className="flex shrink-0 items-center gap-1">
+          <PortalAppsLink />
           <button
             onClick={() => void signOut()}
             className="rounded px-2 py-1 text-sake-red transition-colors hover:bg-sake-red/10"

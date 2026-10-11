@@ -1,27 +1,38 @@
-import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { useCallback, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
 import { useAuth } from '../AuthContext';
+import { PORTAL_SIGN_OUT_URL } from '../amplifyConfig';
+import { AuthLoading } from './AuthLoading';
+import './AuthPage.css';
 
-const MotionButton = motion.create(Button);
+/** 4 アプリ共通の入口の表紙。サインアウト後の戻り先と同じ URL */
+const PORTAL_TOP_URL = PORTAL_SIGN_OUT_URL;
 
 /**
  * 未サインインのときの画面。
  *
  * サインイン・MFA・パスワードの扱いは、共通ログイン（4 アプリ共有）の
- * マネージドログイン画面が受け持つ。ここはそこへ送るボタンだけを置く。
- * 自動でリダイレクトしないのは、戻りで失敗したときに行ったり来たりを
- * 繰り返さず、失敗の文言をここで読めるようにするため。
- * アカウントは管理者が共通ログイン側で作る（セルフサインアップは無い）。
+ * マネージドログイン画面が受け持つ。ここはそこへ送るだけ。
+ *
+ * 開いた時点で未サインインなら、ボタンを押させずにタブごとに一度だけ自動で送る
+ * （autoSignIn.ts）。その間は読み込み中の表示のままにして、この画面は見せない。
+ * 戻ってきてもまだ未サインイン（取り消した・`?error=` 付きで戻った等）なら、
+ * 印があるので自動では送らず、入口の表紙と同じ見た目の画面とボタンを出す。
+ * 行ったり来たりを繰り返さず、失敗の文言をここで読めるようにするため。
+ * ボタンは印によらず必ず送る。
+ *
+ * この画面だけは黒に固定する（AuthPage.css）。アカウントは管理者が共通ログイン側で
+ * 作る（セルフサインアップは無い）。
  */
 export function AuthPage() {
-  const { signIn, error } = useAuth();
+  const { signIn, error, autoSignIn, takeAutoSignIn } = useAuth();
+  // 自動で送るときは、この画面を一瞬見せずに読み込み中の表示で始める
+  const [isAutoRedirecting, setIsAutoRedirecting] = useState(autoSignIn && !error);
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
 
-  const handleSignIn = async () => {
+  const handleSignIn = useCallback(async () => {
     setIsRedirecting(true);
     setStartError(null);
     try {
@@ -32,56 +43,77 @@ export function AuthPage() {
       setStartError('サインイン画面を開けませんでした。もう一度お試しください');
     } finally {
       setIsRedirecting(false);
+      setIsAutoRedirecting(false);
     }
-  };
+  }, [signIn]);
+
+  useEffect(() => {
+    // 戻りで失敗した文言があるときは送らない。takeAutoSignIn は一度しか
+    // true を返さないので、画面を出し直しても送り直さない
+    if (error || !takeAutoSignIn()) return;
+    void handleSignIn();
+  }, [error, handleSignIn, takeAutoSignIn]);
+
+  useEffect(() => {
+    // マネージドログインから戻るボタンで帰ってくると、iOS Safari などは移る直前の
+    // 画面（移動中のまま）を履歴のキャッシュから戻す。そのときはボタンを押せる状態に戻す
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      setIsRedirecting(false);
+      setIsAutoRedirecting(false);
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
+
+  useEffect(() => {
+    // この画面を出している間だけ <html> の地も黒にする（AuthPage.css）
+    const root = document.documentElement;
+    root.classList.add('signin-active');
+    return () => root.classList.remove('signin-active');
+  }, []);
+
+  if (isAutoRedirecting) {
+    return <AuthLoading />;
+  }
 
   const message = startError ?? error;
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center bg-background px-4"
-      data-testid="auth-page"
-    >
-      <motion.div
-        className="w-full max-w-sm space-y-6 text-center"
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25, ease: 'easeOut' }}
+    <main className="signin-cover" data-testid="auth-page">
+      <div className="signin-mark" aria-hidden="true">
+        🍶
+      </div>
+      <h1 className="signin-title">酒カス</h1>
+      <div className="signin-rule" aria-hidden="true">
+        ◆
+      </div>
+      <p className="signin-lead">日本酒の記録</p>
+      <button
+        type="button"
+        className="signin-btn"
+        data-testid="signin-submit"
+        disabled={isRedirecting}
+        onClick={() => void handleSignIn()}
       >
-        <div className="space-y-2">
-          <h1 className="text-2xl font-bold text-foreground">🍶 酒カス</h1>
-          <p className="text-sm text-muted-foreground">サインイン</p>
-        </div>
-
-        {message && (
-          <p data-testid="signin-error" className="text-sm text-destructive" role="alert">
-            {message}
-          </p>
+        {isRedirecting ? (
+          <>
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            移動中...
+          </>
+        ) : (
+          'パスキーでログイン'
         )}
-
-        <MotionButton
-          type="button"
-          data-testid="signin-submit"
-          disabled={isRedirecting}
-          onClick={() => void handleSignIn()}
-          className="w-full h-10 text-base font-semibold bg-gold-wa text-white hover:bg-gold-wa/80"
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-        >
-          {isRedirecting ? (
-            <>
-              <Loader2 className="size-4 animate-spin" />
-              サインイン画面へ移動中...
-            </>
-          ) : (
-            '🍶 サインイン'
-          )}
-        </MotionButton>
-
-        <p className="text-xs text-muted-foreground">
-          共通ログインの画面へ移動します。二段階認証のコードもそちらで入力します
+      </button>
+      <p className="signin-note">共通ログインの画面へ移動します</p>
+      {message && (
+        <p data-testid="signin-error" className="signin-error" role="alert">
+          {message}
         </p>
-      </motion.div>
-    </div>
+      )}
+      <a className="signin-back" href={PORTAL_TOP_URL}>
+        ← sakekasu の入口へ
+      </a>
+    </main>
   );
 }

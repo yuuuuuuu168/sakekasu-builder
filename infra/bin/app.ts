@@ -24,12 +24,14 @@ const app = new cdk.App();
 // 作り直しが起き、古いロールからポリシーがはがれて API が止まった）。ロールはガードレールでも
 // 名前の接頭辞で範囲を絞る。
 //
-// Application Signals の SLO にも付けない。cdkd は SLO を Cloud Control API で更新し、その途中で
-// application-signals:GetServiceLevelObjective を呼ぶが、cdkd 用ロールにその権限が無く断られる
-// （2026-10-04、sakekasu-dev-monitoring のデプロイが失敗してロールバックした）。ロールの権限を
-// 足すには OIDC スタックを手でデプロイする必要があるので、タグのためにはそこまでしない
+// Application Signals の SLO には付ける。以前は外していた。cdkd は SLO を Cloud Control API で更新し、
+// その途中で application-signals:GetServiceLevelObjective を呼ぶが、cdkd 用ロールにその権限が無く断られ、
+// 2026-10-04 に sakekasu-dev-monitoring のデプロイが失敗してロールバックしたため。
+// 権限が無かった原因は、cdkd-policies.ts が接頭辞を `applicationsignals:` と書いていたこと。
+// 2026-10-11 に直して OIDC スタックを入れ直し、Cloud Control と SLO の操作が許されることを
+// simulate-principal-policy で確かめてから戻した
 cdk.Tags.of(app).add('App', 'builder', {
-  excludeResourceTypes: ['AWS::IAM::Role', 'AWS::ApplicationSignals::ServiceLevelObjective'],
+  excludeResourceTypes: ['AWS::IAM::Role'],
 });
 
 // GitHub Actions からの CDK デプロイ用 OIDC 連携（Issue #94）。
@@ -131,9 +133,6 @@ function buildApplicationStacks(app: cdk.App): void {
     (app.node.tryGetContext('sommelierRuntimeArn') as string | undefined) ??
     `arn:aws:bedrock-agentcore:ap-northeast-1:${cdkEnv.account}:runtime/sommelier_sommelier-Cn5eM865GE`;
 
-  const siteUrl =
-    (app.node.tryGetContext('siteUrl') as string | undefined) ?? 'https://sake.sakekasu-builder.com';
-
   const monitoringStack = new MonitoringStack(app, `${prefix}-monitoring`, {
     envName: env,
     graphqlApi: apiStack.graphqlApi,
@@ -147,7 +146,6 @@ function buildApplicationStacks(app: cdk.App): void {
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
     llmFallbackMetricFilters: apiStack.llmFallbackMetricFilters,
     sommelierRuntimeArn,
-    siteUrl,
     env: cdkEnv,
   });
 
@@ -188,9 +186,9 @@ function buildApplicationStacks(app: cdk.App): void {
       envName: env,
       monitoringAccountId,
       agentSpaceArn,
-      alertTopic: monitoringStack.alertTopic,
       env: cdkEnv,
     });
+    // 監視スタックへの参照は無い（転送 Lambda は共通基盤へ移した）。デプロイの順序だけ従来どおりにしておく
     devopsAgentStack.addDependency(monitoringStack);
   }
 
