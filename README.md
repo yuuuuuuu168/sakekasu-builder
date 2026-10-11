@@ -533,16 +533,19 @@ EventBridge（毎日 00:05 UTC）→ billing-notifier Lambda → Cost Explorer A
 ### デプロイ手順（管理アカウント）
 
 ```bash
+# 0. 管理アカウントに書き込めるプロファイル名を入れる（リポジトリには書かない）
+ORG_PROFILE=<管理アカウントのプロファイル>
+
 # 1. 管理アカウントの認証情報で入っていることを確認し、その ID を控える（以降の手順で使う）
-BILLING_ACCOUNT_ID=$(AWS_PROFILE=yuuuuuuuki7749 aws sts get-caller-identity --query Account --output text)
+BILLING_ACCOUNT_ID=$(AWS_PROFILE=$ORG_PROFILE aws sts get-caller-identity --query Account --output text)
 echo "$BILLING_ACCOUNT_ID"
 
 # 2. （初回のみ）管理アカウントを CDK bootstrap する
 cd infra
-AWS_PROFILE=yuuuuuuuki7749 npx cdk bootstrap aws://$BILLING_ACCOUNT_ID/ap-northeast-1 -c billing=true -c billingAccount=$BILLING_ACCOUNT_ID
+AWS_PROFILE=$ORG_PROFILE npx cdk bootstrap aws://$BILLING_ACCOUNT_ID/ap-northeast-1 -c billing=true -c billingAccount=$BILLING_ACCOUNT_ID
 
 # 3. Slack の Incoming Webhook URL を管理アカウント側に登録する
-AWS_PROFILE=yuuuuuuuki7749 aws ssm put-parameter \
+AWS_PROFILE=$ORG_PROFILE aws ssm put-parameter \
   --name /sakekasu-billing/slack-webhook-url \
   --type SecureString \
   --value 'https://hooks.slack.com/services/XXX/YYY/ZZZ' \
@@ -550,11 +553,11 @@ AWS_PROFILE=yuuuuuuuki7749 aws ssm put-parameter \
 
 # 4. デプロイ（内訳に出すアプリ本体のアカウントの ID も、リポジトリに書かず渡す）
 APP_ACCOUNT_ID=$(AWS_PROFILE=sakekasu-builder aws sts get-caller-identity --query Account --output text)
-AWS_PROFILE=yuuuuuuuki7749 npx cdk deploy sakekasu-billing-notifier -c billing=true \
+AWS_PROFILE=$ORG_PROFILE npx cdk deploy sakekasu-billing-notifier -c billing=true \
   -c billingAccount=$BILLING_ACCOUNT_ID -c appAccount=$APP_ACCOUNT_ID
 
 # 5. 動作確認（手動で1回実行して Slack に届くか見る）
-AWS_PROFILE=yuuuuuuuki7749 aws lambda invoke \
+AWS_PROFILE=$ORG_PROFILE aws lambda invoke \
   --function-name sakekasu-billing-notifier \
   --region ap-northeast-1 /dev/stdout
 ```
