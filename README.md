@@ -315,7 +315,7 @@ URL だけは無害化を通さない。山括弧を丸括弧に潰した URL �
 キーはリポジトリにも `agentcore.json` にも置かない。[Tavily](https://tavily.com/) でキーを取ってから、先に Secrets Manager へ入れる。
 
 ```bash
-AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
+AWS_PROFILE=<アプリ用のプロファイル> aws secretsmanager create-secret \
   --name dev-sakekasu/sommelier/tavily-api-key \
   --secret-string 'tvly-xxxxxxxxxxxxxxxxxxxxxxxx' \
   --region ap-northeast-1
@@ -350,7 +350,7 @@ AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
 Runtime まで届いていたかどうかは、CloudWatch Logs でも確認できる。
 
 ```bash
-AWS_PROFILE=sakekasu-builder aws logs tail \
+AWS_PROFILE=<アプリ用のプロファイル> aws logs tail \
   /aws/bedrock-agentcore/runtimes/sommelier_sommelier-Cn5eM865GE-DEFAULT \
   --since 1h --region ap-northeast-1
 ```
@@ -362,7 +362,7 @@ AWS_PROFILE=sakekasu-builder aws logs tail \
 ```bash
 # ローカル実行（COGNITO_* は LOCAL_DEV=1 と同時に設定不可）
 cd sommelier/app/sommelier
-AWS_PROFILE=sakekasu-builder PURCHASE_TABLE_NAME=dev-sakekasu-purchase-records \
+AWS_PROFILE=<アプリ用のプロファイル> PURCHASE_TABLE_NAME=dev-sakekasu-purchase-records \
   LOCAL_DEV=1 LOCAL_DEV_OWNER_SUB=<Cognitoのsub> uv run main.py
 # → POST http://localhost:8080/invocations  {"prompt": "...", "history": []}
 
@@ -390,13 +390,13 @@ git switch main && git pull
 
 # 2. デプロイ（--target は aws-targets.json の name）
 cd sommelier
-AWS_PROFILE=sakekasu-builder agentcore deploy --target dev
+AWS_PROFILE=<アプリ用のプロファイル> agentcore deploy --target dev
 
 # 3. cdk/ の依存が勝手に上がっていないか見る（下記）
 git status --short sommelier/agentcore/cdk
 
 # 4. 反映を確認（lastUpdatedAt が今なら出ている）
-AWS_PROFILE=sakekasu-builder aws bedrock-agentcore-control list-agent-runtimes \
+AWS_PROFILE=<アプリ用のプロファイル> aws bedrock-agentcore-control list-agent-runtimes \
   --region ap-northeast-1 \
   --query "agentRuntimes[?agentRuntimeName=='sommelier_sommelier'].[agentRuntimeVersion,lastUpdatedAt]" \
   --output text
@@ -426,10 +426,10 @@ npx aws-cdk ls    # AgentCore-sommelier-dev
 好み学習はフェイルオープンなので、**動いていなくても画面上は「好みを覚えていないだけ」にしか見えない**。抽出はサービス側の非同期処理で、Memory の実行ロールに権限が足りなければ黙って止まる。デプロイしたら数往復会話してから、レコードが増えているか一度だけ確認する。
 
 ```bash
-MEMORY_ID=$(AWS_PROFILE=sakekasu-builder aws bedrock-agentcore-control list-memories \
+MEMORY_ID=$(AWS_PROFILE=<アプリ用のプロファイル> aws bedrock-agentcore-control list-memories \
   --region ap-northeast-1 --query "memories[?contains(id,'sommelier_preference')].id | [0]" --output text)
 
-AWS_PROFILE=sakekasu-builder aws bedrock-agentcore list-memory-records \
+AWS_PROFILE=<アプリ用のプロファイル> aws bedrock-agentcore list-memory-records \
   --region ap-northeast-1 --memory-id "$MEMORY_ID" \
   --namespace "sommelier/preference/<Cognitoのsub>"
 ```
@@ -493,7 +493,7 @@ Webhook URL はリポジトリに置けないため、**先に手動で登録**�
 
 ```bash
 # 1. Slack の Incoming Webhook URL を登録する
-AWS_PROFILE=sakekasu-builder aws ssm put-parameter \
+AWS_PROFILE=<アプリ用のプロファイル> aws ssm put-parameter \
   --name /dev-sakekasu/monitoring/slack-webhook-url \
   --type SecureString \
   --value 'https://hooks.slack.com/services/XXX/YYY/ZZZ' \
@@ -552,7 +552,7 @@ AWS_PROFILE=$ORG_PROFILE aws ssm put-parameter \
   --region ap-northeast-1
 
 # 4. デプロイ（内訳に出すアプリ本体のアカウントの ID も、リポジトリに書かず渡す）
-APP_ACCOUNT_ID=$(AWS_PROFILE=sakekasu-builder aws sts get-caller-identity --query Account --output text)
+APP_ACCOUNT_ID=$(AWS_PROFILE=<アプリ用のプロファイル> aws sts get-caller-identity --query Account --output text)
 AWS_PROFILE=$ORG_PROFILE npx cdk deploy sakekasu-billing-notifier -c billing=true \
   -c billingAccount=$BILLING_ACCOUNT_ID -c appAccount=$APP_ACCOUNT_ID
 
@@ -705,7 +705,7 @@ npm run dev
 # インフラ（CDK）※デプロイは Actions 経由。ここでは差分の確認まで
 cd infra
 npm install
-AWS_PROFILE=sakekasu-builder npx cdkd diff --all -c env=dev
+AWS_PROFILE=<アプリ用のプロファイル> npx cdkd diff --all -c env=dev
 ```
 
 デプロイ後に AppSync のエンドポイント等が変わったときは、`infra/scripts/generate-outputs.ts` を実行して `amplify_outputs.json` を作り直す。認証の値（共通ログイン）は `infra/cdk.json` の `sharedAuth` から書く。
@@ -750,7 +750,7 @@ infra のスタックは [cdkd](https://github.com/go-to-k/cdkd) の管理下に
 
 ```bash
 cd infra
-AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc -c github-oidc=true
+AWS_PROFILE=<アプリ用のプロファイル> npx cdk deploy sakekasu-github-oidc -c github-oidc=true
 ```
 
 OIDC プロバイダーと deploy / diff / site ロール、それに cdkd 用のデプロイロール（`sakekasu-cdkd-deploy`）が入る。初回のほか、これらのロールを変えたときも同じコマンドで入れ直す。
