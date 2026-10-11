@@ -5,6 +5,15 @@ builder だけがトップレベルのドメイン（`sakekasu-builder.com`）�
 `sake.sakekasu-builder.com` に移し、あわせて配信を Amplify Hosting から CDK（S3 + CloudFront）へ
 載せ替える。
 
+> **いまの状態（2026-10-11〜）**: 移行は 2026-10-04 に済んだ。空いた apex（`sakekasu-builder.com`）は
+> 4 アプリ共通の入口のページになっている（表紙 → 共通ログイン → アプリの一覧）。入口が受け持つパス
+> （`/`、`/apps`、`/logout`）以外は、今も sake. へ 301 で転送する。各アプリでサインアウトすると、
+> この入口の表紙に戻る。入口の作りは sakekasu-integrated_environment の docs/apex-redirect.md にある。
+
+> **その後（2026-10-11）**: 同じ CloudFront が apex の `/`・`/apps`・`/logout` で 4 アプリの入口の
+> ページを返すようになった。sake. への 301 は、それ以外のパスで続いている。
+> 下の手順 7・8 は移行した当時の記録で、その後に変わったところは各節の注に書いた。
+
 ## なぜ移すか
 
 - apex を空ける。4 アプリの入口ページや転送に使える。いまは「サイト全体の名前」と
@@ -146,7 +155,10 @@ docs/apex-redirect.md にある。
 ### 8. 片付け
 
 - 共通ログインの builder のクライアントから `https://sakekasu-builder.com/` と
-  `https://www.sakekasu-builder.com/` を外した（sakekasu-integrated_environment の infra/cdk.json）
+  `https://www.sakekasu-builder.com/` を外した（sakekasu-integrated_environment の infra/cdk.json）。
+  その後 2026-10-11 に、`https://sakekasu-builder.com/` だけをサインアウト後の戻り先（`logoutUrls`）に
+  戻した。サインアウトしたら入口の表紙へ帰すため（`src/features/auth/amplifyConfig.ts` の
+  `PORTAL_SIGN_OUT_URL`）。ログインの戻り先（`callbackUrls`）は sake. のまま
 - 画像バケットの CORS（[api-stack.ts](../infra/lib/api-stack.ts)）から apex と `*.amplifyapp.com` を外した
 - 外形監視の対象を sake. に替えた。共通基盤の `healthChecks` の builder と、このリポジトリの `siteUrl`。
   monitoring-stack が外形監視を共通基盤と二重に持っている件は、別に片付ける

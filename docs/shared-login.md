@@ -30,13 +30,21 @@ builder 用クライアントに許されている OAuth スコープは `openid
 画面が使うのは `signInWithRedirect`・`signOut`・`getCurrentUser`（トークンのクレームを読むだけ）・
 `fetchAuthSession`（ソムリエへ渡すアクセストークン）だけ。
 
-戻り先とログアウト後の戻り先は、共通ログイン側に次の 3 つを登録してある。末尾の `/` まで完全一致でないと断られる。
+戻り先とログアウト後の戻り先は、共通ログイン側（sakekasu-integrated_environment の `infra/cdk.json`）に
+次のとおり登録してある。末尾の `/` まで完全一致でないと断られる。
 
-- `https://sakekasu-builder.com/`
-- `https://www.sakekasu-builder.com/`
-- `http://localhost:5173/`
+| URL | ログインの戻り先 | ログアウト後の戻り先 |
+| --- | --- | --- |
+| `https://sake.sakekasu-builder.com/` | ○ | ○ |
+| `https://sakekasu-builder.com/`（4 アプリ共通の入口） | | ○ |
+| `http://localhost:5173/` | ○ | ○ |
 
-画面は開いているオリジンに `/` を付けた URL を戻り先にする（`src/features/auth/amplifyConfig.ts`）。
+ログインの戻り先は、開いているオリジンに `/` を付けた URL にする。ログアウト後は、本番では入口の表紙
+（`https://sakekasu-builder.com/`）、手元（localhost / 127.0.0.1）では自分の `/` に戻す
+（どちらも `src/features/auth/amplifyConfig.ts`）。
+
+> 2026-10-04 に `sake.sakekasu-builder.com` へ移るまでは、apex と www（`https://sakekasu-builder.com/`・
+> `https://www.sakekasu-builder.com/`）を登録していた（[sake-subdomain.md](sake-subdomain.md)）。
 Amplify Hosting のプレビュー URL（`*.amplifyapp.com`）は登録していないので、そこからはログインできない。
 
 ## 何が共通ログインを見るようになったか
