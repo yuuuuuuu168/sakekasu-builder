@@ -274,6 +274,11 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
     // cdkd がこれを必要とするのは、CDK 側で assumedBy を変えたときだけ。
     // 起きたら AccessDenied で止まるので、そのときは人間が手で直す
     // （PR #152 のレビュー指摘）
+    //
+    // iam:ListInstanceProfilesForRole はロールを消すときに要る。cdkd は DeleteRole の前に、
+    // ロールを入れたインスタンスプロファイルを一覧して外す。無いとロールを作り替えた
+    // デプロイが古いロールを消す段で止まり、巻き戻しで古いロールの権限だけが消えた
+    // まま残る（2026-10-11、OCR とテイスティングノートのロール名を固定したデプロイで実際に起きた）
     new iam.PolicyStatement({
       sid: 'ReadAndTagApplicationRoles',
       actions: [
@@ -283,6 +288,7 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
         'iam:GetRolePolicy',
         'iam:ListRolePolicies',
         'iam:ListAttachedRolePolicies',
+        'iam:ListInstanceProfilesForRole',
         'iam:ListRoleTags',
         'iam:TagRole',
         'iam:UntagRole',

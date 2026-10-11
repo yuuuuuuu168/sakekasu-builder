@@ -220,6 +220,29 @@ PR にしてマージすると、ロールに `sts:GetWebIdentityToken` が付�
 
 フォールバックそのものを確かめたいときは、一時的にルールを無効にする（または Console で別のワークスペースだけを認可する）と、`errorType: authentication` で Bedrock に回り、`[llm] fallback` が出る。確かめたら戻す。
 
+## 2026-10-11 のデプロイ失敗
+
+切り替えの PR をマージした後のデプロイ（cdkd）が、古い実行ロールを消す段で止まった。cdkd のデプロイロール（`sakekasu-cdkd-deploy`）に `iam:ListInstanceProfilesForRole` が無かったため。cdkd はロールを消す前に、管理ポリシー・インラインポリシーを外し、インスタンスプロファイルを一覧してから `DeleteRole` を呼ぶ。cdkd に移ってからロールを消すのはこれが初めてで、それまで抜けに気づけなかった。
+
+巻き戻しは途中までしか戻らなかった。
+
+- OCR とテイスティングノートの Lambda は古いロールに戻ったが、そのロールの権限（インライン・管理ポリシーとも）は先に消えていて戻らなかった。ログも書けず、S3 も Bedrock も呼べない状態になった
+- 新しく作った `sakekasu-dev-llm-ocr-analyzer` / `sakekasu-dev-llm-tasting-note` は、同じ権限不足で消せずに残った。cdkd の state には「作成済み」として載っている（次の `cdkd diff` でロール本体が作成に出ない）。ただし巻き戻しの途中で管理ポリシーが外れていて、state の上では付いたままになっている。cdkd は state と比べて差分を当てるので、デプロイしても付け直さない
+
+直し方は次の順。
+
+1. デプロイロールに `iam:ListInstanceProfilesForRole` を足す（[cdkd-policies.ts](../infra/lib/cdkd-policies.ts)）。デプロイロールは `sakekasu-github-oidc` スタックなので、手動でデプロイする。このとき Permissions Boundary の変更も一緒に反映される
+2. 新しいロールに、外れた管理ポリシーを手で付け直す。テンプレートが期待しているのは次の 3 つ（ロールは消さない。消すと state と食い違い、次のデプロイがインラインポリシーを付ける段で落ちる）
+   ```sh
+   aws iam attach-role-policy --role-name sakekasu-dev-llm-ocr-analyzer \
+     --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+   aws iam attach-role-policy --role-name sakekasu-dev-llm-ocr-analyzer \
+     --policy-arn arn:aws:iam::aws:policy/CloudWatchLambdaApplicationSignalsExecutionRolePolicy
+   aws iam attach-role-policy --role-name sakekasu-dev-llm-tasting-note \
+     --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+   ```
+3. デプロイをやり直す（修正の PR をマージすると走る）。インラインポリシー（S3・Bedrock・X-Ray など）は新しく作られ、Lambda が新しいロールに付け替わり、古いロールが消える。古いロールのインラインポリシーは state から外れ済みで、残りも cdkd は「すでに無い」を飛ばして進む
+
 ## 戻し方
 
 - **1 つの機能だけ Bedrock に戻す**: その関数の `LLM_PROVIDER` を `bedrock` にする（Lambda は [api-stack.ts](../infra/lib/api-stack.ts) の `llmEnvironment`、ソムリエは `agentcore.json`）
