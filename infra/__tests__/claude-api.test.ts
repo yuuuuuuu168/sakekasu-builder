@@ -223,7 +223,7 @@ describe('Claude API から Bedrock へのやり直しの監視', () => {
     });
 
     Template.fromStack(monitoring).hasResourceProperties('AWS::CloudWatch::Alarm', {
-      AlarmName: 'dev-sakekasu-llm-fallback',
+      AlarmName: 'sakekasu-builder-dev-llm-fallback',
       MetricName: 'LlmFallbackCount',
       Namespace: 'dev-sakekasu',
       Threshold: 3,

@@ -157,13 +157,13 @@ describe("MonitoringStack", () => {
       Protocol: "lambda",
     });
     template.hasResourceProperties("AWS::Lambda::Function", {
-      FunctionName: "dev-sakekasu-slack-notifier",
+      FunctionName: "sakekasu-builder-dev-slack-notifier",
     });
   });
 
   it("Webhook URL はコードに持たず SSM パラメータ名だけを渡す", () => {
     template.hasResourceProperties("AWS::Lambda::Function", {
-      FunctionName: "dev-sakekasu-slack-notifier",
+      FunctionName: "sakekasu-builder-dev-slack-notifier",
       Environment: {
         Variables: {
           WEBHOOK_PARAMETER_NAME: "/dev-sakekasu/monitoring/slack-webhook-url",
@@ -193,7 +193,7 @@ describe("MonitoringStack", () => {
       "InvalidInboundTokenException",
     ]) {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-        AlarmName: `dev-sakekasu-sommelier-auth-failure-${exceptionType}`,
+        AlarmName: `sakekasu-builder-dev-sommelier-auth-failure-${exceptionType}`,
         Namespace: "AWS/Bedrock-AgentCore",
         MetricName: "InboundAuthorizationFailure",
         Dimensions: Match.arrayWith([
@@ -206,10 +206,10 @@ describe("MonitoringStack", () => {
 
   it("AI 機能（ソムリエ・OCR）のエラーとスロットルを監視する", () => {
     for (const alarmName of [
-      "dev-sakekasu-sommelier-system-errors",
-      "dev-sakekasu-sommelier-throttles",
-      "dev-sakekasu-ocr-errors",
-      "dev-sakekasu-ocr-throttles",
+      "sakekasu-builder-dev-sommelier-system-errors",
+      "sakekasu-builder-dev-sommelier-throttles",
+      "sakekasu-builder-dev-ocr-errors",
+      "sakekasu-builder-dev-ocr-throttles",
     ]) {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: alarmName,
@@ -219,7 +219,7 @@ describe("MonitoringStack", () => {
 
   it("サービス正常性（AppSync・DynamoDB）を監視する", () => {
     template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      AlarmName: "dev-sakekasu-appsync-5xx",
+      AlarmName: "sakekasu-builder-dev-appsync-5xx",
       Namespace: "AWS/AppSync",
       MetricName: "5XXError",
     });
@@ -237,7 +237,7 @@ describe("MonitoringStack", () => {
   it("DynamoDB のスロットリングはテーブル単位で出る指標で見る", () => {
     const alarms = Object.values(
       template.findResources("AWS::CloudWatch::Alarm", {
-        Properties: { AlarmName: Match.stringLikeRegexp("^dev-sakekasu-dynamodb-throttle-") },
+        Properties: { AlarmName: Match.stringLikeRegexp("^sakekasu-builder-dev-dynamodb-throttle-") },
       }),
     ) as Array<{ Properties: { MetricName?: string; Metrics: AlarmMetricEntry[] } }>;
     expect(alarms.length).toBeGreaterThan(0);
@@ -268,14 +268,14 @@ describe("MonitoringStack", () => {
   // 通知経路そのものが壊れると誰も気づけない
   it("Slack 通知 Lambda の失敗も監視する", () => {
     template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      AlarmName: "dev-sakekasu-slack-notifier-failure",
+      AlarmName: "sakekasu-builder-dev-slack-notifier-failure",
     });
   });
 
   // 以前は ApiStack にあり通知先が無かった
   it("画像削除失敗アラームを引き継ぎ、通知先を持たせる", () => {
     template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      AlarmName: "dev-sakekasu-image-delete-fail",
+      AlarmName: "sakekasu-builder-dev-image-delete-fail",
       MetricName: "ImageDeleteFailCount",
     });
   });
@@ -302,11 +302,11 @@ describe("MonitoringStack", () => {
     // - SLO の達成率: 30日の rolling で動きが遅い。値が出なくなったときに
     //   「異常なし」と扱うと、未達のまま復旧したことになってしまう
     const exceptions = new Set([
-      "dev-sakekasu-watcher-silent-health-check",
-      "dev-sakekasu-ocr-slo-availability",
-      "dev-sakekasu-ocr-slo-latency",
-      "dev-sakekasu-presigned-url-slo-availability",
-      "dev-sakekasu-presigned-url-slo-latency",
+      "sakekasu-builder-dev-watcher-silent-health-check",
+      "sakekasu-builder-dev-ocr-slo-availability",
+      "sakekasu-builder-dev-ocr-slo-latency",
+      "sakekasu-builder-dev-presigned-url-slo-availability",
+      "sakekasu-builder-dev-presigned-url-slo-latency",
     ]);
 
     const alarms = template.findResources("AWS::CloudWatch::Alarm");
@@ -324,7 +324,7 @@ describe("MonitoringStack", () => {
   // 実際に発報させているのは欠損の扱い（breaching）のほう
   it("外形監視が「動いていないこと」自体を検知する", () => {
     for (const [name, window] of [
-      ["dev-sakekasu-watcher-silent-health-check", 3600],
+      ["sakekasu-builder-dev-watcher-silent-health-check", 3600],
     ] as const) {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: name,
@@ -343,7 +343,7 @@ describe("MonitoringStack", () => {
   // 監視が動かなくなると異常に気づけない
   it("外形監視の実行失敗そのものを監視する", () => {
     for (const alarmName of [
-      "dev-sakekasu-watcher-failure-health-check",
+      "sakekasu-builder-dev-watcher-failure-health-check",
     ]) {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: alarmName,
@@ -353,7 +353,7 @@ describe("MonitoringStack", () => {
 
   it("外形監視を5分ごとに回す", () => {
     template.hasResourceProperties("AWS::Events::Rule", {
-      Name: "dev-sakekasu-health-check-schedule",
+      Name: "sakekasu-builder-dev-health-check-schedule",
       ScheduleExpression: "rate(5 minutes)",
     });
   });
@@ -361,7 +361,7 @@ describe("MonitoringStack", () => {
   it("外形監視は認証なしで叩いて拒否が返ることを正常とみなす", () => {
     const functions = template.findResources("AWS::Lambda::Function");
     const healthCheck = Object.values(functions).find(
-      (fn) => fn.Properties?.FunctionName === "dev-sakekasu-health-check",
+      (fn) => fn.Properties?.FunctionName === "sakekasu-builder-dev-health-check",
     );
     expect(healthCheck).toBeDefined();
 
@@ -383,7 +383,7 @@ describe("MonitoringStack", () => {
 
   it("外形監視は2回続けて失敗したときだけ通知する", () => {
     template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      AlarmName: "dev-sakekasu-health-check-frontend",
+      AlarmName: "sakekasu-builder-dev-health-check-frontend",
       EvaluationPeriods: 2,
     });
   });
@@ -563,16 +563,16 @@ describe("MonitoringStack", () => {
     // まま居座り、監視が入っているように見えて何も鳴らない
     it.each([
       [
-        "dev-sakekasu-ocr-slo-availability",
+        "sakekasu-builder-dev-ocr-slo-availability",
         "dev-sakekasu-ocr-analyzer-availability",
       ],
-      ["dev-sakekasu-ocr-slo-latency", "dev-sakekasu-ocr-analyzer-latency"],
+      ["sakekasu-builder-dev-ocr-slo-latency", "dev-sakekasu-ocr-analyzer-latency"],
       [
-        "dev-sakekasu-presigned-url-slo-availability",
+        "sakekasu-builder-dev-presigned-url-slo-availability",
         "dev-sakekasu-presigned-url-availability",
       ],
       [
-        "dev-sakekasu-presigned-url-slo-latency",
+        "sakekasu-builder-dev-presigned-url-slo-latency",
         "dev-sakekasu-presigned-url-latency",
       ],
     ])("%s は %s の達成率を見ている", (alarmName, sloName) => {
@@ -587,10 +587,10 @@ describe("MonitoringStack", () => {
     // 「下回ったら異常」。既定は「以上で異常」なので、指定を落とすと
     // 達成率が高いときに鳴る逆立ちしたアラームになる
     it.each([
-      "dev-sakekasu-ocr-slo-availability",
-      "dev-sakekasu-ocr-slo-latency",
-      "dev-sakekasu-presigned-url-slo-availability",
-      "dev-sakekasu-presigned-url-slo-latency",
+      "sakekasu-builder-dev-ocr-slo-availability",
+      "sakekasu-builder-dev-ocr-slo-latency",
+      "sakekasu-builder-dev-presigned-url-slo-availability",
+      "sakekasu-builder-dev-presigned-url-slo-latency",
     ])("%s は目標を下回ったときに鳴る", (alarmName) => {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: alarmName,

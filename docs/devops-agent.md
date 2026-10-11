@@ -45,13 +45,13 @@ Agent Space は運用ツール専用のメンバーアカウント `ops-tooling`
 
 ### アラーム転送 Lambda
 
-`dev-sakekasu-devops-agent-webhook`（`infra/lambda/devops-agent-webhook/`）。アラートトピックを購読し、DevOps Agent の Webhook に調査依頼を投げる。
+`sakekasu-builder-dev-devops-agent-webhook`（`infra/lambda/devops-agent-webhook/`）。アラートトピックを購読し、DevOps Agent の Webhook に調査依頼を投げる。
 
 調査に回すのは、次の条件を満たすものだけ。エージェントは秒課金なので、鳴ったもの全部を投げると費用が読めなくなる。
 
 - CloudWatch アラームが `ALARM` に変わったとき。復旧（`OK`）とデータ不足では投げない
 - AWS Health のうち `issue`（実際の障害）だけ。予定された変更やお知らせは投げない。ただし AWS Health の通知は共通基盤（sakekasu-integrated_environment）へ移したので、いまはこのトピックに流れてこない。転送 Lambda の判定は残してある
-- 転送 Lambda 自身の失敗アラーム（`dev-sakekasu-devops-agent-webhook-failure`）は捨てる。届かないことを届けようとして調査が積み上がるのを避けるため
+- 転送 Lambda 自身の失敗アラーム（`sakekasu-builder-dev-devops-agent-webhook-failure`）は捨てる。届かないことを届けようとして調査が積み上がるのを避けるため
 
 調査の識別子は「アラーム名 + 状態が変わった時刻」で作る。SNS が再試行しても同じ値になるので調査は1件に収まり、2度目の発報では別の値になるので重複として捨てられない。
 
@@ -209,7 +209,7 @@ Slack を鳴らさずに転送だけ試すなら、Lambda を直接呼ぶ。
 
 ```bash
 AWS_PROFILE=sakekasu-builder aws lambda invoke \
-  --function-name dev-sakekasu-devops-agent-webhook \
+  --function-name sakekasu-builder-dev-devops-agent-webhook \
   --region ap-northeast-1 \
   --payload '{"Records":[{"Sns":{"Message":"{\"AlarmName\":\"TEST-devops-agent\",\"AlarmDescription\":\"[TEST] 疎通確認です。調査は不要です\",\"NewStateValue\":\"ALARM\",\"NewStateReason\":\"[TEST] Webhook の疎通確認\",\"Region\":\"Asia Pacific (Tokyo)\"}","Timestamp":"2026-08-09T00:00:00.000Z"}}]}' \
   --cli-binary-format raw-in-base64-out /dev/stdout
@@ -267,7 +267,7 @@ aws iam list-attached-role-policies \
 ```
 
 2026-10-04 に試したところ、S3 バケット12個・Lambda 関数33個・DynamoDB テーブル5個などが
-アカウント構成つきで返ってきた。デプロイしたばかりの `dev-sakekasu-devops-agent-webhook` も
+アカウント構成つきで返ってきた。デプロイしたばかりの `sakekasu-builder-dev-devops-agent-webhook` も
 「10/4作成」として認識されていた。
 
 返ってきた一覧には、タグを付けていないリソース（`sakekasu-kakeibo-dev-*`・`ReinventPlanner-*`・
