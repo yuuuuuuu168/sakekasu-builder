@@ -153,6 +153,7 @@ cdkd 側の対応状況は、おおむね問題ない。[supported-resources.md]
 **フロントの配信物を CDK の `BucketDeployment` で置かない。** あれは `Custom::CDKBucketDeployment` という Lambda 製のカスタムリソースを作る。[#129](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/129) で `Custom::LogRetention` を6個消したのは、CloudFormation がカスタムリソースを IMPORT できず cdkd から戻せなくなるためだった。同じ性質のものをフロント側から持ち込むと、せっかく確保した退路が塞がる。ビルド成果物は Actions から CLI でバケットへ同期する形にする。
 
 外形監視は変更が要らない。`infra/bin/app.ts` の `siteUrl` は `https://sakekasu-builder.com` で、監視しているのはドメインであって Amplify の URL ではない。DNS の向き先が変わるだけなので、`monitoring-stack.ts` の設定はそのまま通る。
+（その後、サイトの外形監視はこのリポジトリから外し、共通基盤（sakekasu-integrated_environment）の `healthChecks` の `builder` だけが見るようにした。`siteUrl` はもう無い）
 
 ついでに片付くものとして、`infra/lib/api-stack.ts` の S3 CORS 許可オリジンから `https://*.amplifyapp.com` を消せる。ワイルドカードのサブドメインを許可している行なので、消せるなら消したい。
 
