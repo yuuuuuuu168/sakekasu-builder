@@ -36,6 +36,12 @@ export interface AppOutputs {
  */
 export const PORTAL_SIGN_OUT_URL = 'https://sakekasu-builder.com/';
 
+/**
+ * 4 アプリの入口の一覧。ログイン後のヘッダーの「アプリ一覧」から移る先。
+ * 共通ログインのセッションが残っていれば、入力なしで一覧が出る
+ */
+export const PORTAL_APPS_URL = 'https://sakekasu-builder.com/apps';
+
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
 
 /** オリジン + `/`。共通ログインに登録した戻り先は末尾の `/` まで完全一致で比べられる */

@@ -19,7 +19,8 @@ import {
 } from '@/features/sommelier/lib/chatStorage';
 import { clearFilterState } from '@/features/records/lib/filterStorage';
 import { clearDownloadUrlCache } from '@/features/image/lib/downloadUrlCache';
-import { consumeSsoHint } from './ssoHint';
+import { consumeSsoHint, type LandingUrl } from './ssoHint';
+import { canAutoSignIn, clearAutoSignInMark, markAutoSignIn } from './autoSignIn';
 import { signOutRedirectUrl } from './amplifyConfig';
 
 /**
@@ -45,15 +46,16 @@ export interface AuthContextValue {
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
   /**
-   * 共通ポータルから `?sso=1` 付きで来て、読み込みを終えた時点で未サインインだった。
-   * AuthPage はこのときボタンを見せずに「移動中」の表示で始める
+   * 読み込みを終えた時点で未サインインで、このタブではまだ自動で送っていない。
+   * AuthPage はこのとき見本の画面を見せずに「移動中」の表示で始める
    */
-  ssoAutoSignIn: boolean;
+  autoSignIn: boolean;
   /**
    * 自動サインインを始めてよいかを一度だけ答える（2回目以降は常に false）。
-   * true を返したら、呼び手がボタンと同じ signIn を呼ぶ
+   * 印は autoSignIn を立てる時点で置いてある（autoSignIn.ts）。true を返したら、
+   * 呼び手がボタンと同じ signIn を呼ぶ
    */
-  takeSsoAutoSignIn: () => boolean;
+  takeAutoSignIn: () => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -72,18 +74,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // ポータルからの目印。null はまだ読んでいない。StrictMode で effect が
+  // 開いた URL から読んだこと。null はまだ読んでいない。StrictMode で effect が
   // 2回走っても URL は1回目で書き換わるので、読んだ結果を ref に持っておく
-  const ssoHintRef = useRef<boolean | null>(null);
-  const [ssoAutoSignIn, setSsoAutoSignIn] = useState(false);
+  const landingRef = useRef<LandingUrl | null>(null);
+  // 自動で送ってよいと決めたか。決めるのは最初の読み込みのときだけで、
+  // サインアウトやリフレッシュの失敗で未サインインに戻ったときは送らない
+  // （サインアウトは自分でマネージドログインの /logout へ移るので、ここから
+  // 送るとその移動を潰す）
+  const autoSignInRef = useRef(false);
+  const [autoSignIn, setAutoSignIn] = useState(false);
 
   useEffect(() => {
     let active = true;
 
-    // 目印はサインイン済みかどうかによらず、読み込みの最初に URL から消す
-    if (ssoHintRef.current === null) {
-      ssoHintRef.current = consumeSsoHint();
+    // ポータルの目印はサインイン済みかどうかによらず、読み込みの最初に URL から消す
+    if (landingRef.current === null) {
+      landingRef.current = consumeSsoHint();
     }
+    const landing = landingRef.current;
 
     // マネージドログインから ?code=... 付きで戻ってきたときは、Amplify が
     // configure の直後にトークン交換を始める。getCurrentUser はその完了を
@@ -96,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           fetchAuthUser()
             .then((authUser) => {
               if (!active) return;
+              clearAutoSignInMark();
               setUser(authUser);
               setError(null);
             })
@@ -108,6 +117,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (active) {
             setUser(null);
             setError(REDIRECT_FAILURE_MESSAGE);
+            autoSignInRef.current = false;
+            setAutoSignIn(false);
           }
           break;
         case 'signedOut':
@@ -121,15 +132,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     fetchAuthUser()
       .then((authUser) => {
         if (!active) return;
+        // サインインできているので、このタブの印は役目を終えた
+        clearAutoSignInMark();
         setUser(authUser);
-        // すでにサインイン済みなら目印は使わない。後でサインアウトしたときに
-        // 自動で送り直さないよう、ここで捨てる
-        ssoHintRef.current = false;
       })
       .catch(() => {
         if (!active) return;
         setUser(null);
-        if (ssoHintRef.current) setSsoAutoSignIn(true);
+        // `?error=` で戻ってきたときは、Amplify の失敗のイベントを待たずに文言を出す。
+        // イベントはこの effect が受け口を張る前に流れてしまうことがある
+        if (landing.oauthError) setError(REDIRECT_FAILURE_MESSAGE);
+        // 印は送ると決めた時点で置く。置けなければ一度だけを守れないので、
+        // 自動では送らずに画面を出す
+        if (canAutoSignIn(landing) && markAutoSignIn()) {
+          autoSignInRef.current = true;
+          setAutoSignIn(true);
+        }
       })
       .finally(() => {
         if (active) setIsLoading(false);
@@ -155,10 +173,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const takeSsoAutoSignIn = useCallback(() => {
-    if (!ssoHintRef.current) return false;
-    ssoHintRef.current = false;
-    setSsoAutoSignIn(false);
+  const takeAutoSignIn = useCallback(() => {
+    if (!autoSignInRef.current) return false;
+    autoSignInRef.current = false;
+    setAutoSignIn(false);
     return true;
   }, []);
 
@@ -213,8 +231,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     error,
     signIn,
     signOut,
-    ssoAutoSignIn,
-    takeSsoAutoSignIn,
+    autoSignIn,
+    takeAutoSignIn,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

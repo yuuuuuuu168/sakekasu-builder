@@ -47,6 +47,12 @@ builder 用クライアントに許されている OAuth スコープは `openid
 > `https://www.sakekasu-builder.com/`）を登録していた（[sake-subdomain.md](sake-subdomain.md)）。
 Amplify Hosting のプレビュー URL（`*.amplifyapp.com`）は登録していないので、そこからはログインできない。
 
+未サインインでアプリを開くと、ボタンを押させずにマネージドログインへ自動で送る（タブごとに一度だけ）。
+送る前に sessionStorage へ印を置き、戻ってきてもまだ未サインイン（取り消した、`?error=` 付きで戻った等）なら
+自動では送らず、入口の表紙と同じ見た目の画面（黒に固定）と「パスキーでログイン」のボタンを出す。
+サインインできたら印を消す。共通ポータルが付けてくる `?sso=1` は判断に使わず、URL から消すだけ
+（`src/features/auth/autoSignIn.ts`・`ssoHint.ts`）。
+
 ## 何が共通ログインを見るようになったか
 
 | 場所 | 変更 |
