@@ -1,7 +1,8 @@
 # Amplify をやめて CDK 側へ寄せるかの検討
 
 > **2026-10-04 に移行した。** builder は `sake.sakekasu-builder.com` で S3 + CloudFront（CDK）から配り、
-> apex と www は sake. へ転送している。Amplify アプリは削除済み。手順と記録は [sake-subdomain.md](sake-subdomain.md)。
+> apex と www は sake. へ転送した。Amplify アプリは削除済み。手順と記録は [sake-subdomain.md](sake-subdomain.md)。
+> 2026-10-11 からは、apex の `/`・`/apps`・`/logout` が 4 アプリ共通の入口のページになっている（それ以外のパスは今も sake. へ転送）。
 > 以下は移行前の検討の記録として残す。
 
 cdkd 移行（[#19](https://github.com/yuuuuuuu168/sakekasu-builder/issues/19)）の流れで「Amplify を全面的にやめる」案が出たので、可否を調べた。結論は「急いでやる理由は無い。ただし移行しないなら、コンソールにしか無い設定をこの文書に書き出しておく」。
