@@ -32,7 +32,11 @@
         { "name": "TAVILY_API_KEY_SECRET_ID", "value": "dev-sakekasu/sommelier/tavily-api-key" },
         { "name": "LLM_PROVIDER", "value": "anthropic" },
         { "name": "ANTHROPIC_MODEL_CHAT", "value": "claude-haiku-5-5" },
-        { "name": "BEDROCK_MODEL_ID", "value": "jp.anthropic.claude-haiku-4-5-20251001-v1:0" }
+        { "name": "BEDROCK_MODEL_ID", "value": "jp.anthropic.claude-haiku-4-5-20251001-v1:0" },
+        { "name": "ANTHROPIC_FEDERATION_RULE_ID", "value": "fdrl_01Tqxpf4VMtFM2fiCuGndsw3" },
+        { "name": "ANTHROPIC_ORGANIZATION_ID", "value": "c155ee76-4f2a-4282-aae0-a453dd5145af" },
+        { "name": "ANTHROPIC_SERVICE_ACCOUNT_ID", "value": "svac_01AZtWEtET1fTHKpwvVcMkQS" },
+        { "name": "ANTHROPIC_WORKSPACE_ID", "value": "wrkspc_01RTpiayq3B1SM6Ap151XkLY" }
       ]
     }
   ],
