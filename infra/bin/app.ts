@@ -24,13 +24,14 @@ const app = new cdk.App();
 // 作り直しが起き、古いロールからポリシーがはがれて API が止まった）。ロールはガードレールでも
 // 名前の接頭辞で範囲を絞る。
 //
-// Application Signals の SLO にも付けない。cdkd は SLO を Cloud Control API で更新し、その途中で
-// application-signals:GetServiceLevelObjective を呼ぶが、cdkd 用ロールにその権限が無く断られる
-// （2026-10-04、sakekasu-dev-monitoring のデプロイが失敗してロールバックした）。
-// 権限が無かったのは、cdkd-policies.ts が接頭辞を `applicationsignals:` と書いていたため（2026-10 に直した）。
-// 直した権限は OIDC スタックを手でデプロイしたあとに効く。それを確かめるまで、ここは外したままにする
+// Application Signals の SLO には付ける。以前は外していた。cdkd は SLO を Cloud Control API で更新し、
+// その途中で application-signals:GetServiceLevelObjective を呼ぶが、cdkd 用ロールにその権限が無く断られ、
+// 2026-10-04 に sakekasu-dev-monitoring のデプロイが失敗してロールバックしたため。
+// 権限が無かった原因は、cdkd-policies.ts が接頭辞を `applicationsignals:` と書いていたこと。
+// 2026-10-11 に直して OIDC スタックを入れ直し、Cloud Control と SLO の操作が許されることを
+// simulate-principal-policy で確かめてから戻した
 cdk.Tags.of(app).add('App', 'builder', {
-  excludeResourceTypes: ['AWS::IAM::Role', 'AWS::ApplicationSignals::ServiceLevelObjective'],
+  excludeResourceTypes: ['AWS::IAM::Role'],
 });
 
 // GitHub Actions からの CDK デプロイ用 OIDC 連携（Issue #94）。
