@@ -93,6 +93,10 @@ if not IS_LOCAL_DEV and (not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_IDS)
         "COGNITO_USER_POOL_ID / COGNITO_APP_CLIENT_ID が未設定、または空白のみなど"
         "使用できない値です（LOCAL_DEV=1 以外では必須）"
     )
+# 相談の回数の上限（quota.py）。テーブル名が無いと上限が黙って効かなくなるので、
+# 手元での確認（LOCAL_DEV=1）以外では起動を止める
+if not IS_LOCAL_DEV and not os.getenv("CHAT_QUOTA_TABLE_NAME", "").strip():
+    raise RuntimeError("CHAT_QUOTA_TABLE_NAME が未設定です（LOCAL_DEV=1 以外では必須）")
 
 # 悪用時のコスト増幅・リソース枯渇を抑える上限
 MAX_PROMPT_LENGTH = 4000

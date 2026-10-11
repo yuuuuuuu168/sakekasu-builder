@@ -69,9 +69,22 @@ def test_数えられないときはUNAVAILABLE(monkeypatch):
     assert quota.consume("user-1") is QuotaResult.UNAVAILABLE
 
 
-def test_テーブル名が無ければ数えない(monkeypatch):
+def test_テーブル名が無ければ数えない_手元の確認用(monkeypatch):
     monkeypatch.delenv("CHAT_QUOTA_TABLE_NAME", raising=False)
     assert quota.consume("user-1") is QuotaResult.OK
+
+
+def test_手元の確認以外でテーブル名が無ければ起動を止める():
+    import os
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if k != "CHAT_QUOTA_TABLE_NAME"}
+    result = subprocess.run(
+        [sys.executable, "-c", "import main"], env=env, capture_output=True, text=True, cwd=os.path.dirname(main.__file__)
+    )
+    assert result.returncode != 0
+    assert "CHAT_QUOTA_TABLE_NAME" in result.stderr
 
 
 def test_上限の既定は50回で_不正な値なら既定に戻す(monkeypatch):
