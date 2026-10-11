@@ -5,18 +5,24 @@
 投稿を読んだ側から追加で頼みたくなったぶんは、双方向用のプライベートチャンネルで受ける。メンションで調査を始めたり、経過を聞いたりできる（[Slack の双方向通信](#slack-の双方向通信)）。
 
 ```
-CloudWatch アラーム ─┐
-外形監視・カナリア ──┴→ SNS（dev-sakekasu-alerts）┬→ Slack 通知 Lambda → Slack（#sakekasu-builder-alarm）
-                                                  │
-                                                  └→ 転送 Lambda → DevOps Agent Webhook
-                                                                        ↓
-                                                     自動調査 → Slack（#sakekasu-builder-agent）
+4 アプリの CloudWatch アラーム ─┐
+共通基盤の外形監視 ─────────────┴→ SNS（sakekasu-integrated-alerts）┬→ Slack 通知 Lambda → Slack（#sakekasu-builder-alarm）
+                                                                   │
+                                                                   └→ 転送 Lambda → DevOps Agent Webhook
+                                                                                         ↓
+                                                                      自動調査 → Slack（#sakekasu-builder-agent）
 
 人 ⇄ Slack（#sakekasu-builder-agent・プライベート）⇄ DevOps Agent
      メンションで調査の開始・経過の照会・追加の指示
 ```
 
 既存の Slack 通知はそのまま残る。転送 Lambda は同じトピックをもう1つの購読者として横から受け取るだけなので、エージェントが止まってもアラート自体は届く。
+
+**トピックと転送 Lambda は共通基盤（sakekasu-integrated_environment）にある（2026-10 に移した）。**
+以前は転送 Lambda がこのリポジトリにあり、builder のトピック（`dev-sakekasu-alerts`）だけを購読していた。
+他の 3 アプリのアラームは Slack に届くだけで調査に回っていなかったので、共通トピックの側へ移し、builder のアラームも
+共通トピックへ送るようにした。転送の作り（調査に回す条件、優先度、HMAC、送り先の制限）と設定の登録手順は、
+共通基盤の `docs/monitoring.md` の「DevOps Agent への転送」にある。
 
 ## アカウント構成
 
@@ -33,7 +39,7 @@ Agent Space は運用ツール専用のメンバーアカウント `ops-tooling`
 
 ## リポジトリに入っているもの
 
-コンソール側（Agent Space・Slack・GitHub 連携）は手作業で、アプリ本体アカウント側は CDK で作る。スタックは `sakekasu-dev-devops-agent`（`infra/lib/devops-agent-stack.ts`）で、中身は2つ。
+コンソール側（Agent Space・Slack・GitHub 連携）は手作業で、アプリ本体アカウント側は CDK で作る。スタックは `sakekasu-dev-devops-agent`（`infra/lib/devops-agent-stack.ts`）で、中身は調査用のクロスアカウントロールだけ。転送 Lambda は共通基盤へ移した（下の「アラーム転送 Lambda」）。
 
 ### 調査用のクロスアカウントロール
 
@@ -43,9 +49,13 @@ Agent Space は運用ツール専用のメンバーアカウント `ops-tooling`
 
 信頼条件は `aws:SourceAccount`（プライマリのアカウント ID）と `aws:SourceArn`（Agent Space の ARN）の両方で絞る。混乱した代理人（confused deputy）を防ぐための条件で、AWS のドキュメントもこの形を推奨している。
 
-### アラーム転送 Lambda
+### アラーム転送 Lambda（共通基盤へ移した）
 
-`sakekasu-builder-dev-devops-agent-webhook`（`infra/lambda/devops-agent-webhook/`）。アラートトピックを購読し、DevOps Agent の Webhook に調査依頼を投げる。
+いまは共通基盤の `sakekasu-integrated-devops-agent-webhook`（同リポジトリの `infra/lambda/devops-agent-webhook/`）。
+共通トピックを購読し、DevOps Agent の Webhook に調査依頼を投げる。設定は Secrets Manager ではなく SSM の
+`/sakekasu-integrated/devops-agent/webhook` から読む（共通基盤のロールの境界が SSM だけを許すため）。
+以下はこのリポジトリにあった頃の `sakekasu-builder-dev-devops-agent-webhook` の説明で、考え方は共通基盤の版も同じ。
+優先度の表は 4 アプリのアラーム名に広げてある（共通基盤の `docs/monitoring.md`）。
 
 調査に回すのは、次の条件を満たすものだけ。エージェントは秒課金なので、鳴ったもの全部を投げると費用が読めなくなる。
 
@@ -100,6 +110,10 @@ Security Agent の Agent Space（Issue #107 で同じ `ops-tooling` に移して
 Agent Space の Capabilities タブから Webhook を作る。認証方式は HMAC を選ぶ（転送 Lambda がその前提で署名している）。表示される URL と署名鍵はこの1回しか見られないので、その場で控える。
 
 ### 5. Webhook の設定をセカンダリに登録する
+
+> いまの転送 Lambda（共通基盤）は、この Secrets Manager ではなく SSM の `/sakekasu-integrated/devops-agent/webhook` を読む。
+> この秘密から写す手順は共通基盤の `docs/monitoring.md` の「設定を登録する」にある。写し終えて共通基盤の転送が
+> 動いたのを確かめたら、この秘密は消してよい（このリポジトリのコードはもう読まない）。
 
 URL と鍵はリポジトリに置けないため、先に Secrets Manager へ入れる。CDK は名前で参照するだけ。
 
@@ -204,6 +218,9 @@ done
 次に疑うのは Resource Explorer（上の「Resource Explorer が要る」）。スタックの無いこのアカウントでは、ここが止まると検出そのものが成立しない。
 
 ### 8. 動作を確認する
+
+> 下の手順の関数 `sakekasu-builder-dev-devops-agent-webhook` は消した。いまは共通基盤の
+> `sakekasu-integrated-devops-agent-webhook` を呼ぶ（共通基盤の `docs/monitoring.md` の「動作を確かめる」）。
 
 Slack を鳴らさずに転送だけ試すなら、Lambda を直接呼ぶ。
 
@@ -395,7 +412,7 @@ Slack の双方向通信で増えるのはチャットの分。人がメンシ�
 
 機能自体は Basic のまま使える。CLI / CDK 経由のオンボーディングにサポートプランの要件は無く、純粋な従量課金になる。クレジット額は月 $8.7 相当（エージェント稼働で17分ほど）で、それを得るために管理アカウントへ Agent Space を置く方が割に合わない、という判断（Issue #67 のコメントを参照）。
 
-転送 Lambda 側の費用は誤差の範囲（発報のたびに1回動くだけ）。
+転送 Lambda 側の費用は誤差の範囲（発報のたびに1回動くだけ）。共通基盤へ移したことで 4 アプリのアラームが調査に回るようになったので、鳴る回数のぶん稼働時間は増える。
 
 ## 注意事項
 

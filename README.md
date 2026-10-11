@@ -447,8 +447,14 @@ Runtime の ARN はフロントの `src/features/sommelier/config.ts` に持つ�
 
 ```
 CloudWatch アラーム ─┐
-外形監視 Lambda ─────┴→ SNS → Slack 通知 Lambda → Slack（Incoming Webhook）
+外形監視 Lambda ─────┴→ SNS（共通基盤の sakekasu-integrated-alerts）┬→ Slack 通知 Lambda → Slack（Incoming Webhook）
+                                                                  └→ 転送 Lambda → DevOps Agent（自動調査）
 ```
+
+送り先のトピックと、その先の Slack 通知・DevOps Agent への転送は共通基盤
+（[sakekasu-integrated_environment](https://github.com/yuuuuuuu168/sakekasu-integrated_environment) の `docs/monitoring.md`）が持つ。
+4 アプリのアラームが同じ経路を通る。builder の自分のトピック（`dev-sakekasu-alerts`）と Slack 通知 Lambda は、
+もう何も届かないまま残っていて、次の段で消す（`infra/lib/monitoring-stack.ts` のコメント）。
 
 アラームは**発報だけでなく復旧も通知する**ので、鳴りっぱなしなのか直ったのかが Slack だけで分かる。
 
@@ -486,7 +492,7 @@ CloudWatch アラーム ─┐
 
 外したのは、監視スタックの `dev-sakekasu-aws-health` ルールと、us-east-1 の `sakekasu-dev-health-global` スタック（転送ルール `dev-sakekasu-aws-health-global` とロール `dev-sakekasu-health-forwarder`）。us-east-1 のスタックはアプリから外しても `cdkd deploy --all` では消えないので、手で消す（[docs/cdkd-migration.md](docs/cdkd-migration.md) の「health-global を外した」）。
 
-Slack 通知 Lambda と DevOps Agent の転送 Lambda には、Health イベントを整形するコードが残っている。イベントがもう届かないので動かないが、害は無く、アラームの経路と同じ関数なので手を付けていない。
+Slack 通知 Lambda には、Health イベントを整形するコードが残っている。イベントがもう届かないので動かないが、害は無く、アラームの経路と同じ関数なので手を付けていない。
 
 ### 新規ユーザー登録の通知（Issue #66）
 
@@ -582,17 +588,20 @@ AWS_PROFILE=yuuuuuuuki7749 aws lambda invoke \
 アラームが鳴ってから調べ始めるまでの時間をなくすため、CloudWatch アラームの発報をそのまま AWS DevOps Agent に渡して調査を始めさせる。エージェントがテレメトリ・ログ・デプロイ履歴を突き合わせ、根本原因と緩和策を専用の Slack チャンネルに投稿する。
 
 ```
-SNS（dev-sakekasu-alerts）┬→ Slack 通知 Lambda → Slack（既存のアラートチャンネル）
-                          └→ 転送 Lambda → DevOps Agent Webhook → 自動調査 → Slack（専用チャンネル）
+SNS（共通基盤の sakekasu-integrated-alerts）┬→ Slack 通知 Lambda → Slack（既存のアラートチャンネル）
+                                            └→ 転送 Lambda → DevOps Agent Webhook → 自動調査 → Slack（専用チャンネル）
 
 人 ⇄ Slack（双方向用プライベートチャンネル）⇄ DevOps Agent
 ```
 
-既存の Slack 通知は変えていない。転送 Lambda は同じトピックをもう1つの購読者として受け取るだけなので、エージェント側が止まってもアラート自体は届く。
+転送 Lambda は Slack 通知と同じトピックをもう1つの購読者として受け取るだけなので、エージェント側が止まってもアラート自体は届く。
 
-Agent Space は運用ツール専用アカウント（`ops-tooling`）に置き、調査対象はアプリ本体のアカウント（`<アプリのアカウント ID>`）。CDK が作るのはアプリ本体側の2つで、調査用のクロスアカウントロール（読み取り専用）と、アラームを Webhook へ転送する Lambda。Agent Space の作成・Slack 連携・GitHub 連携・Webhook の発行はコンソールでの手作業になる。
+転送 Lambda は以前このリポジトリにあり、builder のトピックだけを購読していた。kakeibo・learning・reinvent のアラームも調査に回すため、共通基盤へ移した（2026-10）。
+builder のアラームも共通トピックへ送るようにしたので、調査に回る範囲は前と変わらない。
 
-エージェントは秒課金なので、投げるものを絞っている。アラームは `ALARM` に変わったときだけ（復旧では投げない）、転送 Lambda 自身の失敗アラームは捨てる。AWS Health は共通基盤へ移したので、このトピックにはもう流れてこない。
+Agent Space は運用ツール専用アカウント（`ops-tooling`）に置き、調査対象はアプリ本体のアカウント（`<アプリのアカウント ID>`）。このリポジトリの CDK が作るのは、調査用のクロスアカウントロール（読み取り専用）だけ。アカウント全体を読むロールなので本来は共通基盤のものだが、共通基盤のロールの境界が `iam:*` を拒否していて作れないため、ここに残している。Agent Space の作成・Slack 連携・GitHub 連携・Webhook の発行はコンソールでの手作業になる。
+
+エージェントは秒課金なので、投げるものを絞っている。アラームは `ALARM` に変わったときだけ（復旧では投げない）、AWS Health は障害（`issue`）だけ、転送 Lambda 自身の失敗アラームは捨てる。判定は共通基盤の `infra/lambda/devops-agent-webhook` にある。
 
 調査結果を読んだ先で追加の指示を出したくなるぶんは、双方向用のプライベートチャンネルで受ける。メンションで調査を始めたり、経過や根拠を聞いたりできて、返答は元メッセージのスレッドに積まれる。双方向はプライベートチャンネルでしか有効にできず、有効化には `AIDevOpsChannelAccessPolicy` を付けた IAM ロールが要る。CloudFormation 側にまだ双方向のフィールドが無いため、この設定はコンソールでの手作業になる。
 

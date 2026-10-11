@@ -106,6 +106,12 @@ export interface MonitoringStackProps extends cdk.StackProps {
 export class MonitoringStack extends cdk.Stack {
   public readonly alertTopic: sns.Topic;
 
+  /**
+   * アラームの送り先。4 アプリ共通の通知先トピック（sakekasu-integrated_environment の
+   * sakekasu-integrated-alerts）で、Slack 通知と DevOps Agent への転送はそちらが持つ
+   */
+  private readonly sharedAlertTopic: sns.ITopic;
+
   /** 外形監視が書き込むカスタムメトリクスの名前空間 */
   private readonly metricNamespace: string;
 
@@ -150,6 +156,26 @@ export class MonitoringStack extends cdk.Stack {
 
     // --- 通知経路 ---
 
+    /*
+     * アラームは共通基盤のトピックへ送る（共通基盤の docs/monitoring.md の「各アプリからアラームを送る」）。
+     * 他の 3 アプリはすでにそちらへ送っていて、builder だけが自分のトピックを持っていた。
+     * DevOps Agent への転送を共通基盤へ移したのに合わせて揃えた（docs/devops-agent.md）。
+     *
+     * 名前から ARN を組み立てる。スタックの出力を参照すると、共通基盤のスタックを作り直せなくなる。
+     * Slack の見出しのアプリ名は、アラーム名の接頭辞（sakekasu-builder-）から共通基盤が引く
+     */
+    this.sharedAlertTopic = sns.Topic.fromTopicArn(
+      this,
+      'SharedAlertTopic',
+      `arn:aws:sns:${this.region}:${this.account}:sakekasu-integrated-alerts`,
+    );
+
+    /*
+     * 以下の builder のトピックと Slack 通知 Lambda は、もうアラームの送り先ではない。
+     * 消すのは次の段にする。DevOps Agent のスタックがこのトピックの ARN を Fn::ImportValue で
+     * 読んでいたので、読む側が無くなったデプロイの後でないと Export を消せない
+     * （下の exportValue）。それまでは何も届かないトピックとして残る
+     */
     this.alertTopic = new sns.Topic(this, 'AlertTopic', {
       topicName: `${prefix}-alerts`,
       displayName: '酒カス 監視アラート',
@@ -560,6 +586,11 @@ export class MonitoringStack extends cdk.Stack {
       value: this.alertTopic.topicArn,
       description: '監視アラートの SNS トピック',
     });
+
+    // DevOps Agent のスタックが転送 Lambda の購読のために読んでいた Export を、読む側を外した
+    // このデプロイの間だけ残す。先にこちらが更新されて Export が消えると、まだ購読を持つ
+    // DevOps Agent のスタックの参照が宙に浮く。次の段でトピックごと消すときに、これも外す
+    this.exportValue(this.alertTopic.topicArn);
     new cdk.CfnOutput(this, 'SlackWebhookParameterName', {
       value: webhookParameterName,
       description: 'Slack Webhook URL を入れる SSM パラメータ名（手動登録）',
@@ -798,9 +829,9 @@ export class MonitoringStack extends cdk.Stack {
     // コンストラクタ内の代入順までは見てくれないので、ここで弾く。
     // 落ちること自体は合成時に分かるが、素の TypeError だと原因が読み取れない
     // （PR #165 のレビュー指摘）
-    if (!this.alertTopic) {
+    if (!this.sharedAlertTopic) {
       throw new Error(
-        `${id}: 通知先（alertTopic）を作る前にアラームを追加している。` +
+        `${id}: 通知先（sharedAlertTopic）を作る前にアラームを追加している。` +
           'addAlarm の呼び出しをトピックの生成より後ろに移すこと',
       );
     }
@@ -818,8 +849,8 @@ export class MonitoringStack extends cdk.Stack {
       treatMissingData: options.treatMissingData ?? cloudwatch.TreatMissingData.NOT_BREACHING,
     });
 
-    alarm.addAlarmAction(new actions.SnsAction(this.alertTopic));
-    alarm.addOkAction(new actions.SnsAction(this.alertTopic));
+    alarm.addAlarmAction(new actions.SnsAction(this.sharedAlertTopic));
+    alarm.addOkAction(new actions.SnsAction(this.sharedAlertTopic));
     return alarm;
   }
 }
