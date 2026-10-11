@@ -607,6 +607,7 @@ SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 9
 ![構成図](docs/architecture.drawio.svg)
 
 [docs/architecture.drawio.svg](docs/architecture.drawio.svg) は draw.io（VS Code の Draw.io 拡張でも可）でそのまま開いて編集できる。
+アイコンは [AWS Architecture Icons](https://aws.amazon.com/architecture/icons/)（2026-01-30 版）を図の中に埋め込んである。
 アカウント ID は図に書かない。
 
 | スタック | アカウント / リージョン | デプロイ | 中身 |
