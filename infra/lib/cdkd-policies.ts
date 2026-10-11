@@ -91,6 +91,13 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
     // IAM の接頭辞は `application-signals`（ハイフンあり）。CloudFormation の型名や CDK の
     // モジュール名につられて `applicationsignals:` と書くと、IAM は黙って何も許さない。
     // 2026-10 まではその綴りで、この文も下の Deny も効いていなかった
+    //
+    // 列挙は CloudFormation の型の handlers.*.permissions（`aws cloudformation describe-type
+    // --type-name AWS::ApplicationSignals::ServiceLevelObjective`）に合わせる。SLO の更新ハンドラは
+    // 除外ウィンドウ（ListServiceLevelObjectiveExclusionWindows / BatchUpdateExclusionWindows）と
+    // RUM の定義も読み書きしにいく。2026-10-11 にタグを足すだけの更新が
+    // ListServiceLevelObjectiveExclusionWindows の AccessDenied で4つとも落ちた。
+    // RUM の2つは読み取りだけで、SLI に RUM を使わない限り中身は何も返らない
     new iam.PolicyStatement({
       sid: 'ManageServiceLevelObjectives',
       actions: [
@@ -102,6 +109,10 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
         'application-signals:TagResource',
         'application-signals:UntagResource',
         'application-signals:ListTagsForResource',
+        'application-signals:ListServiceLevelObjectiveExclusionWindows',
+        'application-signals:BatchUpdateExclusionWindows',
+        'rum:GetAppMonitor',
+        'rum:BatchGetRumMetricDefinitions',
       ],
       resources: ['*'],
     }),
@@ -560,6 +571,8 @@ export function cdkdDiffStatements(account: string): iam.PolicyStatement[] {
         'application-signals:GetServiceLevelObjective',
         'application-signals:ListServiceLevelObjectives',
         'application-signals:ListTagsForResource',
+        // 読み取りハンドラも除外ウィンドウを読む（デプロイロールの ManageServiceLevelObjectives を参照）
+        'application-signals:ListServiceLevelObjectiveExclusionWindows',
         'appsync:Get*',
         'appsync:List*',
         'lambda:Get*',
