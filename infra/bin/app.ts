@@ -131,9 +131,6 @@ function buildApplicationStacks(app: cdk.App): void {
     (app.node.tryGetContext('sommelierRuntimeArn') as string | undefined) ??
     `arn:aws:bedrock-agentcore:ap-northeast-1:${cdkEnv.account}:runtime/sommelier_sommelier-Cn5eM865GE`;
 
-  const siteUrl =
-    (app.node.tryGetContext('siteUrl') as string | undefined) ?? 'https://sake.sakekasu-builder.com';
-
   const monitoringStack = new MonitoringStack(app, `${prefix}-monitoring`, {
     envName: env,
     graphqlApi: apiStack.graphqlApi,
@@ -147,7 +144,6 @@ function buildApplicationStacks(app: cdk.App): void {
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
     llmFallbackMetricFilters: apiStack.llmFallbackMetricFilters,
     sommelierRuntimeArn,
-    siteUrl,
     env: cdkEnv,
   });
 

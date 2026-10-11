@@ -95,7 +95,6 @@ function synth() {
     ocrFunction: apiStack.ocrAnalyzerFunction,
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
     sommelierRuntimeArn: RUNTIME_ARN,
-    siteUrl: 'https://example.com',
     env,
   });
 

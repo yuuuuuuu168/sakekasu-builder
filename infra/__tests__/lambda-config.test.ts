@@ -170,7 +170,6 @@ function synthAllTemplates(): {
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
     sommelierRuntimeArn:
       'arn:aws:bedrock-agentcore:ap-northeast-1:111122223333:runtime/sommelier_test-ABC123',
-    siteUrl: 'https://example.com',
     env,
   });
 

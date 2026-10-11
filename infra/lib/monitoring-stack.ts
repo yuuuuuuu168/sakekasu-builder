@@ -93,8 +93,6 @@ export interface MonitoringStackProps extends cdk.StackProps {
   llmFallbackMetricFilters?: logs.MetricFilter[];
   /** ソムリエ Runtime の ARN */
   sommelierRuntimeArn: string;
-  /** フロントの公開 URL（外形監視の対象） */
-  siteUrl: string;
 }
 
 /**
@@ -460,13 +458,11 @@ export class MonitoringStack extends cdk.Stack {
     });
 
     // --- 外形監視: 到達性（5分ごと）---
+    //
+    // サイト（sake.sakekasu-builder.com）そのものは共通基盤（sakekasu-integrated_environment）の
+    // 外形監視が見ている。同じ URL を両方で見て二重に鳴らないよう、ここでは置かない
 
     const healthCheckTargets = [
-      {
-        name: 'frontend',
-        url: props.siteUrl,
-        expectStatus: [200],
-      },
       {
         // 認証なしで叩き「拒否されること」を確認する。
         // 認証情報を持たずに、到達性と認証の働きを同時に見られる
