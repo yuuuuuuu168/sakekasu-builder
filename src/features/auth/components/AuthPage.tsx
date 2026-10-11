@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 
@@ -14,14 +14,20 @@ const MotionButton = motion.create(Button);
  * マネージドログイン画面が受け持つ。ここはそこへ送るボタンだけを置く。
  * 自動でリダイレクトしないのは、戻りで失敗したときに行ったり来たりを
  * 繰り返さず、失敗の文言をここで読めるようにするため。
+ *
+ * 例外は共通ポータルから `?sso=1` 付きで来たときだけ。ポータルの利用者は
+ * 直前に共通ログインでサインインしているので、ボタンを押させずに送る。
+ * 目印は送る前に URL から消してあり（ssoHint.ts）、戻り先は素の `/` なので、
+ * 戻ってきたときには目印が無く、自動で送り直すことはない。
  * アカウントは管理者が共通ログイン側で作る（セルフサインアップは無い）。
  */
 export function AuthPage() {
-  const { signIn, error } = useAuth();
-  const [isRedirecting, setIsRedirecting] = useState(false);
+  const { signIn, error, ssoAutoSignIn, takeSsoAutoSignIn } = useAuth();
+  // ポータルから来て自動で送るときは、ボタンを一瞬見せずに「移動中」で始める
+  const [isRedirecting, setIsRedirecting] = useState(ssoAutoSignIn && !error);
   const [startError, setStartError] = useState<string | null>(null);
 
-  const handleSignIn = async () => {
+  const handleSignIn = useCallback(async () => {
     setIsRedirecting(true);
     setStartError(null);
     try {
@@ -33,7 +39,14 @@ export function AuthPage() {
     } finally {
       setIsRedirecting(false);
     }
-  };
+  }, [signIn]);
+
+  useEffect(() => {
+    // 戻りで失敗した文言があるときは送らない。takeSsoAutoSignIn は一度しか
+    // true を返さないので、画面を出し直しても送り直さない
+    if (error || !takeSsoAutoSignIn()) return;
+    void handleSignIn();
+  }, [error, handleSignIn, takeSsoAutoSignIn]);
 
   const message = startError ?? error;
 
