@@ -1,14 +1,14 @@
 /**
- * 共通ポータル（https://sakekasu-builder.com/apps）から来たときの目印 `?sso=1` の扱い。
+ * 開いた URL の読み取り。共通ポータルの目印 `?sso=1` を消し、マネージドログインからの
+ * 戻りの最中かどうかを見る。
  *
- * ポータルから来る利用者は、直前に共通ログイン（マネージドログイン）で
- * サインインしたばかりなので、マネージドログインへ送ればコード付きで黙って
- * 戻ってくる。目印があって未サインインのときだけ、サインインのボタンを
- * 押させずに自動で送る（AuthPage）。
+ * 以前は `?sso=1` が付いているときだけ自動でマネージドログインへ送っていたが、
+ * いまは未サインインなら目印によらず一度だけ自動で送る（autoSignIn.ts）。
+ * 目印はもう判断に使わないが、ポータルが付けてくるので今までどおり URL からは消す。
  *
- * 目印は読んだらすぐ URL から消す。マネージドログインの戻り先は素の `/`
- * なので、戻ってきた URL には目印が無く、戻りで失敗しても行ったり来たりを
- * 繰り返さない。
+ * 戻りの最中（`code` / `error` 付き）は自動で送らない。`code` のときは Amplify が
+ * トークン交換をしているので、ここから送り直すと交換を潰す。`error` のときは
+ * 画面に失敗の文言を出して、利用者にボタンで選ばせる。
  */
 
 /** ポータルが付けてくるクエリ名 */
@@ -22,11 +22,21 @@ export interface SsoHint {
   present: boolean;
   /** マネージドログインからの戻り（code / error 付き）の最中 */
   oauthCallback: boolean;
+  /** マネージドログインが `error` を付けて戻してきた（取り消し・拒否など） */
+  oauthError: boolean;
   /**
    * `sso` を取り除いた URL（パス + クエリ + ハッシュ）。`sso` が無ければ null で、
    * URL を書き換える必要は無い
    */
   cleanedUrl: string | null;
+}
+
+/** 読み込みの最初に URL から読んだこと。AuthProvider が自動で送るかを決めるのに使う */
+export interface LandingUrl {
+  /** マネージドログインからの戻り（code / error 付き）の最中 */
+  oauthCallback: boolean;
+  /** マネージドログインが `error` を付けて戻してきた */
+  oauthError: boolean;
 }
 
 /**
@@ -41,32 +51,32 @@ export function parseSsoHint(href: string): SsoHint {
 
   const present = params.getAll(SSO_HINT_PARAM).includes('1');
   const oauthCallback = OAUTH_CALLBACK_PARAMS.some((name) => params.has(name));
+  const oauthError = params.has('error');
 
   if (!params.has(SSO_HINT_PARAM)) {
-    return { present, oauthCallback, cleanedUrl: null };
+    return { present, oauthCallback, oauthError, cleanedUrl: null };
   }
 
   params.delete(SSO_HINT_PARAM);
   const search = params.toString();
   const cleanedUrl = `${url.pathname}${search ? `?${search}` : ''}${url.hash}`;
-  return { present, oauthCallback, cleanedUrl };
+  return { present, oauthCallback, oauthError, cleanedUrl };
 }
 
 /**
- * 目印を読んで URL から消し、自動でサインインへ送ってよいかを返す。
+ * URL を読んで目印を消し、戻りの最中かどうかを返す。
  *
- * 送ってよいのは目印があり、かつマネージドログインからの戻りの最中でない
- * ときだけ。戻りの最中は Amplify がトークン交換をしているので、ここから
- * もう一度送ると交換を潰してしまう。
+ * `error` は消さない。Amplify は戻りの処理で URL を読み直し、`error` を見て
+ * 失敗のイベントを流すので、先に消すとそちらの判断が変わってしまう。
  */
 export function consumeSsoHint(
   location: Pick<Location, 'href'> = window.location,
   history: Pick<History, 'replaceState' | 'state'> = window.history,
-): boolean {
+): LandingUrl {
   const hint = parseSsoHint(location.href);
   if (hint.cleanedUrl !== null) {
     // 履歴を増やさずに書き換える。戻るボタンで目印付きの URL に戻らないようにする
     history.replaceState(history.state, '', hint.cleanedUrl);
   }
-  return hint.present && !hint.oauthCallback;
+  return { oauthCallback: hint.oauthCallback, oauthError: hint.oauthError };
 }
