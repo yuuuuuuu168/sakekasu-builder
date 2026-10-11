@@ -440,26 +440,26 @@ describe('GithubOidcStack', () => {
   });
 
   // SLO は Cloud Control API 経由で作られるが、その先で
-  // applicationsignals:CreateServiceLevelObjective が呼ばれる。
+  // application-signals:CreateServiceLevelObjective が呼ばれる。
   // cloudformation:CreateResource だけでは AccessDenied で落ちる
   it('cdkd のデプロイロールは SLO を作れる', () => {
     const statements = statementsFor(template, /^CdkdDeployRole/);
 
-    expect(allows(statements, 'applicationsignals:CreateServiceLevelObjective')).toBe(true);
-    expect(allows(statements, 'applicationsignals:TagResource')).toBe(true);
+    expect(allows(statements, 'application-signals:CreateServiceLevelObjective')).toBe(true);
+    expect(allows(statements, 'application-signals:TagResource')).toBe(true);
   });
 
   // サービス検出はアカウントに1つの設定で、スタックから外して守っている。
   // 一度これを消しかけてソムリエの可観測性を道連れにしている。
-  // applicationsignals:* にすると IAM の側から素通りで触れてしまう
+  // application-signals:* にすると IAM の側から素通りで触れてしまう
   it('cdkd のデプロイロールはサービス検出を有効化できない', () => {
     const statements = statementsFor(template, /^CdkdDeployRole/);
 
-    expect(allows(statements, 'applicationsignals:StartDiscovery')).toBe(false);
+    expect(allows(statements, 'application-signals:StartDiscovery')).toBe(false);
 
     // Allow が広がっても効くように Deny も置いてある
     expect(
-      denies(statements, 'applicationsignals:StartDiscovery'),
+      denies(statements, 'application-signals:StartDiscovery'),
       'StartDiscovery を拒否するステートメントが無い',
     ).toBe(true);
   });
@@ -469,8 +469,8 @@ describe('GithubOidcStack', () => {
   it('diff ロールは SLO を読める', () => {
     const statements = statementsFor(template, /^DiffRole/);
 
-    expect(allows(statements, 'applicationsignals:GetServiceLevelObjective')).toBe(true);
-    expect(allows(statements, 'applicationsignals:ListServiceLevelObjectives')).toBe(true);
+    expect(allows(statements, 'application-signals:GetServiceLevelObjective')).toBe(true);
+    expect(allows(statements, 'application-signals:ListServiceLevelObjectives')).toBe(true);
   });
 
   // diff ロールは読み取り専用。SLO も例外ではない
@@ -478,13 +478,26 @@ describe('GithubOidcStack', () => {
     const statements = statementsFor(template, /^DiffRole/);
 
     for (const action of [
-      'applicationsignals:CreateServiceLevelObjective',
-      'applicationsignals:UpdateServiceLevelObjective',
-      'applicationsignals:DeleteServiceLevelObjective',
-      'applicationsignals:StartDiscovery',
+      'application-signals:CreateServiceLevelObjective',
+      'application-signals:UpdateServiceLevelObjective',
+      'application-signals:DeleteServiceLevelObjective',
+      'application-signals:StartDiscovery',
     ]) {
       expect(allows(statements, action), `${action} が許可されている`).toBe(false);
     }
+  });
+
+  // IAM の Application Signals のサービス接頭辞は `application-signals`。CloudFormation の型名
+  // （AWS::ApplicationSignals::*）や CDK のモジュール名（aws-applicationsignals）につられて
+  // `applicationsignals:` と書くと、IAM はエラーにせず黙って何も許さない（Deny も効かない）。
+  // 2026-10 まで実際にこの綴りで、SLO の操作がすべて implicitDeny になっていた
+  it('Application Signals の操作をハイフン無しの接頭辞で書いていない', () => {
+    const statements = statementsFor(template, /./);
+    const misspelled = statements
+      .flatMap((s) => toArray(s.Action))
+      .filter((action) => typeof action === 'string' && action.startsWith('applicationsignals:'));
+
+    expect(misspelled).toEqual([]);
   });
 
   it('cdkd のデプロイロールはログの中身を読めない', () => {
