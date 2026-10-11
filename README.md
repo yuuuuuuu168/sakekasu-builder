@@ -55,7 +55,7 @@
 
 | 機能 | 補足 |
 |------|------|
-| 監視とアラート通知 | 23アラーム（AI・サービス正常性・外形監視・SLO）を Slack へ。AWS Health の通知は共通基盤へ移した。デプロイ前に手動登録あり。ソムリエのカナリアは共通ログインでは動かせないので消した（[docs/shared-login.md](docs/shared-login.md)） |
+| 監視とアラート通知 | 24アラーム（AI・サービス正常性・外形監視・SLO）を Slack へ。AWS Health の通知は共通基盤へ移した。デプロイ前に手動登録あり。ソムリエのカナリアは共通ログインでは動かせないので消した（[docs/shared-login.md](docs/shared-login.md)） |
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/92)） |
 | DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。プライベートチャンネルではメンションで調査の開始や照会もできる。コンソール側の設定あり（[#67](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/67)） |
 | Application Signals による APM | OCR と画像アップロードの2関数を計装。OCR には SLO を2本置き、割ったらアラーム（[#11](https://github.com/yuuuuuuu168/sakekasu-builder/issues/11)） |
@@ -452,7 +452,7 @@ CloudWatch アラーム ─┐
 
 アラームは**発報だけでなく復旧も通知する**ので、鳴りっぱなしなのか直ったのかが Slack だけで分かる。
 
-### 監視項目（23アラーム）
+### 監視項目（24アラーム）
 
 | 分類 | 監視対象 | 発報条件 |
 |------|---------|---------|
@@ -461,6 +461,7 @@ CloudWatch アラーム ─┐
 | AI・OCR | Lambda エラー | 15分で3回以上 |
 | AI・OCR | スロットル | 15分で1回以上 |
 | AI・OCR | SLO の達成率（可用性・レイテンシー） | 30日 rolling の達成率が 90% を割ったら |
+| AI・OCR / ノート | Claude API から Bedrock へのやり直し（`[llm] fallback`） | 1時間で3回以上 |
 | サービス | AppSync 5XX | 5分で5回以上 |
 | サービス | Lambda エラー（presigned-url / ocr-analyzer / tasting-note） | 15分で5回以上 |
 | サービス | DynamoDB スロットル（2テーブル） | 5分で1回以上 |
@@ -524,7 +525,7 @@ Runtime の ARN とサイト URL は CDK コンテキスト（`sommelierRuntimeA
 
 ### 費用の目安
 
-概算で**月5ドル前後**。内訳は CloudWatch アラーム23件（$0.10/件）とカスタムメトリクス（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。SLO とトレースの費用は Application Signals 側で別立てになる（月数十円から数百円の見込み。[docs/application-signals.md](docs/application-signals.md)）。
+概算で**月5ドル前後**。内訳は CloudWatch アラーム24件（$0.10/件）とカスタムメトリクス（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。SLO とトレースの費用は Application Signals 側で別立てになる（月数十円から数百円の見込み。[docs/application-signals.md](docs/application-signals.md)）。
 
 ## 毎日の利用料金 Slack 通知（Issue #92）
 
@@ -633,7 +634,7 @@ SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 9
 - AWS S3（画像ストレージ）
 - Amplify（フロントエンドホスティング）
 - Amazon Bedrock AgentCore Runtime + AgentCore Memory + Strands Agents（Python）※ソムリエ
-- Amazon Bedrock（Claude Haiku 4.5）※OCR・テイスティングノート・ソムリエ
+- Claude API（Claude Haiku 5.5。API キーなしの Workload Identity Federation）※OCR・テイスティングノート・ソムリエ。失敗したら Amazon Bedrock（Claude Haiku 4.5）でやり直す（[docs/claude-api.md](docs/claude-api.md)）
 - react-day-picker（カレンダー）
 - Vitest + Testing Library + fast-check（フロントと infra の CDK）、Jest（ソムリエの CDK）、pytest（ソムリエ本体）
 
@@ -675,6 +676,7 @@ aidlc/           # AI-DLC のルールと成果物
 
 | ドキュメント | 内容 |
 |------------|------|
+| [docs/claude-api.md](docs/claude-api.md) | Claude API への切り替え（ID 連携・Bedrock へのフォールバック・環境変数・IAM の差分・有効にする手順） |
 | [docs/shared-login.md](docs/shared-login.md) | 共通ログインへの切り替え（変わったこと・旧プールを外す手順・カナリア・旧 sub から新 sub へのデータの付け替えの記録） |
 | [docs/agentcore-phase1-design.md](docs/agentcore-phase1-design.md) | ソムリエ Phase 1 の設計（認証の二段構え・ツール設計・決定事項） |
 | [docs/devops-agent.md](docs/devops-agent.md) | DevOps Agent のセットアップ手順・Slack の双方向通信・優先度の割り当て・カスタムスキル・費用 |

@@ -29,7 +29,10 @@
         { "name": "DRINKING_TABLE_NAME", "value": "dev-sakekasu-drinking-records" },
         { "name": "COGNITO_USER_POOL_ID", "value": "ap-northeast-1_yw1VDKtxW" },
         { "name": "COGNITO_APP_CLIENT_ID", "value": "iuv75jactiu7ffumrj71khmen" },
-        { "name": "TAVILY_API_KEY_SECRET_ID", "value": "dev-sakekasu/sommelier/tavily-api-key" }
+        { "name": "TAVILY_API_KEY_SECRET_ID", "value": "dev-sakekasu/sommelier/tavily-api-key" },
+        { "name": "LLM_PROVIDER", "value": "anthropic" },
+        { "name": "ANTHROPIC_MODEL_CHAT", "value": "claude-haiku-5-5" },
+        { "name": "BEDROCK_MODEL_ID", "value": "jp.anthropic.claude-haiku-4-5-20251001-v1:0" }
       ]
     }
   ],

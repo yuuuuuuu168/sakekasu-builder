@@ -1,6 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import type { Construct } from 'constructs';
+import { IDENTITY_TOKEN_AUDIENCE } from './llm-constants.js';
 
 /**
  * アプリのロールに付ける Permissions Boundary（Issue #150）。
@@ -27,6 +28,10 @@ import type { Construct } from 'constructs';
  *
  * 合成した4スタックのポリシーを全部走査して、`iam:` `sts:` `organizations:`
  * `account:` で始まるアクションを要求しているロールが1つも無いことは確認済み。
+ *
+ * 例外は 1 つだけある。Claude API に API キーなしで入るため（Workload Identity Federation）、
+ * OCR とテイスティングノートのロールは `sts:GetWebIdentityToken` を要求する。境界はこれを
+ * 宛先が Anthropic の場合に限って通す（下の DenySecurityTokenServiceExceptIdentityTokens）。
  */
 
 /** 境界ポリシーの名前。ARN を名前から組み立てるため、値を変えると再作成になる */
@@ -60,8 +65,41 @@ export function createRoleBoundary(scope: Construct, id: string): iam.ManagedPol
       new iam.PolicyStatement({
         sid: 'DenyIdentityAndOrganizationControl',
         effect: iam.Effect.DENY,
-        actions: ['iam:*', 'sts:*', 'organizations:*', 'account:*'],
+        actions: ['iam:*', 'organizations:*', 'account:*'],
         resources: ['*'],
+      }),
+      // STS も同じく拒否するが、Claude API に入るための ID トークン（JWT）の取得だけは通す
+      // （OCR とテイスティングノート。lambda/shared/llm.ts）。
+      //
+      // 開けるのは GetWebIdentityToken だけで、宛先が Anthropic のものに限る。AssumeRole など
+      // 別のロールの権限を得る操作は、これまでどおり天井から外れたまま。宛先を絞るので、
+      // このロールを乗っ取っても AWS や他のサービスに入る JWT は作れない。作れた JWT で入れるのは
+      // Claude Console のルールが認めたワークスペースの推論だけになる。
+      //
+      // 書き方を 2 つに分けているのは、「sts:* から 1 つだけ除く」を列挙で書くと、
+      // AWS が STS に操作を足したときにそれが素通りする（fail-open）ため。
+      // 1 つ目は宛先の条件キーを持たない操作をすべて拒否する。この条件キーを持つのは
+      // GetWebIdentityToken だけなので、新しい操作も含めて残りはすべてここで止まる
+      new iam.PolicyStatement({
+        sid: 'DenySecurityTokenServiceExceptIdentityTokens',
+        effect: iam.Effect.DENY,
+        actions: ['sts:*'],
+        resources: ['*'],
+        conditions: {
+          Null: { 'sts:IdentityTokenAudience': 'true' },
+        },
+      }),
+      // 2 つ目は、宛先に Anthropic 以外が 1 つでも混ざった ID トークンの取得を拒否する
+      new iam.PolicyStatement({
+        sid: 'DenyIdentityTokensForOtherAudiences',
+        effect: iam.Effect.DENY,
+        actions: ['sts:GetWebIdentityToken'],
+        resources: ['*'],
+        conditions: {
+          'ForAnyValue:StringNotEquals': {
+            'sts:IdentityTokenAudience': [IDENTITY_TOKEN_AUDIENCE],
+          },
+        },
       }),
     ],
   });

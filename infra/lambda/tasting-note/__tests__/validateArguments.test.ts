@@ -1,18 +1,20 @@
 /**
  * ノート生成 Lambda の入力検証のテスト。
  *
- * 呼び出し1回が Bedrock の課金につながるので、Bedrock を呼ぶ前に
+ * 呼び出し1回がモデルの課金につながるので、モデルを呼ぶ前に
  * 弾けているか（カテゴリ・銘柄名）をここで固定する。
+ *
+ * 控えのモデル ID（BEDROCK_MODEL_ID）に既定値を持たせないことの検査は、
+ * 呼び出し口と一緒に lambda/shared/__tests__/llm.test.ts へ移した。
  */
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
-// AWS SDK モジュールをモックして import エラーを回避（ocr-analyzer のテストと同じ）
-vi.mock('@aws-sdk/client-bedrock-runtime', () => ({
-  BedrockRuntimeClient: vi.fn(),
-  InvokeModelCommand: vi.fn(),
+// モデルの呼び出し口（Claude API / Bedrock）は使わないので、SDK ごと読み込まない
+vi.mock('../../shared/llm', () => ({
+  createLlmClient: () => ({ callTool: vi.fn() }),
 }));
 
-import { assertNotableCategory, normalizeSakeName, resolveModelId } from '../index.js';
+import { assertNotableCategory, normalizeSakeName } from '../index.js';
 
 describe('assertNotableCategory', () => {
   it('ウイスキーと日本酒は通す', () => {
@@ -43,28 +45,5 @@ describe('normalizeSakeName', () => {
 
   it('長すぎる銘柄名は切り詰める', () => {
     expect(normalizeSakeName('獺祭'.repeat(200))).toHaveLength(200);
-  });
-});
-
-describe('resolveModelId', () => {
-  const original = process.env.BEDROCK_MODEL_ID;
-
-  afterEach(() => {
-    if (original === undefined) {
-      delete process.env.BEDROCK_MODEL_ID;
-    } else {
-      process.env.BEDROCK_MODEL_ID = original;
-    }
-  });
-
-  it('環境変数の値を返す', () => {
-    process.env.BEDROCK_MODEL_ID = 'jp.anthropic.claude-haiku-4-5-20251001-v1:0';
-    expect(resolveModelId()).toBe('jp.anthropic.claude-haiku-4-5-20251001-v1:0');
-  });
-
-  // 既定値を持たせると、設定漏れが AccessDeniedException として出てくる
-  it('環境変数が無ければ落とす', () => {
-    delete process.env.BEDROCK_MODEL_ID;
-    expect(() => resolveModelId()).toThrow('BEDROCK_MODEL_ID is not set');
   });
 });

@@ -185,9 +185,16 @@ describe('migrate-to-cdkd.sh の移行順', () => {
 describe('migrate-to-cdkd.sh の識別子の手当て', () => {
   const script = readFileSync(SCRIPT_PATH, 'utf8');
 
-  /** 物理 ID と Cloud Control の識別子が食い違う型と、スタックごとの個数 */
+  /**
+   * 物理 ID と Cloud Control の識別子が食い違う型と、スタックごとの個数。
+   *
+   * api の MetricFilter は 1 件から 3 件になった（Claude API から Bedrock へのやり直しを
+   * 数える OCR / テイスティングノートの 2 件）。取り込み（手順7）より後に足したもので、
+   * cdkd が新しく作る。取り込み直すことがあっても、スクリプトの identifier_overrides は
+   * 型で拾って 1 件ずつロググループを引くので、件数が増えても手当ては変わらない
+   */
   const NEEDS_OVERRIDE = [
-    { type: 'AWS::Logs::MetricFilter', counts: { api: 1 } },
+    { type: 'AWS::Logs::MetricFilter', counts: { api: 3 } },
     { type: 'AWS::AppSync::GraphQLApi', counts: { api: 1 } },
   ] as const;
 

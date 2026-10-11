@@ -1,4 +1,3 @@
-import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import {
   extractTastingNote,
   isNotableCategory,
@@ -6,8 +5,22 @@ import {
   type TastingNoteResult,
 } from './extractTastingNote.js';
 import { searchSake, type SearchResult } from './webSearch.js';
+import { createLlmClient, type ToolRequest } from '../shared/llm';
+import { DEFAULT_ANTHROPIC_MODEL_NOTE } from '../../lib/llm-constants';
 
-const bedrockClient = new BedrockRuntimeClient({});
+/**
+ * ノートを書くモデルの呼び出し口。モデルは ANTHROPIC_MODEL_NOTE、控えは BEDROCK_MODEL_ID。
+ *
+ * Claude API の待ち時間は 8 秒まで。知らない銘柄では「知識で 1 回 → 検索（6 秒で打ち切り）→
+ * 検索つきでもう 1 回」と三段になり、Lambda のタイムアウト（25 秒）と AppSync の 30 秒に
+ * 収める必要がある。実測でモデルは 1 回 1〜3 秒なので、8 秒で切れるのは障害のときだけ
+ */
+const llm = createLlmClient({
+  feature: 'tasting-note',
+  anthropicModelEnvName: 'ANTHROPIC_MODEL_NOTE',
+  defaultAnthropicModel: DEFAULT_ANTHROPIC_MODEL_NOTE,
+  anthropicTimeoutMs: 8_000,
+});
 
 interface AppSyncEvent {
   info: {
@@ -29,21 +42,6 @@ interface AppSyncEvent {
  * インジェクションに使える。銘柄名として妥当な長さで切る
  */
 const SAKE_NAME_MAX_LENGTH = 200;
-
-/**
- * 使う Bedrock のモデルIDは環境変数から取る（OCR と同じ理由）。
- *
- * 既定値を持たない。IAM はこのモデルの ARN だけを許可しているので、ここに
- * モデルIDを書き残すと、環境変数が欠けたときに許可されていないモデルを
- * 黙って呼びに行き、設定漏れが AccessDeniedException として出てくる
- */
-export function resolveModelId(): string {
-  const modelId = process.env.BEDROCK_MODEL_ID;
-  if (!modelId) {
-    throw new Error('BEDROCK_MODEL_ID is not set');
-  }
-  return modelId;
-}
 
 /** ノートを構造化して受け取る tool の名前 */
 const NOTE_TOOL_NAME = 'record_tasting_note';
@@ -234,13 +232,12 @@ async function generateNote(
 ${formatSearchResults(searchResults)}`
     : '- 知っている銘柄についてのみ書く。知らない銘柄・自信のない銘柄は isKnown を false にして、他の項目は null にする。それらしい文章を作らない';
 
-  const requestBody = {
-    anthropic_version: 'bedrock-2023-05-31',
-    max_tokens: 1024,
-    // 同じ銘柄で毎回違うノートが出ると、記録として読み比べられない
-    temperature: 0,
-    tools: [NOTE_TOOL],
-    tool_choice: { type: 'tool', name: NOTE_TOOL_NAME },
+  // Bedrock では temperature: 0 で頼む（同じ銘柄で毎回違うノートが出ると、記録として
+  // 読み比べられない）。Claude API の今の世代は temperature を受け付けないので、ブレは
+  // 指示の具体さで抑える（lambda/shared/llm.ts）
+  const request: ToolRequest = {
+    maxTokens: 1024,
+    tool: NOTE_TOOL,
     messages: [
       {
         role: 'user',
@@ -266,19 +263,11 @@ ${sourceRule}
 
   let toolInput: unknown = null;
   try {
-    const response = await bedrockClient.send(
-      new InvokeModelCommand({
-        modelId: resolveModelId(),
-        contentType: 'application/json',
-        accept: 'application/json',
-        body: JSON.stringify(requestBody),
-      }),
-    );
-    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-    const content: { type: string; name?: string; input?: unknown }[] = responseBody.content ?? [];
+    // Claude API で失敗したら Bedrock でやり直す（lambda/shared/llm.ts）
+    const response = await llm.callTool(request);
     // tool_choice で強制しているので通常は1つ。max_tokens 到達などで欠けた場合や
     // 複数返ってきた場合は、どれも採らず「書けなかった」として扱う（OCR と同じ）
-    const toolUseBlocks = content.filter(
+    const toolUseBlocks = response.content.filter(
       (block) => block.type === 'tool_use' && block.name === NOTE_TOOL_NAME,
     );
     if (toolUseBlocks.length === 1) {
@@ -288,12 +277,13 @@ ${sourceRule}
         '[TastingNote] unexpected tool_use block count:',
         JSON.stringify({
           count: toolUseBlocks.length,
-          stopReason: responseBody.stop_reason,
+          stopReason: response.stopReason,
+          provider: response.provider,
         }),
       );
     }
   } catch (err) {
-    console.error('[TastingNote] Bedrock invocation error:', err);
+    console.error('[TastingNote] model invocation error:', err);
     throw new Error('Tasting note generation failed');
   }
 

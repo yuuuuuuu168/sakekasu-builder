@@ -18,6 +18,17 @@ import {
 } from './image-constants.js';
 import { applyRoleBoundary } from './role-boundary.js';
 import type { SharedAuth } from './shared-auth.js';
+import {
+  anthropicFederationEnvironment,
+  llmRoleNamePrefix,
+  type AnthropicFederation,
+} from './anthropic-federation.js';
+import {
+  DEFAULT_ANTHROPIC_MODEL_NOTE,
+  DEFAULT_ANTHROPIC_MODEL_OCR,
+  IDENTITY_TOKEN_AUDIENCE,
+  IDENTITY_TOKEN_SECONDS,
+} from './llm-constants.js';
 
 /**
  * Application Signals 用の OpenTelemetry レイヤー（Issue #86）。
@@ -255,6 +266,31 @@ export function assertInferenceProfileMatchesFoundationModel(
 // 気づくのは本番の OCR が AccessDeniedException で止まったときになる
 assertInferenceProfileMatchesFoundationModel(BEDROCK_MODEL_ID, BEDROCK_FOUNDATION_MODEL_ID);
 
+/**
+ * Claude API から Bedrock へやり直した回数のメトリクス名（OCR とテイスティングノートで共通）。
+ * 監視スタックのアラームがこの名前で読む
+ */
+export const LLM_FALLBACK_METRIC_NAME = 'LlmFallbackCount';
+
+/**
+ * Claude を呼ぶ Lambda に渡す、呼び先の環境変数（lambda/shared/llm.ts の readLlmConfig が読む）。
+ *
+ * LLM_PROVIDER は関数ごとに持つ。既定は anthropic で、ID 連携の値が無ければ Lambda 側が
+ * Bedrock だけで動く。1 つの関数だけ Bedrock に戻したいときは、その関数の LLM_PROVIDER を
+ * bedrock にする。モデルは Claude Haiku 5.5 から始め、品質を見て上げる
+ */
+function llmEnvironment(
+  modelEnvName: string,
+  model: string,
+  federation: AnthropicFederation | undefined,
+): Record<string, string> {
+  return {
+    LLM_PROVIDER: 'anthropic',
+    [modelEnvName]: model,
+    ...anthropicFederationEnvironment(federation),
+  };
+}
+
 export interface ApiStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
   envName: string;
@@ -266,6 +302,13 @@ export interface ApiStackProps extends cdk.StackProps {
    * ID だけを受け取ってここで参照を組み立てる
    */
   sharedAuth: SharedAuth;
+  /**
+   * Claude API に API キーなしで入るための ID 連携の値（cdk.json の context `anthropicFederation`）。
+   *
+   * 無ければ OCR とテイスティングノートは Bedrock だけで動く。値と手順は
+   * lib/anthropic-federation.ts と docs/claude-api.md にある
+   */
+  anthropicFederation?: AnthropicFederation;
 }
 
 export class ApiStack extends cdk.Stack {
@@ -287,6 +330,11 @@ export class ApiStack extends cdk.Stack {
   public readonly ocrAnalyzerFunction: NodejsFunction;
   /** テイスティングノート生成 Lambda（監視スタックから参照する） */
   public readonly tastingNoteFunction: NodejsFunction;
+  /**
+   * Claude API から Bedrock へやり直した回数のメトリクスフィルター（OCR とテイスティングノート）。
+   * 同じメトリクスに数えるので、アラームは監視スタックで 1 つ作れば両方を見られる
+   */
+  public readonly llmFallbackMetricFilters: logs.MetricFilter[];
   /**
    * 画像削除失敗のメトリクスフィルター。
    * アラーム自体は監視スタック側で作る（通知先の SNS を参照すると
@@ -558,6 +606,8 @@ export class ApiStack extends cdk.Stack {
       functionName: ocrAnalyzerFunctionName,
       runtime: Runtime.NODEJS_22_X,
       logGroup: lambdaLogGroup(this, 'OcrAnalyzerLogGroup', ocrAnalyzerFunctionName),
+      // Claude Console のルールがロールの ARN の前方一致で照合するため、名前を固定する
+      role: this.llmExecutionRole('OcrAnalyzerRole', `${llmRoleNamePrefix(props.envName)}ocr-analyzer`),
       entry: path.join(
         path.dirname(url.fileURLToPath(import.meta.url)),
         '../lambda/ocr-analyzer/index.ts',
@@ -577,6 +627,7 @@ export class ApiStack extends cdk.Stack {
       environment: {
         BUCKET_NAME: this.imageBucket.bucketName,
         BEDROCK_MODEL_ID,
+        ...llmEnvironment('ANTHROPIC_MODEL_OCR', DEFAULT_ANTHROPIC_MODEL_OCR, props.anthropicFederation),
       },
       bundling: {
         format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
@@ -615,6 +666,9 @@ export class ApiStack extends cdk.Stack {
       ],
     }));
 
+    // Claude API に入るための ID トークン（JWT）を STS からもらう権限。Bedrock の権限は控え（フォールバック）用に残す
+    this.grantClaudeApiAccess(this.ocrAnalyzerFunction, props.anthropicFederation);
+
     // AppSync Lambda データソース + リゾルバー
     const ocrDataSource = this.graphqlApi.addLambdaDataSource(
       'OcrAnalyzerDataSource',
@@ -646,6 +700,8 @@ export class ApiStack extends cdk.Stack {
       functionName: tastingNoteFunctionName,
       runtime: Runtime.NODEJS_22_X,
       logGroup: lambdaLogGroup(this, 'TastingNoteLogGroup', tastingNoteFunctionName),
+      // Claude Console のルールがロールの ARN の前方一致で照合するため、名前を固定する
+      role: this.llmExecutionRole('TastingNoteRole', `${llmRoleNamePrefix(props.envName)}tasting-note`),
       entry: path.join(
         path.dirname(url.fileURLToPath(import.meta.url)),
         '../lambda/tasting-note/index.ts',
@@ -663,6 +719,7 @@ export class ApiStack extends cdk.Stack {
       environment: {
         BEDROCK_MODEL_ID,
         TAVILY_API_KEY_SECRET_ID: tavilyApiKeySecretName,
+        ...llmEnvironment('ANTHROPIC_MODEL_NOTE', DEFAULT_ANTHROPIC_MODEL_NOTE, props.anthropicFederation),
       },
       bundling: {
         format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
@@ -685,6 +742,25 @@ export class ApiStack extends cdk.Stack {
           ),
         ],
       }),
+    );
+
+    // Claude API に入るための ID トークンの権限。考え方は OCR 側と同じ
+    this.grantClaudeApiAccess(this.tastingNoteFunction, props.anthropicFederation);
+
+    // Claude API から Bedrock へやり直した回数。lambda/shared/llm.ts の console.warn の文言
+    // （[llm] fallback）と合わせる。2 関数とも同じメトリクスに数え、アラームは監視スタックで作る
+    this.llmFallbackMetricFilters = [
+      { id: 'OcrLlmFallbackMetricFilter', fn: this.ocrAnalyzerFunction },
+      { id: 'TastingNoteLlmFallbackMetricFilter', fn: this.tastingNoteFunction },
+    ].map(
+      ({ id, fn }) =>
+        new logs.MetricFilter(this, id, {
+          logGroup: fn.logGroup,
+          filterPattern: logs.FilterPattern.literal('"[llm] fallback"'),
+          metricNamespace: `${props.envName}-sakekasu`,
+          metricName: LLM_FALLBACK_METRIC_NAME,
+          metricValue: '1',
+        }),
     );
 
     // Web 検索の API キーを読む権限。名前だけでは ARN が確定しないため、
@@ -732,6 +808,49 @@ export class ApiStack extends cdk.Stack {
       value: this.region,
       description: 'API リソースの AWS リージョン',
     });
+  }
+
+  /**
+   * Claude を呼ぶ Lambda の実行ロール。名前を固定する以外は NodejsFunction が自動で作るものと同じ
+   * （ログの書き込み。X-Ray と Application Signals の権限は関数の側が足す）。
+   *
+   * 名前を固定するのは、Claude Console のフェデレーションルールがロールの ARN の前方一致
+   * （`sakekasu-{env}-llm-`）で照合するため。自動の名前では末尾が乱数になり、作り直しで変わる。
+   * Permissions Boundary はスタック全体にかけた applyRoleBoundary が付ける
+   */
+  private llmExecutionRole(id: string, roleName: string): cdk.aws_iam.Role {
+    return new cdk.aws_iam.Role(this, id, {
+      roleName,
+      assumedBy: new cdk.aws_iam.ServicePrincipal('lambda.amazonaws.com'),
+      managedPolicies: [
+        cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+      ],
+    });
+  }
+
+  /**
+   * Claude API に入るための ID トークン（JWT）を STS からもらう権限。
+   *
+   * 宛先は Anthropic だけ、寿命は Lambda が頼む長さまで、署名は RS256 に絞る。
+   * Permissions Boundary も宛先が Anthropic 以外の取得を拒否している（role-boundary.ts）。
+   * JWT は短命で、Anthropic の側でもルール（発行者・ロールの ARN・宛先）に合うものしか交換されない。
+   *
+   * ID 連携の値が無い環境では付けない（Bedrock だけで動くので要らない）
+   */
+  private grantClaudeApiAccess(fn: NodejsFunction, federation: AnthropicFederation | undefined): void {
+    if (!federation) return;
+    fn.addToRolePolicy(
+      new cdk.aws_iam.PolicyStatement({
+        actions: ['sts:GetWebIdentityToken'],
+        // GetWebIdentityToken はリソースを取らない
+        resources: ['*'],
+        conditions: {
+          'ForAllValues:StringEquals': { 'sts:IdentityTokenAudience': [IDENTITY_TOKEN_AUDIENCE] },
+          NumericLessThanEquals: { 'sts:DurationSeconds': IDENTITY_TOKEN_SECONDS },
+          StringEquals: { 'sts:SigningAlgorithm': 'RS256' },
+        },
+      }),
+    );
   }
 
   /**

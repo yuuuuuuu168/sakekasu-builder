@@ -7,9 +7,9 @@ vi.mock('@aws-sdk/client-s3', () => ({
   S3Client: vi.fn(),
   GetObjectCommand: vi.fn(),
 }));
-vi.mock('@aws-sdk/client-bedrock-runtime', () => ({
-  BedrockRuntimeClient: vi.fn(),
-  InvokeModelCommand: vi.fn(),
+// モデルの呼び出し口（Claude API / Bedrock）は使わないので、SDK ごと読み込まない
+vi.mock('../../shared/llm', () => ({
+  createLlmClient: () => ({ callTool: vi.fn() }),
 }));
 
 import { assertImagesFitBedrockLimit } from '../index.js';

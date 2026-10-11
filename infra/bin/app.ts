@@ -8,6 +8,7 @@ import { DevOpsAgentStack } from '../lib/devops-agent-stack.js';
 import { SiteDnsStack } from '../lib/site-dns-stack.js';
 import { SiteStack } from '../lib/site-stack.js';
 import { parseSharedAuth, sharedAuthRegion, type SharedAuth } from '../lib/shared-auth.js';
+import { parseAnthropicFederation } from '../lib/anthropic-federation.js';
 import { readFileSync } from 'node:fs';
 
 const app = new cdk.App();
@@ -110,9 +111,15 @@ function buildApplicationStacks(app: cdk.App): void {
   // する（docs/shared-login.md の「旧ユーザープールを外す」）
 
   // ApiStack: AppSync + DynamoDB（認証は共通ログインのユーザープール）
+  // OCR とテイスティングノートが Claude API に API キーなしで入るための ID 連携
+  // （Workload Identity Federation）の値。無ければ両方とも Bedrock だけで動く。
+  // 値と手順は lib/anthropic-federation.ts と docs/claude-api.md にある
+  const anthropicFederation = parseAnthropicFederation(app.node.tryGetContext('anthropicFederation'));
+
   const apiStack = new ApiStack(app, `${prefix}-api`, {
     envName: env,
     sharedAuth,
+    anthropicFederation,
     env: cdkEnv,
   });
 
@@ -138,6 +145,7 @@ function buildApplicationStacks(app: cdk.App): void {
     ],
     ocrFunction: apiStack.ocrAnalyzerFunction,
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
+    llmFallbackMetricFilters: apiStack.llmFallbackMetricFilters,
     sommelierRuntimeArn,
     siteUrl,
     env: cdkEnv,

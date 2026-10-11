@@ -86,6 +86,11 @@ export interface MonitoringStackProps extends cdk.StackProps {
   ocrFunction: NodejsFunction;
   /** 画像削除失敗のメトリクスフィルター（アラームはこちらで作る） */
   imageDeleteFailMetricFilter: logs.MetricFilter;
+  /**
+   * Claude API から Bedrock へやり直した回数のメトリクスフィルター（OCR とテイスティングノート）。
+   * 同じメトリクスに数えている。無ければアラームを作らない
+   */
+  llmFallbackMetricFilters?: logs.MetricFilter[];
   /** ソムリエ Runtime の ARN */
   sommelierRuntimeArn: string;
   /** フロントの公開 URL（外形監視の対象） */
@@ -323,6 +328,31 @@ export class MonitoringStack extends cdk.Stack {
       threshold: 1,
       evaluationPeriods: 1,
     });
+
+    // --- AI: Claude API から Bedrock への切り替え ---
+    //
+    // OCR とテイスティングノートは Claude API を先に呼び、失敗したら Bedrock でやり直す
+    // （infra/lambda/shared/llm.ts）。機能は止まらないので Errors には出ない。
+    // 続いているなら、クレジット切れ・ID 連携の失敗・障害のどれかで、Bedrock の従量課金に
+    // 切り替わっている。2 関数のフィルタは同じメトリクスに数えるので、どれか 1 つから読めば足りる
+    const llmFallbackFilter = props.llmFallbackMetricFilters?.[0];
+    if (llmFallbackFilter) {
+      this.addAlarm('LlmFallback', {
+        alarmName: `${prefix}-llm-fallback`,
+        description:
+          'OCR かテイスティングノートが Claude API で失敗し、Bedrock でやり直しています（機能は動いている）。' +
+          'CloudWatch Logs で「[llm] fallback」を探し、errorType を見る。' +
+          'credit_balance / billing なら Claude Console のクレジット、authentication / permission / credentials なら' +
+          ' ID 連携の設定（docs/claude-api.md）',
+        metric: llmFallbackFilter.metric({
+          statistic: 'Sum',
+          period: cdk.Duration.hours(1),
+        }),
+        // 一時的な混雑（rate_limit / overloaded）の 1〜2 回では鳴らさない
+        threshold: 3,
+        evaluationPeriods: 1,
+      });
+    }
 
     this.addSloAlarms(prefix, props.envName);
 
