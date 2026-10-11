@@ -21,3 +21,17 @@ os.environ.pop("MEMORY_PREFERENCE_ID", None)
 # Web 検索も同じ。シークレット名が設定されていると読み込み時に
 # Secrets Manager のクライアントを作ってしまう
 os.environ.pop("TAVILY_API_KEY_SECRET_ID", None)
+# 相談の回数の上限。main.py は名前が無いと起動を止めるので入れておく。
+# 実際に数えるのは各テストで差し替える（下の fixture。AWS には行かない）
+os.environ.setdefault("CHAT_QUOTA_TABLE_NAME", "test-chat-quota")
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_quota_calls(monkeypatch):
+    """相談のたびに DynamoDB へ数えに行かないよう、既定では常に通す。"""
+    import main
+    from quota import QuotaResult
+
+    monkeypatch.setattr(main, "consume_quota", lambda sub: QuotaResult.OK)

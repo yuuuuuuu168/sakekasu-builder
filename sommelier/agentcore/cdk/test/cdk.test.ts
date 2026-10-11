@@ -381,3 +381,44 @@ describe('Claude API の呼び出し', () => {
     }
   });
 });
+
+// 相談の回数の上限（app/sommelier/quota.py）。テーブル名と上限がエージェントに渡り、
+// そのテーブルにだけ数を足せること。どれかが欠けると、上限が効かないか、相談が断られ続ける
+describe('相談の回数の上限', () => {
+  test('回数を数えるテーブルを、日ごとのキーと TTL で作る', () => {
+    synthesizeProject().hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+      TableName: 'dev-sakekasu-sommelier-chat-quota',
+      KeySchema: [
+        { AttributeName: 'userKey', KeyType: 'HASH' },
+        { AttributeName: 'day', KeyType: 'RANGE' },
+      ],
+      TimeToLiveSpecification: { AttributeName: 'expiresAt', Enabled: true },
+    });
+  });
+
+  test('テーブル名と 1 日 50 回の上限をエージェントの環境変数として渡す', () => {
+    const runtimes = synthesizeProject().findResources('AWS::BedrockAgentCore::Runtime');
+    const [envVars] = Object.values(runtimes).map(
+      (runtime) => (runtime as { Properties?: { EnvironmentVariables?: Record<string, unknown> } })
+        .Properties?.EnvironmentVariables ?? {}
+    );
+    expect(envVars.CHAT_QUOTA_TABLE_NAME).toBe('dev-sakekasu-sommelier-chat-quota');
+    expect(envVars.CHAT_DAILY_LIMIT).toBe('50');
+  });
+
+  test('テーブルに許すのは数を足す UpdateItem だけ', () => {
+    const statements = allPolicyStatements().filter(
+      (s) => s.Effect === 'Allow' && JSON.stringify(s.Resource ?? '').includes('ChatQuotaTable')
+    );
+    expect(statements).toHaveLength(1);
+    expect(actionsOf(statements[0])).toEqual(['dynamodb:UpdateItem']);
+  });
+
+  test('テーブル名にワイルドカードを書かれたら synth で落とす', () => {
+    const spec = readProjectSpec();
+    for (const runtime of spec.runtimes ?? []) {
+      runtime.envVars = runtime.envVars?.map(v => (v.name === 'CHAT_QUOTA_TABLE_NAME' ? { ...v, value: 'quota*' } : v));
+    }
+    expect(() => new AgentCoreStack(new cdk.App(), 'BadQuotaStack', { spec })).toThrow(/CHAT_QUOTA_TABLE_NAME/);
+  });
+});
