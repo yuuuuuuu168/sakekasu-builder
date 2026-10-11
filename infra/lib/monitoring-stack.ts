@@ -2,7 +2,6 @@ import * as cdk from 'aws-cdk-lib';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as actions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as sns from 'aws-cdk-lib/aws-sns';
-import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -98,12 +97,10 @@ export interface MonitoringStackProps extends cdk.StackProps {
 /**
  * 監視とアラート通知をまとめたスタック。
  *
- * 通知先の Slack Webhook URL はリポジトリに置けないため、デプロイ前に
- * 手動で登録した SSM パラメータを名前で参照する（README の手順を参照）。
+ * アラームは共通基盤（sakekasu-integrated_environment）のトピックへ送り、
+ * Slack 通知と DevOps Agent への転送はそちらが持つ。
  */
 export class MonitoringStack extends cdk.Stack {
-  public readonly alertTopic: sns.Topic;
-
   /**
    * アラームの送り先。4 アプリ共通の通知先トピック（sakekasu-integrated_environment の
    * sakekasu-integrated-alerts）で、Slack 通知と DevOps Agent への転送はそちらが持つ
@@ -122,15 +119,12 @@ export class MonitoringStack extends cdk.Stack {
     // 詳細は lib/role-boundary.ts
     applyRoleBoundary(this);
 
-    // トピック、メトリクスの名前空間、SSM パラメータは旧い名前（`dev-sakekasu-*`）のまま。
-    // トピックは DevOps Agent のスタックが購読していて、名前を変えると作り直しになる。
-    // 名前空間とパラメータはリソースではないが、変えると過去の指標や手で入れた値と切れる
+    // メトリクスの名前空間は旧い名前（`dev-sakekasu-*`）のまま。
+    // リソースではないが、変えると過去の指標と切れる
     const prefix = `${props.envName}-sakekasu`;
     // それ以外（関数、ルール、アラーム）は 5 アプリで揃えた `sakekasu-<アプリ>-<env>-*` にする
     const namePrefix = `sakekasu-builder-${props.envName}`;
     this.metricNamespace = `${prefix}-monitoring`;
-
-    const webhookParameterName = `/${prefix}/monitoring/slack-webhook-url`;
 
     // --- Application Signals（Issue #86）---
     //
@@ -167,116 +161,6 @@ export class MonitoringStack extends cdk.Stack {
       'SharedAlertTopic',
       `arn:aws:sns:${this.region}:${this.account}:sakekasu-integrated-alerts`,
     );
-
-    /*
-     * 以下の builder のトピックと Slack 通知 Lambda は、もうアラームの送り先ではない。
-     * 消すのは次の段にする。DevOps Agent のスタックがこのトピックの ARN を Fn::ImportValue で
-     * 読んでいたので、読む側が無くなったデプロイの後でないと Export を消せない
-     * （下の exportValue）。それまでは何も届かないトピックとして残る
-     */
-    this.alertTopic = new sns.Topic(this, 'AlertTopic', {
-      topicName: `${prefix}-alerts`,
-      displayName: '酒カス 監視アラート',
-    });
-
-    // CloudWatch アラームからの publish を明示的に許可する。
-    //
-    // ## なぜ要るか
-    //
-    // SNS はトピック作成時に「所有アカウントからの publish を許可する」既定ポリシーを
-    // 暗黙に持っていて、アラーム通知はこれに乗っている。だがこの既定は
-    // 明示的なトピックポリシーを置いた瞬間に丸ごと置き換わる。
-    // 以前は AWS Health のルール（EventBridge）がこのトピックを宛先にしていて、
-    // CDK が events.amazonaws.com を許可する AWS::SNS::TopicPolicy を生成し、
-    // その副作用でアラーム側の権限が落ちた。
-    //
-    // Health のルールは共通基盤へ移して無くなったが、この文は外さない。
-    // 暗黙の既定に戻すのではなく明示しておけば、将来また別のサービス
-    // （EventBridge など）を宛先に足しても、この文だけは残る。
-    // ここを消してから何かを宛先に足すと、同じ無音の事故がもう一度起きる。
-    //
-    // ## 実際に一度壊した（2026-08-06 〜 08-17）
-    //
-    // AWS Health のルール（当時は AwsHealthRule）を入れた 08-06 から、このスタックの
-    // アラーム全部が無音になった。鳴ってはいるが誰にも届かない状態で、9日間気づけなかった。
-    // EventBridge 経由の AWS Health 通知だけは許可が残っていて届き続けたため、
-    // 通知が来ること自体は日常的に起きていたのが、気づけなかった理由。
-    //
-    // 失われた通知の実例として、08-08 12:46 の signup-notify-fail がある。
-    // 表に出たのは 08-17、Application Signals の SLO アラーム（Issue #86）が
-    // 初めて遷移したときだった。
-    //
-    // ## 壊れているかの見分け方
-    //
-    // アラームの状態ではなく、アクションの履歴を見る。状態は正常に遷移するので、
-    // describe-alarms では気づけない。
-    //
-    //   aws cloudwatch describe-alarm-history --alarm-name <name> \
-    //     --history-item-type Action --query 'AlarmHistoryItems[].[Timestamp,HistorySummary]'
-    //
-    // Failed to execute action が出ていれば拒否されている。
-    // 経路を試すなら set-alarm-state で状態を手で動かすのが早い（実通知が飛ぶ）。
-    //
-    // 対処の出典:
-    // https://repost.aws/knowledge-center/cloudwatch-receive-sns-for-alarm-trigger
-    this.alertTopic.addToResourcePolicy(
-      new iam.PolicyStatement({
-        sid: 'AllowCloudWatchAlarmsToPublish',
-        effect: iam.Effect.ALLOW,
-        principals: [new iam.ServicePrincipal('cloudwatch.amazonaws.com')],
-        actions: ['sns:Publish'],
-        resources: [this.alertTopic.topicArn],
-        // 混乱した代理人対策。ただし条件は、CloudWatch が渡すと AWS の手順書に
-        // 明記されているキーだけに留める。推測で絞ると「鳴っているのに届かない」
-        // という、いま踏んだのと同じ壊れ方をする
-        conditions: {
-          StringEquals: { 'aws:SourceAccount': this.account },
-          ArnLike: {
-            'aws:SourceArn': `arn:aws:cloudwatch:${this.region}:${this.account}:alarm:*`,
-          },
-        },
-      }),
-    );
-
-    const slackNotifierFunctionName = `${namePrefix}-slack-notifier`;
-    const slackNotifier = new NodejsFunction(this, 'SlackNotifierFunction', {
-      functionName: slackNotifierFunctionName,
-      runtime: Runtime.NODEJS_22_X,
-      logGroup: lambdaLogGroup(this, 'SlackNotifierLogGroup', slackNotifierFunctionName),
-      entry: path.join(here, '../lambda/slack-notifier/index.ts'),
-      handler: 'handler',
-      timeout: cdk.Duration.seconds(15),
-      environment: {
-        WEBHOOK_PARAMETER_NAME: webhookParameterName,
-      },
-      bundling: {
-        format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
-        mainFields: ['module', 'main'],
-        banner:
-          "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
-      },
-    });
-
-    // Webhook URL は手動登録のため、パラメータ名で権限を絞る
-    slackNotifier.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['ssm:GetParameter'],
-        resources: [
-          `arn:aws:ssm:${this.region}:${this.account}:parameter${webhookParameterName}`,
-        ],
-      }),
-    );
-
-    this.alertTopic.addSubscription(new subscriptions.LambdaSubscription(slackNotifier));
-
-    // Slack への通知自体が失敗すると誰も気づけないため、そこも監視する
-    this.addAlarm('SlackNotifierFailure', {
-      alarmName: `${namePrefix}-slack-notifier-failure`,
-      description: 'Slack への通知に失敗しています。アラートが届かない状態です',
-      metric: slackNotifier.metricErrors({ period: cdk.Duration.minutes(5), statistic: 'Sum' }),
-      threshold: 1,
-      evaluationPeriods: 1,
-    });
 
     // AWS Health の通知は共通基盤（sakekasu-integrated_environment）へ移した。
     // アカウント全体の話なので 1 か所だけが持つ。ここにも残すと同じ通知が 2 通届く
@@ -577,20 +461,6 @@ export class MonitoringStack extends cdk.Stack {
         treatMissingData: cloudwatch.TreatMissingData.BREACHING,
       });
     }
-
-    new cdk.CfnOutput(this, 'AlertTopicArn', {
-      value: this.alertTopic.topicArn,
-      description: '監視アラートの SNS トピック',
-    });
-
-    // DevOps Agent のスタックが転送 Lambda の購読のために読んでいた Export を、読む側を外した
-    // このデプロイの間だけ残す。先にこちらが更新されて Export が消えると、まだ購読を持つ
-    // DevOps Agent のスタックの参照が宙に浮く。次の段でトピックごと消すときに、これも外す
-    this.exportValue(this.alertTopic.topicArn);
-    new cdk.CfnOutput(this, 'SlackWebhookParameterName', {
-      value: webhookParameterName,
-      description: 'Slack Webhook URL を入れる SSM パラメータ名（手動登録）',
-    });
   }
 
   /**

@@ -21,38 +21,6 @@ function flattenJoin(value: unknown): string {
     .join(separator);
 }
 
-/**
- * トピックポリシーから、CloudWatch アラームの publish を許可している文を拾う。
- *
- * `Sid` では探さない。`Sid` を変えただけで「文が無い」と誤判定してしまい、
- * 本題と関係ない理由でテストが落ちるため。効くのは principal と action なので、
- * ポリシーの評価と同じ見方で拾う。
- */
-function cloudwatchPublishStatements(
-  template: Template,
-): Record<string, unknown>[] {
-  const policies = template.findResources("AWS::SNS::TopicPolicy");
-  return Object.values(policies)
-    .flatMap(
-      (p) =>
-        (p.Properties?.PolicyDocument?.Statement ?? []) as Record<
-          string,
-          unknown
-        >[],
-    )
-    .filter((st) => {
-      const principal = (st.Principal as { Service?: string | string[] })
-        ?.Service;
-      const services = Array.isArray(principal) ? principal : [principal];
-      const actions = Array.isArray(st.Action) ? st.Action : [st.Action];
-      return (
-        st.Effect === "Allow" &&
-        services.includes("cloudwatch.amazonaws.com") &&
-        actions.includes("sns:Publish")
-      );
-    });
-}
-
 function synth() {
   const app = new cdk.App();
   const env = { account: TEST_ACCOUNT, region: TEST_REGION };
@@ -85,60 +53,16 @@ describe("MonitoringStack", () => {
     template = synth().template;
   });
 
-  it("アラートを流す SNS トピックがある", () => {
-    template.hasResourceProperties("AWS::SNS::Topic", {
-      TopicName: "dev-sakekasu-alerts",
-    });
-  });
-
-  /**
-   * トピックポリシーに明示的な文を1つでも置くと、SNS が暗黙に持っている
-   * 「所有アカウントからの publish を許可する」既定ポリシーが丸ごと消える。
-   * 以前は AWS Health のルールが events.amazonaws.com の文を作っていて、
-   * この置き換えが必ず起きていた。
-   *
-   * 実際に一度これで壊れた。全アラームが鳴っても Slack に何も届かず、
-   * EventBridge 経由の AWS Health 通知だけが生きていたので気づけなかった。
-   * Health のルールは共通基盤へ移したが、また別の宛先を足したときに同じ壊れ方を
-   * しないよう、明示の許可は残してある。アラーム経路が無言で死ぬ壊れ方なので、
-   * テストで固定する。
-   */
-  it("トピックポリシーが CloudWatch アラームからの publish を許可している", () => {
-    expect(cloudwatchPublishStatements(template)).toHaveLength(1);
-  });
-
-  /**
-   * 条件はキー名だけでなく、演算子と値まで見る。
-   *
-   * キー名しか見ないと、次のどれも素通りしてしまう。
-   *
-   * - `aws:SourceAccount` が `*`（どのアカウントからでも publish できる）
-   * - 値が空文字（条件が実質無い）
-   * - `aws:SourceArn` を `ArnLike` ではなく `StringEquals` で書く
-   *
-   * 最後のものが特に厄介で、末尾の `*` がワイルドカードではなくただの文字に
-   * なるため、どのアラームにも一致せず配信が止まる。権限が無いのと同じ
-   * 「鳴っているのに届かない」状態、つまりこのテストが防ぎたい壊れ方そのもの。
-   *
-   * 逆に条件を足しすぎても届かなくなるので、過不足なく一致することを見る。
-   * ここを変えるときは、そのキーを CloudWatch が本当に渡すのかを確認すること。
-   */
-  it("CloudWatch への許可が、届く形の条件で絞られている", () => {
-    const [statement] = cloudwatchPublishStatements(template);
-    expect(statement).toBeDefined();
-
-    expect(statement.Condition).toEqual({
-      StringEquals: { "aws:SourceAccount": TEST_ACCOUNT },
-      ArnLike: {
-        "aws:SourceArn": `arn:aws:cloudwatch:${TEST_REGION}:${TEST_ACCOUNT}:alarm:*`,
-      },
-    });
+  it("自分の SNS トピックとトピックポリシーを持たない（送り先は共通基盤のトピック）", () => {
+    template.resourceCountIs("AWS::SNS::Topic", 0);
+    template.resourceCountIs("AWS::SNS::TopicPolicy", 0);
+    template.resourceCountIs("AWS::SNS::Subscription", 0);
   });
 
   /**
    * アラームの送り先は 4 アプリ共通のトピック（共通基盤の sakekasu-integrated-alerts）。
-   * Slack 通知と DevOps Agent への転送はそちらが持つ。上の 2 つ（builder のトピックの許可）は、
-   * builder のトピックを消す次の段まで残る。
+   * Slack 通知と DevOps Agent への転送はそちらが持つ。CloudWatch からの publish を許すトピックポリシーも
+   * 共通基盤の側にある（共通基盤の lib/monitoring-stack.ts）。
    *
    * ARN は名前から組み立てる（共通基盤のスタックの出力を参照しない）。名前を書き違えると
    * 合成もデプロイも通るのに、どこにも届かない
@@ -153,50 +77,6 @@ describe("MonitoringStack", () => {
       expect(alarm.Properties?.AlarmActions).toEqual([shared]);
       expect(alarm.Properties?.OKActions).toEqual([shared]);
     }
-  });
-
-  it("builder のトピックの Export を残す（DevOps Agent のスタックが参照を外すまでの橋渡し）", () => {
-    const outputs = Object.values(template.toJSON().Outputs ?? {}) as Array<{
-      Value?: unknown;
-      Export?: unknown;
-    }>;
-    expect(
-      outputs.some((o) => o.Export && JSON.stringify(o.Value).includes("AlertTopic")),
-    ).toBe(true);
-  });
-
-  it("Slack 通知 Lambda がトピックを購読している", () => {
-    template.hasResourceProperties("AWS::SNS::Subscription", {
-      Protocol: "lambda",
-    });
-    template.hasResourceProperties("AWS::Lambda::Function", {
-      FunctionName: "sakekasu-builder-dev-slack-notifier",
-    });
-  });
-
-  it("Webhook URL はコードに持たず SSM パラメータ名だけを渡す", () => {
-    template.hasResourceProperties("AWS::Lambda::Function", {
-      FunctionName: "sakekasu-builder-dev-slack-notifier",
-      Environment: {
-        Variables: {
-          WEBHOOK_PARAMETER_NAME: "/dev-sakekasu/monitoring/slack-webhook-url",
-        },
-      },
-    });
-  });
-
-  it("Slack 通知 Lambda の SSM 参照は該当パラメータだけに絞る", () => {
-    template.hasResourceProperties("AWS::IAM::Policy", {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Action: "ssm:GetParameter",
-            Resource:
-              "arn:aws:ssm:ap-northeast-1:111122223333:parameter/dev-sakekasu/monitoring/slack-webhook-url",
-          }),
-        ]),
-      },
-    });
   });
 
   // 今回の障害を検知できる本命のアラーム
@@ -276,13 +156,6 @@ describe("MonitoringStack", () => {
 
   it("ThrottledRequests を TableName だけで見るアラームを作らない", () => {
     expect(JSON.stringify(template.toJSON())).not.toContain("ThrottledRequests");
-  });
-
-  // 通知経路そのものが壊れると誰も気づけない
-  it("Slack 通知 Lambda の失敗も監視する", () => {
-    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      AlarmName: "sakekasu-builder-dev-slack-notifier-failure",
-    });
   });
 
   // 以前は ApiStack にあり通知先が無かった
