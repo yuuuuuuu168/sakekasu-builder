@@ -2,7 +2,6 @@ import * as cdk from 'aws-cdk-lib';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as actions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as sns from 'aws-cdk-lib/aws-sns';
-import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
@@ -142,7 +141,20 @@ export class DevOpsAgentStack extends cdk.Stack {
       }),
     );
 
-    props.alertTopic.addSubscription(new subscriptions.LambdaSubscription(webhookForwarder));
+    // LambdaSubscription は使わず、実行の許可と購読を別々に作る。
+    // LambdaSubscription が作る許可（論理 ID `…AllowInvoke…`）は、関数の名前を変えたときに
+    // cdkd が作り直しに失敗した（2026-10-11。同じ StatementId の追加が既存の許可を返し、
+    // 古い方を消せずに止まる）。論理 ID の違う許可を新しく作れば、作り直しの経路を通らない。
+    // 購読は LambdaSubscription と同じ場所・同じ ID（関数の下の `AlertTopic`）に置き、論理 ID を変えない
+    webhookForwarder.addPermission('AllowInvokeFromAlertTopic', {
+      principal: new iam.ServicePrincipal('sns.amazonaws.com'),
+      sourceArn: props.alertTopic.topicArn,
+    });
+    new sns.Subscription(webhookForwarder, props.alertTopic.node.id, {
+      topic: props.alertTopic,
+      protocol: sns.SubscriptionProtocol.LAMBDA,
+      endpoint: webhookForwarder.functionArn,
+    });
 
     // 転送が止まると調査が始まらないまま静かに機能を失うため、そこも監視する。
     // 通知経路は既存のアラートトピック（＝ Slack）をそのまま使う
