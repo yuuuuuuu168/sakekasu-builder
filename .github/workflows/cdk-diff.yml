@@ -68,6 +68,17 @@ jobs:
       # 差し替えた PR を出せばインストール時スクリプトを走らせられる。認証後だと
       # そのスクリプトが diff ロールのセッショントークンを読める
       - run: npm ci --ignore-scripts
+      # 合成で Lambda をバンドルするのに要る。@aws-sdk/* は実行環境にあるので
+      # バンドルから外しているが、Claude API の SDK（lambda/shared の
+      # @anthropic-ai/sdk）は外せず、Lambda ごとの node_modules から解決する。
+      # 取得元は上の検査が Lambda ごとの lock まで見ている。--ignore-scripts と、
+      # 認証情報より前に置く理由は deploy.yml と同じ
+      - name: Lambda ごとの依存を入れる
+        run: |
+          for dir in lambda/*/; do
+            [ -f "${dir}package.json" ] || continue
+            (cd "$dir" && npm ci --ignore-scripts)
+          done
       # 合成も認証情報を入れる前に済ませる（PR #151 のセキュリティレビュー）。
       #
       # --ignore-scripts が止めるのは npm のインストール時スクリプトだけで、
