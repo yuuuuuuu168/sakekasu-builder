@@ -260,7 +260,7 @@ aws secretsmanager delete-secret --secret-id dev-sakekasu/monitoring/canary-user
 
 8 は 7 日間は `aws secretsmanager restore-secret --secret-id dev-sakekasu/monitoring/canary-user` で戻せる。
 一覧にカナリア用の別の秘密（以前の名前など）が出たら、それも同じように消す。Slack の Webhook URL は
-SSM パラメータ（`/dev-sakekasu/monitoring/slack-webhook-url`）なので、この一覧には出ない。消さない。
+SSM パラメータ（`/dev-sakekasu/monitoring/slack-webhook-url`）なので、この一覧には出ない（2026-10 に builder の Slack 通知を共通基盤へ寄せてからは使っていない）。
 
 #### 旧 sub の下の画像を消す
 

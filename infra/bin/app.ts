@@ -186,9 +186,7 @@ function buildApplicationStacks(app: cdk.App): void {
       agentSpaceArn,
       env: cdkEnv,
     });
-    // 転送 Lambda を共通基盤へ移したので、監視スタックへの参照はもう無い。順序だけ残す。
-    // 監視スタックが残している Export（monitoring-stack.ts の exportValue）を、
-    // こちらが参照を外した後で消せるようにするため
+    // 監視スタックへの参照は無い（転送 Lambda は共通基盤へ移した）。デプロイの順序だけ従来どおりにしておく
     devopsAgentStack.addDependency(monitoringStack);
   }
 

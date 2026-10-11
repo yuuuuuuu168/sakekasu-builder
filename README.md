@@ -55,7 +55,7 @@
 
 | 機能 | 補足 |
 |------|------|
-| 監視とアラート通知 | 24アラーム（AI・サービス正常性・外形監視・SLO）を Slack へ。AWS Health の通知は共通基盤へ移した。デプロイ前に手動登録あり。ソムリエのカナリアは共通ログインでは動かせないので消した（[docs/shared-login.md](docs/shared-login.md)） |
+| 監視とアラート通知 | 22アラーム（AI・サービス正常性・外形監視・SLO）を、共通基盤のトピック経由で Slack と DevOps Agent へ。AWS Health の通知は共通基盤へ移した。ソムリエのカナリアは共通ログインでは動かせないので消した（[docs/shared-login.md](docs/shared-login.md)） |
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/92)） |
 | DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。プライベートチャンネルではメンションで調査の開始や照会もできる。コンソール側の設定あり（[#67](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/67)） |
 | Application Signals による APM | OCR と画像アップロードの2関数を計装。OCR には SLO を2本置き、割ったらアラーム（[#11](https://github.com/yuuuuuuu168/sakekasu-builder/issues/11)） |
@@ -453,12 +453,12 @@ CloudWatch アラーム ─┐
 
 送り先のトピックと、その先の Slack 通知・DevOps Agent への転送は共通基盤
 （[sakekasu-integrated_environment](https://github.com/yuuuuuuu168/sakekasu-integrated_environment) の `docs/monitoring.md`）が持つ。
-4 アプリのアラームが同じ経路を通る。builder の自分のトピック（`dev-sakekasu-alerts`）と Slack 通知 Lambda は、
-もう何も届かないまま残っていて、次の段で消す（`infra/lib/monitoring-stack.ts` のコメント）。
+4 アプリのアラームが同じ経路を通る。builder が以前持っていた自分のトピック（`dev-sakekasu-alerts`）と
+Slack 通知 Lambda（`sakekasu-builder-dev-slack-notifier`）は、送り先を移したあとに消した（2026-10）。
 
 アラームは**発報だけでなく復旧も通知する**ので、鳴りっぱなしなのか直ったのかが Slack だけで分かる。
 
-### 監視項目（24アラーム）
+### 監視項目（22アラーム）
 
 | 分類 | 監視対象 | 発報条件 |
 |------|---------|---------|
@@ -472,12 +472,11 @@ CloudWatch アラーム ─┐
 | サービス | Lambda エラー（presigned-url / ocr-analyzer / tasting-note） | 15分で5回以上 |
 | サービス | DynamoDB スロットル（2テーブル） | 5分で1回以上 |
 | サービス | 画像削除の失敗 | 1時間で5回以上 |
-| 外形監視 | フロント配信 / ソムリエ Runtime / AppSync | 2回続けて到達不可 |
-| 通知経路 | Slack 通知 Lambda のエラー | 1回以上 |
+| 外形監視 | ソムリエ Runtime / AppSync（サイトそのものは共通基盤が見る） | 2回続けて到達不可 |
 | 監視自体 | 外形監視の実行失敗 | 1回以上 |
 | 監視自体 | 外形監視が動いていない | 1時間の実行回数が0 |
 
-監視そのものが動かなくなると異常に気づけないため、**Slack 通知 Lambda と外形監視も監視対象**に含めている。「エラーで失敗した」だけでなく「**そもそも動いていない**」も見る。スケジュールが止まるとエラーすら記録されず、静かに監視が消えるため。
+監視そのものが動かなくなると異常に気づけないため、**外形監視も監視対象**に含めている。通知の経路（Slack 通知と DevOps Agent への転送）の失敗は、共通基盤が監視している。「エラーで失敗した」だけでなく「**そもそも動いていない**」も見る。スケジュールが止まるとエラーすら記録されず、静かに監視が消えるため。
 
 既定では「データが無い＝異常なし」として扱うが、欠損そのものに意味がある指標は例外にしている。
 
@@ -492,7 +491,6 @@ CloudWatch アラーム ─┐
 
 外したのは、監視スタックの `dev-sakekasu-aws-health` ルールと、us-east-1 の `sakekasu-dev-health-global` スタック（転送ルール `dev-sakekasu-aws-health-global` とロール `dev-sakekasu-health-forwarder`）。us-east-1 のスタックはアプリから外しても `cdkd deploy --all` では消えないので、手で消す（[docs/cdkd-migration.md](docs/cdkd-migration.md) の「health-global を外した」）。
 
-Slack 通知 Lambda には、Health イベントを整形するコードが残っている。イベントがもう届かないので動かないが、害は無く、アラームの経路と同じ関数なので手を付けていない。
 
 ### 新規ユーザー登録の通知（Issue #66）
 
@@ -511,17 +509,9 @@ Slack 通知 Lambda には、Health イベントを整形するコードが残�
 
 ### デプロイ前の準備
 
-Webhook URL はリポジトリに置けないため、**先に手動で登録**する。CDK は名前で参照するだけ。
-
-```bash
-# 1. Slack の Incoming Webhook URL を登録する
-AWS_PROFILE=sakekasu-builder aws ssm put-parameter \
-  --name /dev-sakekasu/monitoring/slack-webhook-url \
-  --type SecureString \
-  --value 'https://hooks.slack.com/services/XXX/YYY/ZZZ' \
-  --region ap-northeast-1
-
-```
+監視スタックのデプロイ前に手で登録するものは無い。Slack の Webhook URL は共通基盤の
+SSM パラメータ（`/sakekasu-integrated/monitoring/slack-webhook-url`）にあり、builder は持たない。
+以前使っていた `/dev-sakekasu/monitoring/slack-webhook-url` はもう読まれていないので、消してよい。
 
 デプロイは main へのマージで `deploy.yml` が cdkd で行う（下の「デプロイ（CDK）」）。
 
@@ -532,7 +522,7 @@ Runtime の ARN は CDK コンテキスト（`sommelierRuntimeArn`）で差し�
 
 ### 費用の目安
 
-概算で**月5ドル前後**。内訳は CloudWatch アラーム23件（$0.10/件）とカスタムメトリクス（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。SLO とトレースの費用は Application Signals 側で別立てになる（月数十円から数百円の見込み。[docs/application-signals.md](docs/application-signals.md)）。
+概算で**月5ドル前後**。内訳は CloudWatch アラーム22件（$0.10/件）とカスタムメトリクス（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。SLO とトレースの費用は Application Signals 側で別立てになる（月数十円から数百円の見込み。[docs/application-signals.md](docs/application-signals.md)）。
 
 ## 毎日の利用料金 Slack 通知（Issue #92）
 
