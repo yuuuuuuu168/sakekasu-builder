@@ -70,7 +70,6 @@ function synth() {
     ocrFunction: apiStack.ocrAnalyzerFunction,
     imageDeleteFailMetricFilter: apiStack.imageDeleteFailMetricFilter,
     sommelierRuntimeArn: RUNTIME_ARN,
-    siteUrl: "https://example.com",
     env,
   });
 
@@ -371,8 +370,8 @@ describe("MonitoringStack", () => {
       healthCheck!.Properties.Environment.Variables.HEALTH_CHECK_TARGETS,
     );
 
-    expect(targets).toContain('"name":"frontend"');
-    expect(targets).toContain('"expectStatus":[200]');
+    // サイトは共通基盤の外形監視が見るので、ここには置かない
+    expect(targets).not.toContain('"name":"frontend"');
     // 認証なしで叩き、拒否されることを正常とみなす
     expect(targets).toContain('"name":"sommelier-runtime"');
     expect(targets).toContain('"expectStatus":[401,403]');
@@ -383,7 +382,7 @@ describe("MonitoringStack", () => {
 
   it("外形監視は2回続けて失敗したときだけ通知する", () => {
     template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-      AlarmName: "sakekasu-builder-dev-health-check-frontend",
+      AlarmName: "sakekasu-builder-dev-health-check-appsync",
       EvaluationPeriods: 2,
     });
   });

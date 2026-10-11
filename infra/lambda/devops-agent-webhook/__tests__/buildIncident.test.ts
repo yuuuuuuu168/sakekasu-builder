@@ -235,8 +235,7 @@ describe('AWS Health の転送', () => {
 });
 
 describe('priorityForAlarm', () => {
-  it('利用者がサイトを使えないものは最優先にする', () => {
-    expect(mod.priorityForAlarm('dev-sakekasu-health-check-frontend')).toBe('CRITICAL');
+  it('利用者が記録を読み書きできないものは最優先にする', () => {
     expect(mod.priorityForAlarm('dev-sakekasu-appsync-5xx')).toBe('CRITICAL');
   });
 

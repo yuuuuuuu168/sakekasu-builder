@@ -160,7 +160,7 @@ docs/apex-redirect.md にある。
   戻した。サインアウトしたら入口の表紙へ帰すため（`src/features/auth/amplifyConfig.ts` の
   `PORTAL_SIGN_OUT_URL`）。ログインの戻り先（`callbackUrls`）は sake. のまま
 - 画像バケットの CORS（[api-stack.ts](../infra/lib/api-stack.ts)）から apex と `*.amplifyapp.com` を外した
-- 外形監視の対象を sake. に替えた。共通基盤の `healthChecks` の builder と、このリポジトリの `siteUrl`。
+- 外形監視の対象を sake. に替えた。共通基盤の `healthChecks` の builder と、このリポジトリの `siteUrl`（`siteUrl` はのちに外し、サイトの外形監視は共通基盤だけにした）。
   monitoring-stack が外形監視を共通基盤と二重に持っている件は、別に片付ける
 - [amplify-exit.md](amplify-exit.md) に「移行した」と書き足した
 

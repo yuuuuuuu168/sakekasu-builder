@@ -218,7 +218,6 @@ describe('Claude API から Bedrock へのやり直しの監視', () => {
       llmFallbackMetricFilters: apiStack.llmFallbackMetricFilters,
       sommelierRuntimeArn:
         'arn:aws:bedrock-agentcore:ap-northeast-1:111111111111:runtime/sommelier_test-AAAAAAAAAA',
-      siteUrl: 'https://example.com',
       env,
     });
 

@@ -131,8 +131,9 @@ export interface IncidentPayload {
  * 上から順に最初に当たったものを使う
  */
 const PRIORITY_RULES: { match: RegExp; priority: Priority }[] = [
-  // 利用者がサイトを開けない・記録を読み書きできない
-  { match: /health-check-frontend|appsync-5xx/, priority: 'CRITICAL' },
+  // 利用者が記録を読み書きできない。サイトが開けないことは共通基盤の外形監視が見ていて、
+  // このアカウントの DevOps Agent には届かない
+  { match: /appsync-5xx/, priority: 'CRITICAL' },
   // 利用者からは見えないが放置はできないもの（通知の失敗・後片付けの失敗・監視の停止）。
   // HIGH より先に見るのは、監視そのものの停止を表す watcher-* が、名前に監視対象
   // （sommelier など）を含んだときに「その機能の故障」と取り違えられるのを防ぐため。

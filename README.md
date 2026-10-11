@@ -519,13 +519,14 @@ AWS_PROFILE=sakekasu-builder aws ssm put-parameter \
 
 デプロイは main へのマージで `deploy.yml` が cdkd で行う（下の「デプロイ（CDK）」）。
 
-Runtime の ARN とサイト URL は CDK コンテキスト（`sommelierRuntimeArn`・`siteUrl`）で差し替えられる。
+Runtime の ARN は CDK コンテキスト（`sommelierRuntimeArn`）で差し替えられる。
+サイト（`sake.sakekasu-builder.com`）の外形監視はこのリポジトリでは持たず、共通基盤（sakekasu-integrated_environment）の `healthChecks` の `builder` が見る。
 `infra/cdk.json` の context に書いてマージする。監視スタックは cdkd の管理下なので、手元から `cdk deploy` は打たない
 （CloudFormation のスタックが別に作られ、リソースが二重になる）。
 
 ### 費用の目安
 
-概算で**月5ドル前後**。内訳は CloudWatch アラーム24件（$0.10/件）とカスタムメトリクス（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。SLO とトレースの費用は Application Signals 側で別立てになる（月数十円から数百円の見込み。[docs/application-signals.md](docs/application-signals.md)）。
+概算で**月5ドル前後**。内訳は CloudWatch アラーム23件（$0.10/件）とカスタムメトリクス（$0.30/種）が大半で、Lambda・SNS は無料枠にほぼ収まる。SLO とトレースの費用は Application Signals 側で別立てになる（月数十円から数百円の見込み。[docs/application-signals.md](docs/application-signals.md)）。
 
 ## 毎日の利用料金 Slack 通知（Issue #92）
 
