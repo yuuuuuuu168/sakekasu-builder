@@ -118,7 +118,12 @@ export class MonitoringStack extends cdk.Stack {
     // 詳細は lib/role-boundary.ts
     applyRoleBoundary(this);
 
+    // トピック、メトリクスの名前空間、SSM パラメータは旧い名前（`dev-sakekasu-*`）のまま。
+    // トピックは DevOps Agent のスタックが購読していて、名前を変えると作り直しになる。
+    // 名前空間とパラメータはリソースではないが、変えると過去の指標や手で入れた値と切れる
     const prefix = `${props.envName}-sakekasu`;
+    // それ以外（関数、ルール、アラーム）は 5 アプリで揃えた `sakekasu-<アプリ>-<env>-*` にする
+    const namePrefix = `sakekasu-builder-${props.envName}`;
     this.metricNamespace = `${prefix}-monitoring`;
 
     const webhookParameterName = `/${prefix}/monitoring/slack-webhook-url`;
@@ -209,7 +214,7 @@ export class MonitoringStack extends cdk.Stack {
       }),
     );
 
-    const slackNotifierFunctionName = `${prefix}-slack-notifier`;
+    const slackNotifierFunctionName = `${namePrefix}-slack-notifier`;
     const slackNotifier = new NodejsFunction(this, 'SlackNotifierFunction', {
       functionName: slackNotifierFunctionName,
       runtime: Runtime.NODEJS_22_X,
@@ -242,7 +247,7 @@ export class MonitoringStack extends cdk.Stack {
 
     // Slack への通知自体が失敗すると誰も気づけないため、そこも監視する
     this.addAlarm('SlackNotifierFailure', {
-      alarmName: `${prefix}-slack-notifier-failure`,
+      alarmName: `${namePrefix}-slack-notifier-failure`,
       description: 'Slack への通知に失敗しています。アラートが届かない状態です',
       metric: slackNotifier.metricErrors({ period: cdk.Duration.minutes(5), statistic: 'Sum' }),
       threshold: 1,
@@ -262,7 +267,7 @@ export class MonitoringStack extends cdk.Stack {
       'InvalidInboundTokenException',
     ]) {
       this.addAlarm(`SommelierAuthFailure${exceptionType}`, {
-        alarmName: `${prefix}-sommelier-auth-failure-${exceptionType}`,
+        alarmName: `${namePrefix}-sommelier-auth-failure-${exceptionType}`,
         description:
           'ソムリエの認証が拒否されています。利用者はチャットで「サインインの有効期限が切れたかも」と表示されます',
         metric: new cloudwatch.Metric({
@@ -278,7 +283,7 @@ export class MonitoringStack extends cdk.Stack {
     }
 
     this.addAlarm('SommelierSystemErrors', {
-      alarmName: `${prefix}-sommelier-system-errors`,
+      alarmName: `${namePrefix}-sommelier-system-errors`,
       description: 'ソムリエ Runtime がシステムエラーを返しています',
       metric: new cloudwatch.Metric({
         namespace: 'AWS/Bedrock-AgentCore',
@@ -292,7 +297,7 @@ export class MonitoringStack extends cdk.Stack {
     });
 
     this.addAlarm('SommelierThrottles', {
-      alarmName: `${prefix}-sommelier-throttles`,
+      alarmName: `${namePrefix}-sommelier-throttles`,
       description: 'ソムリエ Runtime がスロットリングされています',
       metric: new cloudwatch.Metric({
         namespace: 'AWS/Bedrock-AgentCore',
@@ -308,7 +313,7 @@ export class MonitoringStack extends cdk.Stack {
     // --- AI: OCR（ラベル読み取り）---
 
     this.addAlarm('OcrErrors', {
-      alarmName: `${prefix}-ocr-errors`,
+      alarmName: `${namePrefix}-ocr-errors`,
       description: 'ラベル画像の OCR が失敗しています（銘柄名の自動入力が効きません）',
       metric: props.ocrFunction.metricErrors({
         period: cdk.Duration.minutes(15),
@@ -319,7 +324,7 @@ export class MonitoringStack extends cdk.Stack {
     });
 
     this.addAlarm('OcrThrottles', {
-      alarmName: `${prefix}-ocr-throttles`,
+      alarmName: `${namePrefix}-ocr-throttles`,
       description: 'OCR Lambda がスロットリングされています',
       metric: props.ocrFunction.metricThrottles({
         period: cdk.Duration.minutes(15),
@@ -338,7 +343,7 @@ export class MonitoringStack extends cdk.Stack {
     const llmFallbackFilter = props.llmFallbackMetricFilters?.[0];
     if (llmFallbackFilter) {
       this.addAlarm('LlmFallback', {
-        alarmName: `${prefix}-llm-fallback`,
+        alarmName: `${namePrefix}-llm-fallback`,
         description:
           'OCR かテイスティングノートが Claude API で失敗し、Bedrock でやり直しています（機能は動いている）。' +
           'CloudWatch Logs で「[llm] fallback」を探し、errorType を見る。' +
@@ -354,12 +359,12 @@ export class MonitoringStack extends cdk.Stack {
       });
     }
 
-    this.addSloAlarms(prefix, props.envName);
+    this.addSloAlarms(namePrefix, props.envName);
 
     // --- サービス正常性 ---
 
     this.addAlarm('AppSync5XX', {
-      alarmName: `${prefix}-appsync-5xx`,
+      alarmName: `${namePrefix}-appsync-5xx`,
       description: 'GraphQL API がサーバエラーを返しています（記録の閲覧・登録に影響します）',
       metric: new cloudwatch.Metric({
         namespace: 'AWS/AppSync',
@@ -374,7 +379,7 @@ export class MonitoringStack extends cdk.Stack {
 
     for (const fn of props.functions) {
       this.addAlarm(`LambdaErrors${fn.node.id}`, {
-        alarmName: `${prefix}-lambda-errors-${fn.node.id.toLowerCase()}`,
+        alarmName: `${namePrefix}-lambda-errors-${fn.node.id.toLowerCase()}`,
         description: `${fn.node.id} がエラーを返しています`,
         metric: fn.metricErrors({ period: cdk.Duration.minutes(15), statistic: 'Sum' }),
         threshold: 5,
@@ -400,7 +405,7 @@ export class MonitoringStack extends cdk.Stack {
       });
     for (const table of props.tables) {
       this.addAlarm(`DynamoThrottle${table.node.id}`, {
-        alarmName: `${prefix}-dynamodb-throttle-${table.node.id.toLowerCase()}`,
+        alarmName: `${namePrefix}-dynamodb-throttle-${table.node.id.toLowerCase()}`,
         description: `${table.node.id} が読み書きをスロットリングされています`,
         metric: new cloudwatch.MathExpression({
           expression: 'FILL(r, 0) + FILL(w, 0)',
@@ -418,7 +423,7 @@ export class MonitoringStack extends cdk.Stack {
 
     // 以前は ApiStack 側にあり通知先が無かったため、鳴っても気づけなかった
     this.addAlarm('ImageDeleteFailAlarm', {
-      alarmName: `${prefix}-image-delete-fail`,
+      alarmName: `${namePrefix}-image-delete-fail`,
       description: 'S3 の画像削除に繰り返し失敗しています（消したはずの画像が残ります）',
       metric: props.imageDeleteFailMetricFilter.metric({
         statistic: 'Sum',
@@ -457,7 +462,7 @@ export class MonitoringStack extends cdk.Stack {
       },
     ];
 
-    const healthCheckFunctionName = `${prefix}-health-check`;
+    const healthCheckFunctionName = `${namePrefix}-health-check`;
     const healthCheck = new NodejsFunction(this, 'HealthCheckFunction', {
       functionName: healthCheckFunctionName,
       runtime: Runtime.NODEJS_22_X,
@@ -487,7 +492,7 @@ export class MonitoringStack extends cdk.Stack {
     );
 
     new events.Rule(this, 'HealthCheckSchedule', {
-      ruleName: `${prefix}-health-check-schedule`,
+      ruleName: `${namePrefix}-health-check-schedule`,
       schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
       targets: [new targets.LambdaFunction(healthCheck)],
     });
@@ -495,7 +500,7 @@ export class MonitoringStack extends cdk.Stack {
     // 一時的な失敗で鳴らさないよう、2回続けて失敗したら通知する
     for (const target of healthCheckTargets) {
       this.addAlarm(`HealthCheckFailed${target.name}`, {
-        alarmName: `${prefix}-health-check-${target.name}`,
+        alarmName: `${namePrefix}-health-check-${target.name}`,
         description: `外形監視で ${target.name} に到達できません`,
         metric: new cloudwatch.Metric({
           namespace: this.metricNamespace,
@@ -522,7 +527,7 @@ export class MonitoringStack extends cdk.Stack {
       },
     ]) {
       this.addAlarm(`WatcherFailure-${watcher.key}`, {
-        alarmName: `${prefix}-watcher-failure-${watcher.key}`,
+        alarmName: `${namePrefix}-watcher-failure-${watcher.key}`,
         description: `${watcher.label}の実行自体が失敗しています。異常を検知できない状態です`,
         metric: watcher.fn.metricErrors({
           period: cdk.Duration.hours(1),
@@ -533,7 +538,7 @@ export class MonitoringStack extends cdk.Stack {
       });
 
       this.addAlarm(`WatcherSilent-${watcher.key}`, {
-        alarmName: `${prefix}-watcher-silent-${watcher.key}`,
+        alarmName: `${namePrefix}-watcher-silent-${watcher.key}`,
         description:
           `${watcher.label}が動いていません。スケジュールの停止や権限の失効が疑われます`,
         metric: watcher.fn.metricInvocations({
@@ -723,14 +728,14 @@ export class MonitoringStack extends cdk.Stack {
    * 居座る。監視が入っているように見えて何も鳴らない状態になるので、
    * 名前は `sloNames()` からしか作らない。
    */
-  private addSloAlarms(prefix: string, envName: string): void {
+  private addSloAlarms(namePrefix: string, envName: string): void {
     const slos = SLO_TARGETS.flatMap((target) => {
       const { availability, latency } = MonitoringStack.sloNames(envName, target);
       return [
         {
           id: `${target.idPrefix}AvailabilitySloBreach`,
           sloName: availability,
-          alarmName: `${prefix}-${target.alarmSlug}-slo-availability`,
+          alarmName: `${namePrefix}-${target.alarmSlug}-slo-availability`,
           description:
             `${target.subject}成功率が30日で ${SLO_ATTAINMENT_GOAL}% を割りました` +
             '（1回きりの失敗ではなく、失敗が積み上がっています）',
@@ -738,7 +743,7 @@ export class MonitoringStack extends cdk.Stack {
         {
           id: `${target.idPrefix}LatencySloBreach`,
           sloName: latency,
-          alarmName: `${prefix}-${target.alarmSlug}-slo-latency`,
+          alarmName: `${namePrefix}-${target.alarmSlug}-slo-latency`,
           description:
             `${target.subject}所要時間が30日で ${SLO_ATTAINMENT_GOAL}% の呼び出しで ` +
             `${target.latencyThresholdMs / 1000} 秒を超えています`,

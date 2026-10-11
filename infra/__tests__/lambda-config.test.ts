@@ -523,7 +523,7 @@ describe('Lambda のランタイム', () => {
   const EXPECTED_RESERVATIONS: Record<string, number> = {
     [`${SYNTH_ENV_NAME}-sakekasu-ocr-analyzer`]: 20,
     [`${SYNTH_ENV_NAME}-sakekasu-tasting-note`]: 5,
-    [`${SYNTH_ENV_NAME}-sakekasu-devops-agent-webhook`]: 2,
+    [`sakekasu-builder-${SYNTH_ENV_NAME}-devops-agent-webhook`]: 2,
   };
 
   // 振り分けが壊れると、以降の検査が「対象ゼロ」で素通りしてしまう。

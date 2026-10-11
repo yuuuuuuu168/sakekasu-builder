@@ -100,9 +100,12 @@ export class DevOpsAgentStack extends cdk.Stack {
 
     // --- アラーム → Webhook の転送 ---
 
-    const selfAlarmName = `${prefix}-devops-agent-webhook-failure`;
+    // 関数とアラームは 5 アプリで揃えた `sakekasu-<アプリ>-<env>-*` にする。
+    // Secrets Manager のシークレット（上の webhookSecretName）は手で入れた値なので旧い名前のまま
+    const namePrefix = `sakekasu-builder-${props.envName}`;
+    const selfAlarmName = `${namePrefix}-devops-agent-webhook-failure`;
 
-    const webhookForwarderFunctionName = `${prefix}-devops-agent-webhook`;
+    const webhookForwarderFunctionName = `${namePrefix}-devops-agent-webhook`;
     const webhookForwarder = new NodejsFunction(this, 'WebhookForwarderFunction', {
       functionName: webhookForwarderFunctionName,
       runtime: Runtime.NODEJS_22_X,

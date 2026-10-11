@@ -67,7 +67,7 @@ describe('DevOpsAgentStack', () => {
 
   it('転送 Lambda の同時実行数を絞る（一斉発報で調査が同時に立ち上がるのを避ける）', () => {
     template.hasResourceProperties('AWS::Lambda::Function', {
-      FunctionName: 'dev-sakekasu-devops-agent-webhook',
+      FunctionName: 'sakekasu-builder-dev-devops-agent-webhook',
       ReservedConcurrentExecutions: 2,
     });
   });
@@ -103,12 +103,12 @@ describe('DevOpsAgentStack', () => {
 
   it('転送 Lambda は自分の失敗アラーム名を知っていて、秘密は名前で参照する', () => {
     template.hasResourceProperties('AWS::Lambda::Function', {
-      FunctionName: 'dev-sakekasu-devops-agent-webhook',
+      FunctionName: 'sakekasu-builder-dev-devops-agent-webhook',
       Environment: {
         Variables: {
           WEBHOOK_SECRET_ID: 'dev-sakekasu/devops-agent/webhook',
           ENV_NAME: 'dev',
-          SELF_ALARM_NAME: 'dev-sakekasu-devops-agent-webhook-failure',
+          SELF_ALARM_NAME: 'sakekasu-builder-dev-devops-agent-webhook-failure',
           SERVICE_NAME: 'sakekasu-builder',
         },
       },
@@ -135,7 +135,7 @@ describe('DevOpsAgentStack', () => {
 
   it('転送の失敗を監視するアラームがあり、発報も復旧も同じトピックへ流す', () => {
     template.hasResourceProperties('AWS::CloudWatch::Alarm', {
-      AlarmName: 'dev-sakekasu-devops-agent-webhook-failure',
+      AlarmName: 'sakekasu-builder-dev-devops-agent-webhook-failure',
       Threshold: 1,
       AlarmActions: Match.anyValue(),
       OKActions: Match.anyValue(),
