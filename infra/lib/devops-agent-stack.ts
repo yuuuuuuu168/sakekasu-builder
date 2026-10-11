@@ -1,17 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
-import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
-import * as actions from 'aws-cdk-lib/aws-cloudwatch-actions';
-import * as sns from 'aws-cdk-lib/aws-sns';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { Runtime } from 'aws-cdk-lib/aws-lambda';
-import * as path from 'node:path';
-import * as url from 'node:url';
 import type { Construct } from 'constructs';
-import { lambdaLogGroup } from './log-retention.js';
 import { applyRoleBoundary } from './role-boundary.js';
-
-const here = path.dirname(url.fileURLToPath(import.meta.url));
 
 export interface DevOpsAgentStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
@@ -20,8 +10,6 @@ export interface DevOpsAgentStackProps extends cdk.StackProps {
   monitoringAccountId: string;
   /** 信頼する Agent Space の ARN。1つのスペースだけに絞る */
   agentSpaceArn: string;
-  /** 調査のきっかけを流す SNS トピック（監視スタックのもの） */
-  alertTopic: sns.ITopic;
 }
 
 /**
@@ -29,18 +17,22 @@ export interface DevOpsAgentStackProps extends cdk.StackProps {
  *
  * Agent Space 自体は運用ツール用のアカウント（ops-tooling）の
  * コンソールで作る。
- * このスタックが持つのは、**アプリ本体のアカウント側に必要なもの**の2つ:
+ * このスタックが持つのは、**アプリ本体のアカウント側に必要なもの**のうち
+ * **調査用のクロスアカウントロール**だけ。DevOps Agent のサービスプリンシパルが
+ * 直接引き受ける読み取り専用ロールで、信頼条件を Agent Space の ARN に絞って
+ * 混乱した代理人（confused deputy）を防ぐ。
  *
- * - **調査用のクロスアカウントロール**: DevOps Agent のサービスプリンシパルが
- *   直接引き受ける読み取り専用ロール。信頼条件を Agent Space の ARN に絞って
- *   混乱した代理人（confused deputy）を防ぐ
- * - **アラーム転送 Lambda**: 既存のアラートトピックを購読し、発報を
- *   DevOps Agent の Webhook に投げて調査を自動で始めさせる
+ * アラームを DevOps Agent の Webhook に投げる転送 Lambda は、以前はここにあって
+ * builder のトピック（dev-sakekasu-alerts）だけを購読していた。4 アプリのアラームを
+ * まとめて調査に回すため、共通基盤（sakekasu-integrated_environment）の共通トピックへ移した
+ * （docs/devops-agent.md）。builder のアラームも共通トピックへ送る（monitoring-stack.ts）。
+ *
+ * ロールはアカウント全体を読むもので、本来は共通基盤が持つのが筋だが、ここに残している。
+ * 共通基盤のロールの境界は許可リストで iam:* を拒否していて、AIDevOpsAgentAccessPolicy と
+ * iam:CreateServiceLinkedRole を持つこのロールをそのままでは作れないため。
  *
  * Agent Space の ARN が決まって初めて意味を持つため、コンテキストに
  * `agentSpaceArn` が入っているときだけ合成される（README の手順を参照）。
- * Webhook の URL と署名鍵はリポジトリに置けないので、デプロイ前に手動登録した
- * Secrets Manager を名前で参照する。
  */
 export class DevOpsAgentStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: DevOpsAgentStackProps) {
@@ -51,9 +43,6 @@ export class DevOpsAgentStack extends cdk.Stack {
     // 作り替えられない条件になっているため、外すとデプロイが止まる。
     // 詳細は lib/role-boundary.ts
     applyRoleBoundary(this);
-
-    const prefix = `${props.envName}-sakekasu`;
-    const webhookSecretName = `${prefix}/devops-agent/webhook`;
 
     // --- 調査用のクロスアカウントロール（読み取り専用） ---
 
@@ -97,89 +86,9 @@ export class DevOpsAgentStack extends cdk.Stack {
       }),
     );
 
-    // --- アラーム → Webhook の転送 ---
-
-    // 関数とアラームは 5 アプリで揃えた `sakekasu-<アプリ>-<env>-*` にする。
-    // Secrets Manager のシークレット（上の webhookSecretName）は手で入れた値なので旧い名前のまま
-    const namePrefix = `sakekasu-builder-${props.envName}`;
-    const selfAlarmName = `${namePrefix}-devops-agent-webhook-failure`;
-
-    const webhookForwarderFunctionName = `${namePrefix}-devops-agent-webhook`;
-    const webhookForwarder = new NodejsFunction(this, 'WebhookForwarderFunction', {
-      functionName: webhookForwarderFunctionName,
-      runtime: Runtime.NODEJS_22_X,
-      logGroup: lambdaLogGroup(this, 'WebhookForwarderLogGroup', webhookForwarderFunctionName),
-      entry: path.join(here, '../lambda/devops-agent-webhook/index.ts'),
-      handler: 'handler',
-      timeout: cdk.Duration.seconds(20),
-      // 同時に走る本数を抑える。エージェントは秒課金なので、アラームが一斉に
-      // 鳴ったときに調査が同時に立ち上がるのを避けたい。SNS からの呼び出しは
-      // 非同期なので、絞っても捨てられずキューで順番待ちになるだけで済む。
-      // なお、これは同時に始まる本数の話であって、調査の総数の上限ではない
-      reservedConcurrentExecutions: 2,
-      environment: {
-        WEBHOOK_SECRET_ID: webhookSecretName,
-        ENV_NAME: props.envName,
-        // 転送の失敗を転送し返して調査を起こさないよう、自分の失敗アラームは捨てる
-        SELF_ALARM_NAME: selfAlarmName,
-        SERVICE_NAME: 'sakekasu-builder',
-      },
-      bundling: {
-        format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
-        mainFields: ['module', 'main'],
-        banner:
-          "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
-      },
-    });
-
-    webhookForwarder.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['secretsmanager:GetSecretValue'],
-        resources: [
-          `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${webhookSecretName}-*`,
-        ],
-      }),
-    );
-
-    // LambdaSubscription は使わず、実行の許可と購読を別々に作る。
-    // LambdaSubscription が作る許可（論理 ID `…AllowInvoke…`）は、関数の名前を変えたときに
-    // cdkd が作り直しに失敗した（2026-10-11。同じ StatementId の追加が既存の許可を返し、
-    // 古い方を消せずに止まる）。論理 ID の違う許可を新しく作れば、作り直しの経路を通らない。
-    // 購読は LambdaSubscription と同じ場所・同じ ID（関数の下の `AlertTopic`）に置き、論理 ID を変えない
-    webhookForwarder.addPermission('AllowInvokeFromAlertTopic', {
-      principal: new iam.ServicePrincipal('sns.amazonaws.com'),
-      sourceArn: props.alertTopic.topicArn,
-    });
-    new sns.Subscription(webhookForwarder, props.alertTopic.node.id, {
-      topic: props.alertTopic,
-      protocol: sns.SubscriptionProtocol.LAMBDA,
-      endpoint: webhookForwarder.functionArn,
-    });
-
-    // 転送が止まると調査が始まらないまま静かに機能を失うため、そこも監視する。
-    // 通知経路は既存のアラートトピック（＝ Slack）をそのまま使う
-    const failureAlarm = new cloudwatch.Alarm(this, 'WebhookForwarderFailure', {
-      alarmName: selfAlarmName,
-      alarmDescription:
-        'DevOps Agent への調査依頼の転送に失敗しています。アラートは Slack に届きますが、自動調査は始まりません',
-      metric: webhookForwarder.metricErrors({
-        period: cdk.Duration.minutes(5),
-        statistic: 'Sum',
-      }),
-      threshold: 1,
-      evaluationPeriods: 1,
-      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-    });
-    failureAlarm.addAlarmAction(new actions.SnsAction(props.alertTopic));
-    failureAlarm.addOkAction(new actions.SnsAction(props.alertTopic));
-
     new cdk.CfnOutput(this, 'MonitoringRoleArn', {
       value: monitoringRole.roleArn,
       description: 'DevOps Agent のコンソールでセカンダリソースに登録するロール ARN',
-    });
-    new cdk.CfnOutput(this, 'WebhookSecretName', {
-      value: webhookSecretName,
-      description: 'Webhook の URL と署名鍵を入れる Secrets Manager 名（手動登録）',
     });
   }
 }

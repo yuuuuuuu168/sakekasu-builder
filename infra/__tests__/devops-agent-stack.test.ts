@@ -1,7 +1,6 @@
 import { describe, it, beforeAll } from 'vitest';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib';
-import * as sns from 'aws-cdk-lib/aws-sns';
 import { DevOpsAgentStack } from '../lib/devops-agent-stack.js';
 
 // Agent Space を置く運用ツール専用アカウント（ops-tooling）
@@ -10,17 +9,10 @@ const AGENT_SPACE_ARN = `arn:aws:aidevops:ap-northeast-1:${MONITORING_ACCOUNT_ID
 
 function synth(): Template {
   const app = new cdk.App();
-  // トピックは監視スタックが持つものを想定しているため、別スタックから渡す
-  const topicStack = new cdk.Stack(app, 'TestTopicStack', {
-    env: { account: '111111111111', region: 'ap-northeast-1' },
-  });
-  const alertTopic = new sns.Topic(topicStack, 'AlertTopic', { topicName: 'dev-sakekasu-alerts' });
-
   const stack = new DevOpsAgentStack(app, 'TestDevOpsAgent', {
     envName: 'dev',
     monitoringAccountId: MONITORING_ACCOUNT_ID,
     agentSpaceArn: AGENT_SPACE_ARN,
-    alertTopic,
     env: { account: '111111111111', region: 'ap-northeast-1' },
   });
   return Template.fromStack(stack);
@@ -65,13 +57,6 @@ describe('DevOpsAgentStack', () => {
     });
   });
 
-  it('転送 Lambda の同時実行数を絞る（一斉発報で調査が同時に立ち上がるのを避ける）', () => {
-    template.hasResourceProperties('AWS::Lambda::Function', {
-      FunctionName: 'sakekasu-builder-dev-devops-agent-webhook',
-      ReservedConcurrentExecutions: 2,
-    });
-  });
-
   it('調査用ロールには読み取り専用の管理ポリシーだけを付ける（実行系は持たせない）', () => {
     template.hasResourceProperties('AWS::IAM::Role', {
       RoleName: 'sakekasu-dev-devops-agent-monitoring',
@@ -101,44 +86,9 @@ describe('DevOpsAgentStack', () => {
     });
   });
 
-  it('転送 Lambda は自分の失敗アラーム名を知っていて、秘密は名前で参照する', () => {
-    template.hasResourceProperties('AWS::Lambda::Function', {
-      FunctionName: 'sakekasu-builder-dev-devops-agent-webhook',
-      Environment: {
-        Variables: {
-          WEBHOOK_SECRET_ID: 'dev-sakekasu/devops-agent/webhook',
-          ENV_NAME: 'dev',
-          SELF_ALARM_NAME: 'sakekasu-builder-dev-devops-agent-webhook-failure',
-          SERVICE_NAME: 'sakekasu-builder',
-        },
-      },
-    });
-
-    template.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Action: 'secretsmanager:GetSecretValue',
-            Resource:
-              'arn:aws:secretsmanager:ap-northeast-1:111111111111:secret:dev-sakekasu/devops-agent/webhook-*',
-          }),
-        ]),
-      },
-    });
-  });
-
-  it('既存のアラートトピックを転送 Lambda が購読する', () => {
-    template.hasResourceProperties('AWS::SNS::Subscription', {
-      Protocol: 'lambda',
-    });
-  });
-
-  it('転送の失敗を監視するアラームがあり、発報も復旧も同じトピックへ流す', () => {
-    template.hasResourceProperties('AWS::CloudWatch::Alarm', {
-      AlarmName: 'sakekasu-builder-dev-devops-agent-webhook-failure',
-      Threshold: 1,
-      AlarmActions: Match.anyValue(),
-      OKActions: Match.anyValue(),
-    });
+  it('転送 Lambda は持たない（共通基盤の共通トピックへ移した）', () => {
+    template.resourceCountIs('AWS::Lambda::Function', 0);
+    template.resourceCountIs('AWS::SNS::Subscription', 0);
+    template.resourceCountIs('AWS::CloudWatch::Alarm', 0);
   });
 });

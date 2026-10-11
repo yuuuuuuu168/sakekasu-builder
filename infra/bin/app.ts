@@ -184,9 +184,11 @@ function buildApplicationStacks(app: cdk.App): void {
       envName: env,
       monitoringAccountId,
       agentSpaceArn,
-      alertTopic: monitoringStack.alertTopic,
       env: cdkEnv,
     });
+    // 転送 Lambda を共通基盤へ移したので、監視スタックへの参照はもう無い。順序だけ残す。
+    // 監視スタックが残している Export（monitoring-stack.ts の exportValue）を、
+    // こちらが参照を外した後で消せるようにするため
     devopsAgentStack.addDependency(monitoringStack);
   }
 

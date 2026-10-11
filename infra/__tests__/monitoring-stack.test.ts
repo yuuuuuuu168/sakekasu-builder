@@ -136,19 +136,33 @@ describe("MonitoringStack", () => {
   });
 
   /**
-   * 上の2つは、アラームが本当にこのトピックへ飛ぶ場合にだけ意味がある。
-   * 宛先が別トピックに差し替わったら、許可を足しても届かない。
+   * アラームの送り先は 4 アプリ共通のトピック（共通基盤の sakekasu-integrated-alerts）。
+   * Slack 通知と DevOps Agent への転送はそちらが持つ。上の 2 つ（builder のトピックの許可）は、
+   * builder のトピックを消す次の段まで残る。
+   *
+   * ARN は名前から組み立てる（共通基盤のスタックの出力を参照しない）。名前を書き違えると
+   * 合成もデプロイも通るのに、どこにも届かない
    */
-  it("アラームの通知先がそのトピックである", () => {
+  it("アラームの通知先が共通基盤のトピックである（発報も復旧も）", () => {
     const alarms = template.findResources("AWS::CloudWatch::Alarm");
     const alarmList = Object.values(alarms);
     expect(alarmList.length).toBeGreaterThan(0);
 
+    const shared = `arn:aws:sns:${TEST_REGION}:${TEST_ACCOUNT}:sakekasu-integrated-alerts`;
     for (const alarm of alarmList) {
-      expect(JSON.stringify(alarm.Properties?.AlarmActions)).toContain(
-        "AlertTopic",
-      );
+      expect(alarm.Properties?.AlarmActions).toEqual([shared]);
+      expect(alarm.Properties?.OKActions).toEqual([shared]);
     }
+  });
+
+  it("builder のトピックの Export を残す（DevOps Agent のスタックが参照を外すまでの橋渡し）", () => {
+    const outputs = Object.values(template.toJSON().Outputs ?? {}) as Array<{
+      Value?: unknown;
+      Export?: unknown;
+    }>;
+    expect(
+      outputs.some((o) => o.Export && JSON.stringify(o.Value).includes("AlertTopic")),
+    ).toBe(true);
   });
 
   it("Slack 通知 Lambda がトピックを購読している", () => {
