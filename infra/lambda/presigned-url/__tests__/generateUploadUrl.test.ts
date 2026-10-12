@@ -63,7 +63,7 @@ async function callGenerateUploadUrl(args: {
   temporary?: boolean;
   thumbnail?: boolean;
   fileSize?: number | null;
-}): Promise<{ uploadUrl: string; key: string; taggingHeader: string | null }> {
+}): Promise<{ uploadUrl: string; key: string }> {
   const result = await handler({
     info: { fieldName: 'generateUploadUrl' },
     arguments: {
@@ -83,7 +83,7 @@ async function callGenerateUploadUrl(args: {
     },
     identity: { sub: OWNER },
   } as Parameters<typeof handler>[0]);
-  return result as { uploadUrl: string; key: string; taggingHeader: string | null };
+  return result as { uploadUrl: string; key: string };
 }
 
 /** 署名に渡された PutObjectCommand の入力 */
@@ -127,19 +127,12 @@ describe('generateUploadUrl', () => {
     expect(signedPut().Tagging).toBe('lifecycle=temporary');
   });
 
-  // 参考情報として返すだけの値。クライアントはヘッダで送ってはいけない
-  // （タグは署名済み URL のクエリに入るため、送ると二重指定で 403。PR #147）
-  it('一時領域では付与されるタグを参考情報として返す', async () => {
-    const { taggingHeader } = await callGenerateUploadUrl({ temporary: true });
+  // タグは署名済み URL のクエリに入っている。クライアントが同じ値を
+  // ヘッダで送ると二重指定で 403 になるので、応答には載せない（PR #147）
+  it('応答にはタグを載せない', async () => {
+    const result = await callGenerateUploadUrl({ temporary: true });
 
-    expect(taggingHeader).toBe('lifecycle=temporary');
-    expect(taggingHeader).toBe(signedPut().Tagging);
-  });
-
-  it('通常のアップロードではタグを返さない', async () => {
-    const { taggingHeader } = await callGenerateUploadUrl({});
-
-    expect(taggingHeader).toBeNull();
+    expect(Object.keys(result).sort()).toEqual(['key', 'uploadUrl']);
   });
 
   it('temporary でも recordId の形式は検証する', async () => {

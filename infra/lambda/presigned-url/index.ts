@@ -74,15 +74,6 @@ interface AppSyncEvent {
 interface UploadUrlResponse {
   uploadUrl: string;
   key: string;
-  /**
-   * この URL で付与されるタグ（一時領域以外では null）。
-   *
-   * 参考情報として返すだけで、クライアントはヘッダに載せてはいけない。
-   * SDK はタグを署名済み URL のクエリ（`x-amz-tagging`）に入れるため、
-   * ヘッダでも送ると二重指定になり S3 が 403 を返す（実機で確認済み）。
-   * 値の確認や運用調査のために残している
-   */
-  taggingHeader: string | null;
 }
 
 /** そのキーがサムネイルを指しているか */
@@ -268,7 +259,7 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
     expiresIn: UPLOAD_EXPIRY,
   });
 
-  return { uploadUrl, key, taggingHeader: temporary ? TEMP_OBJECT_TAGGING : null };
+  return { uploadUrl, key };
 }
 
 /** 1 件分のダウンロード用 Presigned URL を作る（所有者チェック込み） */
