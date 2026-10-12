@@ -61,7 +61,7 @@ SDK の再試行はしない（`maxRetries: 0`、ソムリエは Strands の `re
 [llm] fallback {"fallback":true,"feature":"ocr","from":"anthropic","to":"bedrock","errorType":"credit_balance","status":400,"message":"..."}
 ```
 
-OCR とテイスティングノートはメトリクスフィルタ（`{env}-sakekasu` / `LlmFallbackCount`）で数え、1 時間に 3 回以上でアラーム `{env}-sakekasu-llm-fallback` が Slack に鳴る。ソムリエのログは Runtime のロググループ（`/aws/bedrock-agentcore/runtimes/...-DEFAULT`）に同じ形で出るが、フィルタはまだ作っていない。
+OCR とテイスティングノートはメトリクスフィルタ（`{env}-sakekasu` / `LlmFallbackCount`）で数え、1 時間に 3 回以上でアラーム `{env}-sakekasu-llm-fallback` が Slack に鳴る。ソムリエのログは Runtime のロググループ（`/aws/bedrock-agentcore/runtimes/...-DEFAULT`）に同じ形で出るが、メトリクスフィルタでは数えていない。
 
 ### 消費の記録
 
@@ -95,8 +95,6 @@ fields @timestamp, @message
 ソムリエのシステムプロンプトは、指示・今日の日付・検索の節（日付が変わるまで同じ）の後ろに `cachePoint` を置き、相談ごとに変わる「覚えている好み」をその後ろに回している。記録を引く tool を挟んでモデルを呼び直すたびに、前半はキャッシュから読まれる。
 
 OCR 用の画像は、フロントで長辺 1568px に縮小済み（[imageCompressor.ts](../src/features/image/utils/imageCompressor.ts)）。ソムリエのチャットに添付する写真も同じ関数を通る。サーバー側で縮め直してはいない。
-
-即時性の要らない OCR を Message Batches API に回せるよう、頼み方の組み立て（`buildLabelRequest`）と送信を分けてある。バッチ処理そのものは作っていない。
 
 ### AgentCore Memory
 
@@ -241,11 +239,4 @@ PR にしてマージすると、ロールに `sts:GetWebIdentityToken` が付�
 | ソムリエ | [sommelier/app/sommelier/tests/test_llm_fallback.py](../sommelier/app/sommelier/tests/test_llm_fallback.py) | 呼び先の決め方、応答前だけのフォールバック、履歴の写し、キャッシュの区切り、usage のログ |
 | CDK（ソムリエ） | [sommelier/agentcore/cdk/test/cdk.test.ts](../sommelier/agentcore/cdk/test/cdk.test.ts) | ロール名、環境変数、STS の権限と条件 |
 
-実際に Claude API を呼ぶ確認（3 ターンの会話、長期記憶、実画像の OCR）は、ID 連携を有効にした後に手順 5 で行う。
-
-## やっていないこと
-
-- Bedrock 関連コードの削除
-- AgentCore Memory のリソース・ストラテジー・保存と取得の処理の変更
-- Claude Console 側の設定（手順 3。利用上限も手動）
-- Batch API での OCR（頼み方の組み立てを分けただけ）
+実際に Claude API を呼ぶ確認（3 ターンの会話、長期記憶、実画像の OCR）は、手順 5 で行う。

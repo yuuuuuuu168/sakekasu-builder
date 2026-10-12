@@ -21,7 +21,7 @@ builder だけがトップレベルのドメイン（`sakekasu-builder.com`）�
 - 他のアプリと同じ形にそろう。ゾーンの委任、証明書、CORS、ログインの戻り先、外形監視を
   同じ雛形で書ける
 - 配信の設定を IaC に載せる。Amplify ではビルド設定・リライト・セキュリティヘッダ・
-  ドメインがコンソールにしか無かった（[amplify-exit.md](amplify-exit.md)）
+  ドメインがコンソールにしか無かった
 - ついでに CSP を締める。Amplify の CSP は `script-src 'unsafe-inline' 'unsafe-eval'` と
   `connect-src https:`（どこへでも）だった。新しい配信では `script-src 'self'` にし、
   通信先を実際に叩く先だけに絞った（[site-stack.ts](../infra/lib/site-stack.ts)）
@@ -161,7 +161,6 @@ docs/apex-redirect.md にある。
   `PORTAL_SIGN_OUT_URL`）。ログインの戻り先（`callbackUrls`）は sake. のまま
 - 画像バケットの CORS（[api-stack.ts](../infra/lib/api-stack.ts)）から apex と `*.amplifyapp.com` を外した
 - 外形監視の対象を sake. に替えた。共通基盤の `healthChecks` の builder と、このリポジトリの `siteUrl`（`siteUrl` はのちに外し、サイトの外形監視は共通基盤だけにした）
-- [amplify-exit.md](amplify-exit.md) に「移行した」と書き足した
 
 ## 実施の記録（2026-10-04）
 

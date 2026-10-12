@@ -31,7 +31,7 @@
 | プライマリ（Agent Space を置く） | `<運用アカウント ID>` | `ops-tooling` |
 | セカンダリ（調査対象＝アプリ本体） | `<アプリのアカウント ID>` | `sakekasu-builder` |
 
-Agent Space は運用ツール専用のメンバーアカウント `ops-tooling` に集約する。DevOps Agent は Slack・GitHub・Webhook という外部との接点を持つワークロードで、Organization の管理アカウントは唯一 SCP の制約を受けない場所にあたるため、事故を組織のガードレールで止められる側に置く。AWS Security Agent も同じ理由で `ops-tooling` へ移す（Issue #107）。
+Agent Space は運用ツール専用のメンバーアカウント `ops-tooling` に集約する。DevOps Agent は Slack・GitHub・Webhook という外部との接点を持つワークロードで、Organization の管理アカウントは唯一 SCP の制約を受けない場所にあたるため、事故を組織のガードレールで止められる側に置く。
 
 調査対象はアプリ本体のアカウントなので、そちら側にクロスアカウントロールを置き、DevOps Agent のサービスプリンシパル（`aidevops.amazonaws.com`）から直接引き受けさせる。
 
@@ -43,7 +43,7 @@ Agent Space は運用ツール専用のメンバーアカウント `ops-tooling`
 
 ### 調査用のクロスアカウントロール
 
-`sakekasu-dev-devops-agent-monitoring`。読み取り専用の管理ポリシー `AIDevOpsAgentAccessPolicy` だけを持ち、これに加えて Resource Explorer のサービスリンクロール作成だけを許可する。アクション実行用（Operator）のロールは作っていない。まず調査だけ任せ、実行が必要になってから最小権限で足す。
+`sakekasu-dev-devops-agent-monitoring`。読み取り専用の管理ポリシー `AIDevOpsAgentAccessPolicy` だけを持ち、これに加えて Resource Explorer のサービスリンクロール作成だけを許可する。アクション実行用（Operator）のロールは作っていない。
 
 名前だけ他のリソースと向きが違う（`dev-sakekasu-` ではなく `sakekasu-dev-`）。cdkd のデプロイロールが `role/sakekasu-*` にしか `iam:CreateRole` を持っておらず、`dev-` 始まりだと作れないため。スタック名 `sakekasu-dev-devops-agent` には揃っている。
 
@@ -62,7 +62,7 @@ Agent Space の ARN と Webhook の鍵が決まらないと CDK 側が意味を�
 
 DevOps Agent のコンソールに `ops-tooling` で入り、`ap-northeast-1` で Agent Space を作る。作成後、ARN（`arn:aws:aidevops:ap-northeast-1:<運用アカウント ID>:agentspace/xxxxxxxx`）を控える。
 
-Security Agent の Agent Space（Issue #107 で同じ `ops-tooling` に移してくる）とは分ける。調査対象も通知先チャンネルも別で、混ぜると Slack の投稿がどちらのものか分からなくなる。
+Security Agent の Agent Space とは分ける。調査対象も通知先チャンネルも別で、混ぜると Slack の投稿がどちらのものか分からなくなる。
 
 ### 2. Slack を繋ぐ
 
@@ -125,7 +125,7 @@ cdkd は CloudFormation を通らないのでスタックの出力が無い。�
 aws resource-explorer-2 list-indexes --profile verify --region ap-northeast-1
 ```
 
-`<アプリのアカウント ID>` の ap-northeast-1 にはインデックスがあって `ACTIVE`、既定ビューは `tags` を含みフィルタも空。ただし種別は `LOCAL` で、アカウント内に `AGGREGATOR` が1つも無い（2026-10-04 時点）。AWS のトラブルシュートは **Agent Space と同じリージョンに集約インデックスを置くこと**を求めている。トポロジにリソースが出てこないときは、Resource Explorer のコンソールで ap-northeast-1 のインデックスを集約インデックスに昇格させる。
+`<アプリのアカウント ID>` の ap-northeast-1 にはインデックスがあって `ACTIVE`、既定ビューは `tags` を含みフィルタも空。ただし種別は `LOCAL` で、アカウント内に `AGGREGATOR` は無い（2026-10-04 時点）。
 
 #### タグの付け方
 
@@ -135,7 +135,6 @@ aws resource-explorer-2 list-indexes --profile verify --region ap-northeast-1
 
 裏を返すと、**リソースを足してもタグは自動では付かない**。監視対象を増やしたら付け直す。
 下のスクリプトは `dev-sakekasu-` の前方一致で集めるので、増えた分も含めてそのまま流せばよい。
-DevOps Agent 自身のリソース（webhook の Lambda・ロググループ・失敗アラーム）も、デプロイ後にこれで付けた。
 
 ```sh
 PROFILE=sakekasu-builder
@@ -222,9 +221,6 @@ aws devops-agent list-backlog-tasks \
 | `#sakekasu-builder-alarm`（パブリック） | Slack 通知 Lambda が投げるアラーム本体 | 一方向 |
 | 双方向用のプライベートチャンネル（2026-10-04 新設） | エージェントとの会話 | 双方向 |
 
-当初は自動調査の経過用に DevOps Agent 専用チャンネルをもう1つ置く案だったが、作っていない。
-まずこの2つで運用し、調査の投稿が多すぎるようなら分ける。
-
 アラームチャンネルを双方向に作り替えず別に足したのは、会話を始めたい人だけをメンバーにしたいため。
 アラームは広く見せておきたいので、パブリックのまま残す。
 
@@ -298,18 +294,16 @@ Slack ワークスペースのアカウントレベル登録は済んでいる�
 
 関連付けを作る画面でワークスペースが選択肢に出てこないときは、Agent Space と同じアカウント・同じリージョンで Slack を登録したかを疑う。
 
-### まだコードにできない
+### コードにしていない理由
 
-CloudFormation の `AWS::DevOpsAgent::Association` には Slack 用の設定があるが、中身は `WorkspaceId` / `WorkspaceName` / `TransmissionTarget` の3つだけで、双方向のフィールドがまだ無い。API と SDK には `SlackBidirectionalConfiguration`（`enabled` と `roleArn`）があるので、CloudFormation が追いつけば関連付けごと CDK に寄せられる。それまではコンソールでの手作業として残る。
+CloudFormation の `AWS::DevOpsAgent::Association` には Slack 用の設定があるが、中身は `WorkspaceId` / `WorkspaceName` / `TransmissionTarget` の3つだけで、双方向のフィールドが無い。API と SDK には `SlackBidirectionalConfiguration`（`enabled` と `roleArn`）があるが、CDK からは書けないので、関連付けはコンソールで作っている。
 
 ## カスタムスキルに入れておく運用ナレッジ
 
 エージェントは汎用の知識しか持たないので、このプロジェクト固有の勘所はカスタムスキルとして登録しておく。切り分けが速くなる。
 
-- （ソムリエのカナリアは共通ログインへの移行で止めてある。docs/shared-login.md）カナリアが 403 を返したら、`sommelier/agentcore/agentcore.json` の2箇所（Runtime の `allowedClients` と、アプリ内 audience 検証用の環境変数 `COGNITO_APP_CLIENT_ID`）を確認する。片方だけではゲートウェイを通ってもアプリ内で弾かれる
 - AgentCore Runtime のメトリクスは名前空間 `AWS/Bedrock-AgentCore`、ディメンションは `ResourceId`（Runtime の ARN）
 - 外形監視はソムリエ Runtime と AppSync を認証なしで叩き、401/403 が返ることを正常とみなす。200 が返る方が異常
-- （新規登録の通知は旧ユーザープールにだけ付いていて、共通ログインへの移行で役目を終えた）新規登録の通知 Lambda は失敗しても例外を投げない（サインアップ自体を壊さないため）。失敗はログから起こした `SignupNotifyFailCount` メトリクスにだけ現れる
 - 記録の保存は AppSync + DynamoDB、画像は S3、OCR とソムリエは Bedrock（Claude Haiku 4.5）
 
 ## 費用

@@ -492,8 +492,6 @@ ERROR Invoke Error {"errorMessage":"Image too large for OCR"}
 
 この 78 件は対象から外れるだけで、**読めるようになるわけではない**。写真を撮り直して差し替えれば控えの鍵（記録ID + 画像キー）が変わり、自動でまた対象に入る。
 
-根本から直すなら Lambda 側で上限超えを縮小してから Bedrock に渡すことになるが、`sharp` のようなネイティブ依存を Lambda に持ち込む話になるので、必要になってから判断する。
-
 #### SLO アラームと件数型のアラームは補い合う
 
 SLO アラームが既に赤い間に起きた失敗は、状態遷移が無いので SLO 側からは見えない。このときは件数型のエラーアラームのほうが遷移して気づけた。どちらか一方に寄せず、両方を置いておく。
@@ -583,8 +581,6 @@ AWS_PROFILE=verify-org aws ce get-cost-and-usage --region us-east-1 \
 
 インデックス率は現在 100%（`Default` ルール）。当初は 1% にするつもりだったが、この規模では 100% のままでよい。OCR とソムリエを合わせて月に数百リクエスト、1リクエストあたり10スパンとしても月数千スパンで、$0.75/100万 に対して完全に誤差になる。むしろ 1% にするとトレースがほとんど残らず、障害時に見たいリクエストが入っていない状態になる。
 
-リクエスト数が桁で増えたら下げる。
-
 ```bash
 AWS_PROFILE=sakekasu-builder aws xray get-indexing-rules --region ap-northeast-1
 ```
@@ -604,7 +600,7 @@ AWS_PROFILE=sakekasu-builder aws xray get-indexing-rules --region ap-northeast-1
 - **Bedrock のリクエスト本文はスパンに載らない。** `InvokeModel` のフックは body を `JSON.parse` するが、取り出すのは `max_tokens` / `temperature` / `top_p` などの推論パラメータだけで、`messages`（base64 画像）を属性に入れる箇所は無い。本文キャプチャは明示的に無効化している（`enableApplicationSignals()`）
 - **Bedrock のフックが毎回 5MB の JSON をパースする。** 属性を取り出すために `JSON.parse(commandInput.body)` が呼び出しごとに走る。セキュリティの問題ではないが遅延要因になる。レイテンシーを見るときはレイヤー読み込みぶんと合わせて見込む
 - **コールドスタートが悪化する。** レイヤーは展開後 9.7MB ある。実測で 600〜800ms 増える。**メモリを上げても縮まない**（実測済み。初期化は CPU 律速ではない）。あわせてメモリの余裕も 20MB ほど削られるので、枠が狭い関数では OOM に近づく。3つ目を足すときはメモリを見直すこと（「計装の代償」を参照）
-- **レイヤーの ARN にはバージョンが埋まっている**（`AWSOpenTelemetryDistroJs:15`）。上げるときは ARN ごと差し替える。自動で追随する仕組みは入れていないので、たまに新しいバージョンが出ていないかを見る。差し替えるときは中身の展開もやり直すこと。
+- **レイヤーの ARN にはバージョンが埋まっている**（`AWSOpenTelemetryDistroJs:15`）。上げるときは ARN ごと差し替える。自動で追随する仕組みは入れていない。差し替えるときは中身の展開もやり直すこと。
 
   ARN は `api-stack.test.ts` に**提供元アカウント（`615299751070`）とバージョンまで込みで**書き写してある。レイヤーはアプリと同じ実行環境でアプリコードより先に動き、実行ロールの認証情報にも環境変数にも届くため、名前の部分一致だけで見ていると提供元の取り違えを緑のまま通してしまう。差し替えるときは実装とテストの両方を直すことになる（片方だけだと落ちる）
 
@@ -615,9 +611,9 @@ AWS_PROFILE=sakekasu-builder aws xray get-indexing-rules --region ap-northeast-1
     --region ap-northeast-1 --query 'CreatedDate' --output text
   ```
 
-- **アーキテクチャを x86_64 で明示している。** 既定値の変化でレイヤーと噛み合わなくなるのを防ぐため。`AWSOpenTelemetryDistroJs` は arm64 にも対応しているので、費用を詰めるなら arm64 へ寄せる余地がある
+- **アーキテクチャを x86_64 で明示している。** 既定値の変化でレイヤーと噛み合わなくなるのを防ぐため
 - **リージョンを変えるならレイヤーの ARN も差し替える。** レイヤーは同じリージョンのものしか付けられない
-- **AppSync（JS リゾルバー）は Application Signals の対象外。** 必要なら AppSync 側の X-Ray トレーシングを別途有効にする（README の「Issue にしていない小さな宿題」）
+- **AppSync（JS リゾルバー）は Application Signals の対象外。**
 
 ## 参考
 

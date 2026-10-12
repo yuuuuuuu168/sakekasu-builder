@@ -71,14 +71,14 @@ CloudFormation の [auto-import](https://docs.aws.amazon.com/AWSCloudFormation/l
 
 `sakekasu-billing-notifier` で実際に踏んだ。取り込み自体は成功し、`Custom::LogRetention` も消えて過去のログも引き継いだが、保持期間は無期限のままだった。dev の3スタックでこうならなかったのは、取り込む前から 30 日が設定されていたため。
 
-一度だけ実物に設定すれば、テンプレートと一致してドリフトも消える。以後は CDK の管理下なので、コード側で値を変えれば追随する。
+当時は一度だけ実物に設定して、テンプレートと一致させた。これでドリフトも消えた。
 
 ```sh
 AWS_PROFILE=<プロファイル> aws logs put-retention-policy \
   --log-group-name /aws/lambda/<関数名> --retention-in-days 30
 ```
 
-そのうえで次を見る。
+そのうえで、当時は次を確かめた。
 
 ```sh
 # 名前と保持期間。retentionInDays が 30 で、名前が変わっていないこと
@@ -102,9 +102,9 @@ AWS_PROFILE=sakekasu-builder aws cloudformation list-stack-resources \
   --output table
 ```
 
-各 Lambda が起動してログを書けることも見る。実行ロールには `AWSLambdaBasicExecutionRole` が付いたままで権限は変わらないはずだが、合成結果だけでは分からない。画像を1枚上げて `dev-sakekasu-presigned-url` と `dev-sakekasu-ocr-analyzer` に新しいログが出れば足りる。
+各 Lambda が起動してログを書けることも見た。実行ロールには `AWSLambdaBasicExecutionRole` が付いたままで権限は変わらないはずだが、合成結果だけでは分からない。画像を1枚上げて、`dev-sakekasu-presigned-url` と `dev-sakekasu-ocr-analyzer` に新しいログが出ることで確かめた。
 
-AWS が勧めているとおり、取り込みの直後にドリフト検出を掛ける。上の保持期間のずれは、ここでも `MODIFIED` として出る。
+AWS が勧めているとおり、取り込みの直後にドリフト検出を掛けた。上の保持期間のずれは、ここでも `MODIFIED` として出る。
 
 ```sh
 AWS_PROFILE=sakekasu-builder aws cloudformation detect-stack-drift --stack-name sakekasu-dev-api
@@ -124,7 +124,7 @@ Expected: "2018-05-29"   Actual: null
 
 **これは移行と関係が無く、直す必要も無い。** `FunctionVersion` は VTL 時代のプロパティで、JS ランタイム（`FunctionRuntime.JS_1_0_0`）の関数では意味を持たない。テンプレートには CDK が既定値を入れるが、AppSync 側は `null` を返す。値が食い違っているのではなく、使われていない項目が比較されているだけ。テンプレートから消すこともできない。
 
-このスタックでドリフトを見るのは #129 が初めてだったので、ここで表に出た。次に掛ける人が同じところで止まらないよう記録しておく。
+このスタックでドリフトを見たのは #129 が初めてだったので、ここで表に出た。
 
 ## 通らなかった道
 
@@ -144,7 +144,7 @@ As part of the import operation, you cannot modify or add [Outputs]
 
 auto-import は通常の更新なので、この制約がまるごと掛からない。2段階に分ける必要も、一時パッチも要らない。
 
-なお `cdk diff` が日本語を含むリソースを毎回「変更あり」と報告するのは、この `GetTemplate` の化けが理由。実害は無いが、差分を読むときに混乱するので頭に入れておくとよい。
+なお当時の `cdk diff` が日本語を含むリソースを毎回「変更あり」と報告していたのは、この `GetTemplate` の化けが理由。実害は無かったが、差分を読むときに混乱した。
 
 ```
 [~] AWS::Cognito::UserPool UserPool UserPool6BA7E5F2
@@ -157,7 +157,7 @@ auto-import は通常の更新なので、この制約がまるごと掛から�
 
 ## github-oidc のロググループについて
 
-`sakekasu-github-oidc` スタックに、保持期間が無期限のロググループが2つ残る（[643de48](https://github.com/yuuuuuuu168/sakekasu-builder/commit/643de48aa4ae2b98281458d298621344d637ca9a) の拾い漏れ）。
+`sakekasu-github-oidc` スタックに、保持期間が無期限のロググループが2つ残った（[643de48](https://github.com/yuuuuuuu168/sakekasu-builder/commit/643de48aa4ae2b98281458d298621344d637ca9a) の拾い漏れ）。
 
 ```
 /aws/lambda/sakekasu-github-oidc-CustomAWSCDKOpenIdConnectProv-<サフィックス1>
@@ -166,7 +166,7 @@ auto-import は通常の更新なので、この制約がまるごと掛から�
 
 `iam.OpenIdConnectProvider` が内部で作るカスタムリソースのものなので、`NodejsFunction` の `logGroup` では触れない。コンストラクト側にも保持期間を渡す口が無い（`OpenIdConnectProviderProps` は `url` / `clientIds` / `thumbprints` / `removalPolicy` だけ）。ロググループ名も CloudFormation が付けた関数名から決まるため合成時には分からず、CDK 側から同じ名前のロググループを書くこともできない。
 
-コードでは対応せず、実物に手で保持期間を設定する。一度だけの操作。
+コードでは対応せず、実物に手で保持期間を設定する扱いにした。
 
 ```sh
 for name in \
@@ -180,6 +180,6 @@ done
 
 CDK の管理外なので、デプロイで上書きされることはない。関数が作り直されると新しい名前のロググループができるため、そのときは同じ操作をもう一度打つ。`github-oidc` は手動デプロイ専用のスタックで、触る機会は年に数回あるかどうか。
 
-CDK には Lambda を使わない `OidcProviderNative`（`AWS::IAM::OIDCProvider`）があり、そちらへ移せばカスタムリソースごと消える。いまは移さない。OIDC プロバイダーは同じ URL で二重に登録できないため、作り直しが挟まると新旧が衝突して失敗する。落ちる先が GitHub Actions のデプロイ経路そのもので、自分を締め出す形になる。5KB のログのために踏む橋ではない。移すなら、締め出されても復旧できる手順を用意してからにする。
+CDK には Lambda を使わない `OidcProviderNative`（`AWS::IAM::OIDCProvider`）があり、そちらへ移せばカスタムリソースごと消えるが、移さなかった。OIDC プロバイダーは同じ URL で二重に登録できないため、作り直しが挟まると新旧が衝突して失敗する。落ちる先が GitHub Actions のデプロイ経路そのもので、自分を締め出す形になる。5KB のログのために踏む橋ではない。
 
 中身は CDK のカスタムリソースの実行ログで、利用者のデータは入らない。合計 5KB。

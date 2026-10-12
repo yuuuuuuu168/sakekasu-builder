@@ -2,7 +2,7 @@
 
 iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク指示 → PR 確認 → マージ → 自動デプロイ」を Mac なしで完結させるための設定（Issue #95）。
 
-セッションは Anthropic 管理のクラウド VM で動き、完了するとブランチを push して PR を作る。マージ後は Amplify（フロント）と GitHub Actions（バックエンド CDK、Issue #94）が自動デプロイする。
+セッションは Anthropic 管理のクラウド VM で動き、完了するとブランチを push して PR を作る。マージ後は GitHub Actions が自動デプロイする。フロントは `deploy-site.yml`、バックエンドの CDK は `deploy.yml`、ソムリエは `deploy-sommelier.yml` が受け持つ。
 
 ## 初回セットアップ（ブラウザで1回だけ）
 
@@ -69,5 +69,5 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 ## 動作確認の手順
 
 1. iPhone から小さなタスク（README の誤字修正など）を1件投げる
-2. PR が作られ、`infra/**` を触った場合は cdk diff がコメントされることを確認する
+2. PR が作られ、`infra/**` を触った場合は cdkd diff がコメントされることを確認する
 3. マージ後、GitHub Actions の deploy ワークフローが成功することを確認する
