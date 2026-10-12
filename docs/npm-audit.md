@@ -1,6 +1,6 @@
 # npm の脆弱性への対応
 
-`npm audit` の結果と、残しているものの扱い。2026-10-04 時点。
+`npm audit` への対応の記録。2026-10-04 時点。
 
 ## どこに入るか
 
@@ -32,8 +32,7 @@ Lambda のバンドルも esbuild 0.28 で中身が同一だった。
 ### shadcn を依存から外した理由
 
 画面が `shadcn` パッケージから読んでいたのは `shadcn/tailwind.css`（カスタムバリアントとキーフレームだけの CSS）だけだった。
-一方で CLI 本体は `fast-glob` → `micromatch` → `braces` を引いており、`braces` には修正版が出ていない。
-CSS を `src/styles/shadcn-tailwind.css` に写してパッケージを外した。ビルド後の CSS はハッシュまで同一。
+CLI 本体の依存が audit の指摘の多くを占めていたので、CSS を `src/styles/shadcn-tailwind.css` に写してパッケージを外した。ビルド後の CSS はハッシュまで同一。
 コンポーネントを足すときは `npx shadcn@latest add <名前>` を使う（依存に入れなくても動く）。
 CLI が `src/index.css` に `@import "shadcn/tailwind.css";` を書き足したら、その行は消す。
 
@@ -42,10 +41,6 @@ CLI が `src/index.css` に `@import "shadcn/tailwind.css";` を書き足した�
 Node.js 22 同梱の npm 10.9 では、ルートと `infra/` の `npm audit fix` / `npm install <名前>` が
 `Cannot read properties of null (reading 'edgesOut')` で止まる。`npx npm@11 audit fix` なら通る。
 lock の形式（lockfileVersion 3）は同じで、CI の `npm ci`（npm 10）はそのまま入る。
-
-## 残しているもの
-
-本番のバンドルに入る依存に既知の脆弱性は無い。開発・デプロイ時だけの依存の残りは定期的に見直す。
 
 ## 取り直し方
 

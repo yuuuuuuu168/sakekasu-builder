@@ -817,13 +817,6 @@ state が「作成済み」と言っている以上、差分は出ない。
 同じスタックの他のリソースと比べるのが早い。今回は `dev-sakekasu-slack-notifier` の
 ロールにマネージドポリシーが付いていたので、欠けているほうが異常だと分かった。
 
-### 残っている宿題
-
-| やること | なぜ |
-| --- | --- |
-| drift の土台が入れ替わる件を上流に報告する | 最初のデプロイが既存のずれを `observedProperties` に焼き付け、drift から見えなくなる |
-| `infra/**` を main に入れさせない仕掛け | 上の歯止めでデプロイ側は守られた。PR 側で止めるかは未決 |
-
 ### state バケットのスキーマ版
 
 `cdkd diff` を打つたびに、先行リポジトリの state を読めないという行が大量に流れる。
@@ -1104,7 +1097,7 @@ AWS_PROFILE=sakekasu-builder npx cdkd export sakekasu-dev-api --include-non-impo
 
 デプロイの同時実行はスタック単位のロックで防がれる。ジョブが途中でキャンセルされるとロックが残るが、30分の TTL で自動解除される。すぐ解除したいときは `cdkd force-unlock <stack>`。
 
-state バケットには合成後のプロパティが入るため、`{{resolve:secretsmanager:...}}` のような動的参照が解決済みの平文で残りうる。`cdkd scrub --dry-run --fail` で検出できる。CI のゲートに入れるかは移行後に判断する。
+state バケットには合成後のプロパティが入るため、`{{resolve:secretsmanager:...}}` のような動的参照が解決済みの平文で残りうる。`cdkd scrub --dry-run --fail` で検出できるので、deploy ワークフローでデプロイの後ろに置いている（上の「`cdkd scrub` はデプロイの後ろに置く」）。
 
 cdkd 自体はまだ 0.x で、公式に「dev/test 用。production-ready ではない」と明記されている。本番相当の環境には CDK CLI を使うことが推奨されている。この移行はそれを承知のうえで進めている。
 

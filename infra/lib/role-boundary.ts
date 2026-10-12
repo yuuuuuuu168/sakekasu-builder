@@ -8,18 +8,10 @@ import { IDENTITY_TOKEN_AUDIENCE } from './llm-constants.js';
  *
  * cdkd のデプロイロールは、アプリのロール（Lambda・AppSync・EventBridge の
  * 実行ロール）を作り替える必要がある。ロール名はスタック名が接頭辞に付くので
- * `sakekasu-*` に閉じられるが、それだけでは権限昇格が塞げない:
- *
- *   1. `iam:PutRolePolicy` で Lambda の実行ロールに管理者相当を書き込む
- *   2. `lambda:UpdateFunctionConfiguration` でそのロールを使う関数にする
- *   3. `lambda:InvokeFunction` で呼ぶ
- *
- * これで main への push を起点に任意の API を叩ける。PR #151 のセキュリティ
- * レビューで指摘された経路がこれ。
- *
- * 境界を付けると、ロールの実効権限は「アイデンティティポリシー ∩ 境界」に
- * なる。手順1で管理者相当を書き込まれても、境界が `iam:*` を拒否している
- * 限り、そのロールから IAM を触ることはできない。
+ * `sakekasu-*` に閉じられる。そのうえで境界を付けて、ロールの実効権限を
+ * 「アイデンティティポリシー ∩ 境界」で頭打ちにする。作り替えたロールを通して、
+ * 権限がデプロイ用ロールの枠の外に広がらないようにするため（PR #151 の
+ * セキュリティレビューで入れた）。
  *
  * 境界は「許可の上限」であって許可そのものではないため、`Allow *` を置いても
  * ロールの権限は増えない。増えないほうに効くのが Deny の側で、ここを
@@ -73,7 +65,7 @@ export function createRoleBoundary(scope: Construct, id: string): iam.ManagedPol
       //
       // 開けるのは GetWebIdentityToken だけで、宛先が Anthropic のものに限る。AssumeRole など
       // 別のロールの権限を得る操作は、これまでどおり天井から外れたまま。宛先を絞るので、
-      // このロールを乗っ取っても AWS や他のサービスに入る JWT は作れない。作れた JWT で入れるのは
+      // このロールから AWS や他のサービスに入る JWT は作れない。作れた JWT で入れるのは
       // Claude Console のルールが認めたワークスペースの推論だけになる。
       //
       // 書き方を 2 つに分けているのは、「sts:* から 1 つだけ除く」を列挙で書くと、

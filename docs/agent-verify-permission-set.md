@@ -56,7 +56,7 @@ aws iam simulate-principal-policy --profile verify-org --policy-source-arn $ROLE
   --query 'EvaluationResults[].[EvalActionName,EvalDecision]' --output text
 ```
 
-## この Deny が届かないところ
+## Identity Center 側の割り当て
 
 クラウドセッションの承認には `AgentVerifyAccess` だけを割り当てた専用ユーザーを使う。SSO Portal や Cognito の利用者向け操作は IAM の外なので、境界は Identity Center の割り当てにある。
 
@@ -75,7 +75,7 @@ aws iam simulate-principal-policy --profile verify-org --policy-source-arn $ROLE
 
 作り直す場合の手順は次のとおり。管理アカウント（<管理アカウント ID>）の認証が必要で、メンバーアカウントからは `sso:ListPermissionSets` すら通らない。
 
-**`sso-admin` のコマンドは、管理アカウントのプロファイルとリージョン `ap-northeast-1` で流す。** アプリのアカウント（<アプリのアカウント ID>）の `AdministratorAccess` で流すと、`the resource does not exist in this Region` を含む `AccessDeniedException` になる（2026-09-26 に実際に踏んだ）。ローカルの SSO が期限切れなら、先に `aws sso login --profile <管理アカウントのプロファイル>` を流す。最初の `get-caller-identity` で `<管理アカウント ID>` が返ることを確かめてから先へ進む。zsh の対話モードでは `#` で始まる行がコメントにならない（`command not found: #` になる）ので、コードブロック中のコメント行は貼らずに飛ばす。
+**`sso-admin` のコマンドは、管理アカウントのプロファイル（以下 `<管理アカウントのプロファイル>`）とリージョン `ap-northeast-1` で流す。** アプリのアカウント（<アプリのアカウント ID>）の `AdministratorAccess` で流すと、`the resource does not exist in this Region` を含む `AccessDeniedException` になる（2026-09-26 に実際に踏んだ）。ローカルの SSO が期限切れなら、先に `aws sso login --profile <管理アカウントのプロファイル>` を流す。最初の `get-caller-identity` で `<管理アカウント ID>` が返ることを確かめてから先へ進む。zsh の対話モードでは `#` で始まる行がコメントにならない（`command not found: #` になる）ので、コードブロック中のコメント行は貼らずに飛ばす。
 
 ```sh
 export AWS_PROFILE=<管理アカウントのプロファイル> AWS_REGION=ap-northeast-1

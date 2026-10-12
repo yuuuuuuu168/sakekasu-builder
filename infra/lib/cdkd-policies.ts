@@ -254,8 +254,8 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
     //
     // 権限を書き換える系の API は、対象ロールに Permissions Boundary が
     // 付いていることを条件にする。境界の無いロールは作れず、境界の付いた
-    // ロールに管理者相当を書き込んでも実効権限は境界で頭打ちになるため、
-    // 「ロールに書き込む → その権限で動かす」という昇格の連鎖が切れる。
+    // ロールの実効権限は境界で頭打ちになるため、作り替えたロールを通して
+    // 権限がこのポリシーの外に広がらない。
     //
     // 条件を付けられるのは iam:PermissionsBoundary に対応したアクションだけ。
     // TagRole などに付けると、キーが渡らないため常に不一致となり
@@ -281,10 +281,8 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
     // 渡らないアクションなので条件は付けられない。
     //
     // iam:UpdateAssumeRolePolicy はここに入れてはいけない。信頼ポリシーを
-    // まるごと書き換える API で、「誰がそのロールになれるか」を変えられる。
-    // 外部のアカウントを信頼先に足せば、そのロールの権限をそのまま使える。
-    // 境界は iam と sts しか拒否しないので、たとえば OCR 関数のロールを
-    // 乗っ取れば DynamoDB の記録や S3 の画像に届いてしまう。
+    // まるごと書き換える API で、「誰がそのロールになれるか」を決める。
+    // 信頼ポリシーは境界とは別に守る。
     //
     // cdkd がこれを必要とするのは、CDK 側で assumedBy を変えたときだけ。
     // 起きたら AccessDenied で止まるので、そのときは人間が手で直す
@@ -495,9 +493,7 @@ function siteDeliveryStatements(siteZone: string): iam.PolicyStatement[] {
         },
       },
     }),
-    // いまは使っていない。証明書は cdkd では作れず、コンソールで作ることにした
-    // （site-stack.ts の冒頭）。外すと OIDC スタックの手動更新が要るので、次に
-    // そのスタックを更新するときにまとめて外す
+    // 証明書は cdkd では作れないため、コンソールで作っている（site-stack.ts の冒頭）
     new iam.PolicyStatement({
       sid: 'ManageSiteCertificate',
       actions: [

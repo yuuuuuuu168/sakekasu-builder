@@ -338,8 +338,7 @@ describe('GithubOidcStack', () => {
     const statements = statementsFor(template, /^CdkdDeployRole/);
 
     // 権限を増やしうる IAM の API は、すべて境界の条件付きでなければならない。
-    // 1つでも素通しがあると、Lambda の実行ロールに管理者相当を書き込んで
-    // その関数を呼ぶ、という昇格の連鎖が通ってしまう
+    // 1つでも条件の無いものがあると、境界で権限を頭打ちにする前提が崩れる
     const escalating = [
       'iam:CreateRole',
       'iam:PutRolePolicy',
@@ -389,10 +388,8 @@ describe('GithubOidcStack', () => {
   it('cdkd のデプロイロールは信頼ポリシーを書き換えられない', () => {
     const statements = statementsFor(template, /^CdkdDeployRole/);
 
-    // 信頼ポリシーを書き換えられると「誰がそのロールになれるか」を変えられる。
-    // 外部アカウントを信頼先に足してロールを乗っ取れば、境界が拒否しない
-    // DynamoDB や S3 には届いてしまう。iam:PermissionsBoundary はこの
-    // アクションに渡らないため、条件で縛ることもできない
+    // 信頼ポリシーは「誰がそのロールになれるか」を決めるもので、境界とは別に守る。
+    // iam:PermissionsBoundary はこのアクションに渡らないため、条件では縛れない
     expect(allows(statements, 'iam:UpdateAssumeRolePolicy')).toBe(false);
 
     // 「Allow に無い」だけだと、誰かが Allow を広げた瞬間に消える。

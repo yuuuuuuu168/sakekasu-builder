@@ -10,7 +10,7 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 2. リポジトリアクセスの注意: **App のインストール範囲 ＝ セッションのアクセス範囲ではない**。セッションは連携した GitHub アカウントが見えるリポジトリ全体にアクセスできる。絞りたい場合は GitHub 側でアカウント権限を制限する
 3. 画面上部の雲アイコン → 「Add cloud environment」で環境を作る
    - **Network access**: まずはデフォルトの Trusted（GitHub / npm / PyPI / AWS SDK 系ドメインを許可済み）で開始。足りないドメインが出たら Custom に切り替えて追加する（「Also include default list of common package managers」は残す）
-   - **Environment variables**: 現時点では不要（Issue #96 で `TAVILY_API_KEY` を追加予定）。AWS の確認を毎セッションするなら `SAKEKASU_AWS_LOGIN=1` を入れると、セッション開始の時点で SSO ログインまで進む
+   - **Environment variables**: 現時点では不要（Tavily を使うなら `TAVILY_API_KEY`）。AWS の確認を毎セッションするなら `SAKEKASU_AWS_LOGIN=1` を入れると、セッション開始の時点で SSO ログインまで進む
    - **Setup script**: 空でよい。依存インストールはリポジトリ側の SessionStart フックで自動実行される（下記）
 
 ## 依存インストールの自動実行（リポジトリ側・設定済み）
@@ -53,7 +53,8 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 - 参照する Permission Set は `AgentVerifyAccess`。作成手順と権限の考え方は [agent-verify-permission-set.md](agent-verify-permission-set.md) にまとめてある
 - このスクリプトも `$CLAUDE_CODE_REMOTE` を見てクラウド VM でだけ動く。ローカルの `~/.aws/config` を上書きしないため
 - 変更操作は [scripts/deny-aws-writes.sh](../scripts/deny-aws-writes.sh)（`PreToolUse` フック）が止める。読み取り操作だけを通す許可リスト方式で、`get-` / `list-` / `describe-` などの接頭辞と、`sso login` / `logs tail` / `s3 ls` のような明示リストに載るものだけが通る。明示リストに足すときは、`ecs execute-command` のように名前が読み取りっぽくても実質が違うものがあるため、一つずつ実際の権限を確かめる。`invoke` や `assume-role` のように動詞が read でも write でもない操作を数え漏らさないため、拒否リストではなく許可リストにしている
-- 署名されない操作と資格情報を返す操作はフックで落とす（一覧は [scripts/deny-aws-writes.mjs](../scripts/deny-aws-writes.mjs)）。このフックはうっかり変更操作を打つのを止める関門であって、サンドボックスではない。本当の境界は IAM と Identity Center の割り当てにある
+- 名前が読み取りに見えても、資格情報を返す操作や IAM で認証されない操作は明示的に落とす。一覧は CLI 同梱の botocore モデルから機械的に出した
+- このフックはうっかり変更操作を打つのを止める関門であって、権限の境界ではない。本当の境界は `AgentVerifyAccess` の IAM 側と、Identity Center の割り当てにある
 - 判定のテストは [scripts/deny-aws-writes.test.mjs](../scripts/deny-aws-writes.test.mjs) にある。`node --test scripts/deny-aws-writes.test.mjs` で走り、CI では `.github/workflows/claude-hooks.yml` が回す
 - このフックも**クラウドでだけ判定する**。`permissions.deny` に書くとリポジトリ共有のためローカルの正当な管理作業（`sso-admin create-permission-set` など）まで止まり、実際に一度それで詰まった
 - Network access は `awsapps.com` と `*.amazonaws.com` への到達が必要。認証エラーに見える失敗はまずここを疑う
