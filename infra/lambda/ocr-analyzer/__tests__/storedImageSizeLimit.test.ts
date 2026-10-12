@@ -1,4 +1,4 @@
-// Issue sakekasu-builder-archive#172: 大きすぎる画像は、S3 の応答ヘッダの大きさを見て
+// sakekasu-builder#30: 大きすぎる画像は、S3 の応答ヘッダの大きさを見て
 // 本体を読む前に落とす
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

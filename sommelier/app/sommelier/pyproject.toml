@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 # デプロイの梱包は uv.lock を見ず、ここの指定から入れる（下の dev の説明を参照）。
 # 本番に載る版の歯止めは下限だけなので、既知の脆弱性が直った版を下限にしておく。
-# pyjwt はトークン検証の要（Issue sakekasu-builder-archive#216）
+# pyjwt はトークン検証の要（sakekasu-builder#28）
 #
 # Claude API への切り替えで下限を上げたもの（model/load.py）:
 # - strands-agents[anthropic]: AnthropicModel のプロンプトキャッシュ（CacheConfig）と、

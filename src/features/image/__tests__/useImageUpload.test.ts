@@ -303,7 +303,7 @@ describe('useImageUpload - 一時領域からの引き取り', () => {
   });
 
   // サーバーは申告された大きさを署名に含める。PUT する本体と同じものを
-  // 測っていないと、S3 が 403 を返す（Issue sakekasu-builder-archive#173）
+  // 測っていないと、S3 が 403 を返す（sakekasu-builder#30・#31）
   it('署名要求に、PUT する本体と同じ大きさを添える', async () => {
     mockUpload(TEMP_KEY);
     const file = new File(['x'.repeat(1234)], 'a.jpg', { type: 'image/jpeg' });

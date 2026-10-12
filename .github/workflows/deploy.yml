@@ -32,7 +32,7 @@ env:
   # 経由せず生の API を叩くため、必要な権限が別物になる）
   #
   # アカウント ID はリポジトリに書かず、secrets.AWS_ACCOUNT_ID から組み立てる
-  # （公開リポジトリなので。Issue sakekasu-builder-archive#106）。secrets の値は
+  # （公開リポジトリなので。sakekasu-builder#32）。secrets の値は
   # Actions のログで自動的に伏せられる
   CDKD_ROLE_ARN: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sakekasu-cdkd-deploy
   # 認証情報を入れる前に済ませた合成結果を使わせる。これを外すと cdkd が

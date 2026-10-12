@@ -209,7 +209,7 @@ describe('パイプの失敗検知', () => {
 });
 
 // フォークと Dependabot の PR では、diff ロールの認証情報を取らせない
-// （Issue sakekasu-builder-archive#131）。条件が消えても diff は緑のまま動くので、
+// （sakekasu-builder#29）。条件が消えても diff は緑のまま動くので、
 // 文字列で固定しておく
 describe('cdk-diff.yml を走らせる PR', () => {
   const lines = readFileSync(join(WORKFLOW_DIR, 'cdk-diff.yml'), 'utf8').split('\n');
