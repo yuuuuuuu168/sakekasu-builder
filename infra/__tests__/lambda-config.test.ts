@@ -23,12 +23,12 @@ import { TEST_SHARED_AUTH } from './shared-auth-fixture.js';
  *
  * 上限は CloudWatch Application Signals 側の対応状況で決まる。2026-08-10 時点で
  * Application Signals が対応するのは Node.js 18.x / 20.x / 22.x で、24.x は入って
- * いない。Issue #86 で presigned-url と ocr-analyzer に計装を入れ直す予定がある
- * ため、24 には上げない。
+ * いない。presigned-url と ocr-analyzer は Application Signals で計装している
+ * ため（Issue #86）、24 には上げない。
  * https://docs.aws.amazon.com/lambda/latest/dg/monitoring-application-signals.html
  *
- * nodejs22.x の廃止は 2027-04-30、更新ブロックは 2027-07-01。それまでに
- * Application Signals が 24 に対応していれば 24 へ上げる。
+ * nodejs22.x の廃止は 2027-04-30、更新ブロックは 2027-07-01。24 へ上げられるのは
+ * Application Signals が 24 に対応してから。
  */
 const EXPECTED_RUNTIME = 'nodejs22.x';
 const EXPECTED_CDK_ENUM = 'NODEJS_22_X';

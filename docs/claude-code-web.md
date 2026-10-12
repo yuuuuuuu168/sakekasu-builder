@@ -10,7 +10,7 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 2. リポジトリアクセスの注意: **App のインストール範囲 ＝ セッションのアクセス範囲ではない**。セッションは連携した GitHub アカウントが見えるリポジトリ全体にアクセスできる。絞りたい場合は GitHub 側でアカウント権限を制限する
 3. 画面上部の雲アイコン → 「Add cloud environment」で環境を作る
    - **Network access**: まずはデフォルトの Trusted（GitHub / npm / PyPI / AWS SDK 系ドメインを許可済み）で開始。足りないドメインが出たら Custom に切り替えて追加する（「Also include default list of common package managers」は残す）
-   - **Environment variables**: 現時点では不要（Issue #96 で `TAVILY_API_KEY` を追加予定）。AWS の確認を毎セッションするなら `SAKEKASU_AWS_LOGIN=1` を入れると、セッション開始の時点で SSO ログインまで進む
+   - **Environment variables**: 現時点では不要（Tavily を使うなら `TAVILY_API_KEY`）。AWS の確認を毎セッションするなら `SAKEKASU_AWS_LOGIN=1` を入れると、セッション開始の時点で SSO ログインまで進む
    - **Setup script**: 空でよい。依存インストールはリポジトリ側の SessionStart フックで自動実行される（下記）
 
 ## 依存インストールの自動実行（リポジトリ側・設定済み）

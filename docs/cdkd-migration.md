@@ -45,7 +45,7 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | --- | --- | --- |
 | [sakekasu-kakeibo](https://github.com/yuuuuuuu168/sakekasu-kakeibo) | 0.291.16 | deploy ワークフローが毎回 `migrate-to-cdkd.sh` を呼ぶ。人が打つものは無い |
 | [sakekasu-learning](https://github.com/yuuuuuuu168/sakekasu-learning) | 0.291.16 | 手元で `cdkd-stacks.sh migrate` を打つ |
-| sakekasu-builder | 0.291.31 | これから決める |
+| sakekasu-builder | 0.291.31 | deploy ワークフローが `migrate-to-cdkd.sh` を呼ぶ（下の「`deploy.yml` から migrate-to-cdkd.sh を呼ぶ」） |
 
 **版を 0.291.16 に揃えなかった。** 他2本が踏んだ不具合のうち1件は 0.291.23 で直っている（[#3701](https://github.com/go-to-k/cdkd/issues/3701) `complete a bare CloudFormation id to the Cloud Control composite identifier`）。16 に固定すると、上流で直っているものに対して回避コードを新しく書くことになる。揃える先は「他2本がたまたま使っていた版」ではなく最新とし、他2本は後から追随して回避を1つ落とせばよい。
 
@@ -138,9 +138,7 @@ GitHub Actions（main への push）
 
 ### Permissions Boundary
 
-ロール名を `sakekasu-*` に絞るだけでは、権限昇格が塞げない。Lambda の実行ロールは自動生成名がスタック名で始まるためこの範囲に入り、そこへ管理者相当のインラインポリシーを書き込んで、そのロールを使う関数を呼べば任意の API を叩けてしまう。PR #151 のセキュリティレビューで指摘された経路がこれ。
-
-対策として、アプリのスタックが作るロール全部に `sakekasu-role-boundary` を付けている（`infra/lib/role-boundary.ts`）。境界は「許可の上限」なので、ロールの実効権限は「自身のポリシー ∩ 境界」になる。境界が `iam:*` と `sts:*` を拒否している限り、書き込まれた管理者相当は効かない。
+アプリのスタックが作るロール全部に `sakekasu-role-boundary` を付けている（`infra/lib/role-boundary.ts`、PR #151 のセキュリティレビューで入れた）。境界は「許可の上限」なので、ロールの実効権限は「自身のポリシー ∩ 境界」になる。デプロイ用ロールが作り替えるロールを通して、権限がデプロイ用ロールの枠の外に広がらないようにするため。境界は `iam:*` と `sts:*` を拒否している。
 
 cdkd 側は、権限を増やしうる IAM の API（`CreateRole` / `PutRolePolicy` / `AttachRolePolicy` / `PutRolePermissionsBoundary` など）を `iam:PermissionsBoundary` の条件付きにしてある。境界の無いロールは作れず、境界を外すこともできない。
 
@@ -514,7 +512,7 @@ npx cdkd import sakekasu-dev-monitoring -c env=dev --dry-run \
 
 `4 imported, 0 not found, 0 failed` を確かめてから `--dry-run` を外して打つ。`--auto` は付けない。付けると残り48個も解決し直そうとするが、CloudFormation のスタックが無いので物理 ID を引けない型（UserPoolClient / GraphQLApi など）で落ちる。
 
-**教訓として、窓の約束は約束のままだった。** ブランチ保護にも CI にも、取り込み中に `infra/**` を main に入れさせない仕掛けは無い。次に同じことをするなら、取り込みの直前に `infra/**` を触る PR を止める手立てを先に用意する。
+**教訓として、窓の約束は約束のままだった。** 取り込み中に `infra/**` を main に入れさせない仕掛けは無かった。次に同じことをするなら、取り込みの直前に `infra/**` を触る PR を止める手立てを先に用意する。
 
 ### 最初の `cdkd deploy` で何が起きるか
 
@@ -745,7 +743,7 @@ pathToFileURL(argv[1])          : .../com%7Eapple%7ECloudDocs/probe.mjs
 | state 無し | 4本すべて残存 | 失敗 | `engine=cfn`（従来どおり。戻して安全） |
 | 4本すべて state あり | 4本すべて退役 | 通さない | `engine=cdkd` |
 
-**`infra/**` を main に入れさせない仕掛けより、こちらが先。** 窓を守りたかった理由は「その状態でデプロイが走ると壊れる」ことだった。デプロイの側で止まるなら、何が main に入ったかに依らず守られる。PR の側で止める仕掛けは、このリポジトリがブランチ保護を使えない（無料プラン）ので赤いチェックを出すところまでしかできず、目印の置き忘れでも効かなくなる。
+**`infra/**` を main に入れさせない仕掛けより、こちらが先。** 窓を守りたかった理由は「その状態でデプロイが走ると壊れる」ことだった。デプロイの側で止まるなら、何が main に入ったかに依らず守られる。PR の側で止める仕掛けは、目印の置き忘れで効かなくなる。
 
 検査を4件足した（`infra/__tests__/migrate-to-cdkd.test.ts`）。`engine=cfn` の前で state を調べていること、移行済みがあれば止めること、止めるときに `engine=` を書かないこと、`migrated` の展開が bash 3.2 の `set -u` で落ちない書き方であること。歯止めを外す変異・`exit 1` を外す変異・素の配列展開に変える変異のどれでも落ちる。
 
@@ -845,13 +843,6 @@ state が「作成済み」と言っている以上、差分は出ない。
 
 同じスタックの他のリソースと比べるのが早い。今回は `dev-sakekasu-slack-notifier` の
 ロールにマネージドポリシーが付いていたので、欠けているほうが異常だと分かった。
-
-### 残っている宿題
-
-| やること | なぜ |
-| --- | --- |
-| drift の土台が入れ替わる件を上流に報告する | 最初のデプロイが既存のずれを `observedProperties` に焼き付け、drift から見えなくなる |
-| `infra/**` を main に入れさせない仕掛け | 上の歯止めでデプロイ側は守られた。PR 側で止めるかは未決 |
 
 ### state バケットのスキーマ版
 
@@ -987,11 +978,7 @@ account <アプリのアカウント ID> (or access is denied). Refusing to use 
 
 **合成と差分を分ける。** いまの `cdk-diff.yml` は認証情報を入れたあとに `cdk diff` を走らせている。`--ignore-scripts` は npm のインストール時スクリプトを止めるが、CDK アプリのコードは合成時に実行されるため、PR に AWS SDK の呼び出しを仕込めば認証情報付きで動く。認証情報を入れる前に `npx cdk synth --all -q` を済ませ、そのあとは合成済みのアセンブリだけを読ませる（[#29](https://github.com/yuuuuuuu168/sakekasu-builder/pull/29) の1番）。
 
-**これは部分的な対処。** 消えるのは「合成時にアプリのコードが走る」経路だけ。`infra/package-lock.json` は PR が書き換えられるので、`@go-to-k/cdkd` を自前のターゲットに差し替えれば、認証後に動く `cdkd` 自体が PR のコードになる。`--ignore-scripts` が止めるのはインストール時スクリプトで、意図して実行する本体には効かない。差し替え前の `cdk diff` も `aws-cdk` について同じ形だった。
-
-`pull_request` ではワークフローの定義自体が PR のブランチから読まれるため、ワークフロー内の対策では閉じない。塞ぐには `pull_request_target` に移して信頼できる ref を checkout するか、PR のワークフローから OIDC を外すことになる。#131 の前提（private・fork 無し・PR を開けるのは admin 本人だけ）が変わる前にやる作業として、そちらに記録してある。
-
-**「認証情報より前だから安全」ではない。** ジョブには `id-token: write` があるので、動いたコードは自分で OIDC トークンを取って `sts:AssumeRoleWithWebIdentity` でロールに入れる。認証ステップより前かどうかは関係がない。だから `infra/scripts/check-lockfile-registry.mjs` は依存の取得そのものより前に置いてある。
+**依存の取得元は取得の前に確かめる。** `infra/package-lock.json` は PR で書き換えられるので、`infra/scripts/check-lockfile-registry.mjs` が取得元が npm レジストリだけかを、依存の取得そのものより前に確かめる。ジョブには `id-token: write` があるので、認証ステップの前に置くだけでは足りないため。
 
 **取得元の検査は10本すべてを見る。** 認証情報の有無にかかわらずワークフローが取得・import する lockfile は、infra 本体の1本と lambda ごとの9本。`deploy.yml` は lambda ごとに `npm ci` を回し、`npm test` は `vitest.config` の include が lambda 配下の `__tests__` を拾うので、それらのモジュールと依存が読み込まれる。最初に書いた版は infra 本体しか見ておらず、9本が素通りしていた（PR #230 で aws-security-agent が指摘、HIGH）。
 
@@ -1139,7 +1126,7 @@ AWS_PROFILE=sakekasu-builder npx cdkd export sakekasu-dev-api --include-non-impo
 
 デプロイの同時実行はスタック単位のロックで防がれる。ジョブが途中でキャンセルされるとロックが残るが、30分の TTL で自動解除される。すぐ解除したいときは `cdkd force-unlock <stack>`。
 
-state バケットには合成後のプロパティが入るため、`{{resolve:secretsmanager:...}}` のような動的参照が解決済みの平文で残りうる。`cdkd scrub --dry-run --fail` で検出できる。CI のゲートに入れるかは移行後に判断する。
+state バケットには合成後のプロパティが入るため、`{{resolve:secretsmanager:...}}` のような動的参照が解決済みの平文で残りうる。`cdkd scrub --dry-run --fail` で検出できるので、deploy ワークフローでデプロイの後ろに置いている（上の「`cdkd scrub` はデプロイの後ろに置く」）。
 
 cdkd 自体はまだ 0.x で、公式に「dev/test 用。production-ready ではない」と明記されている。本番相当の環境には CDK CLI を使うことが推奨されている。この移行はそれを承知のうえで進めている。
 

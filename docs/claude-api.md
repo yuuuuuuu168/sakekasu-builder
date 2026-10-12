@@ -137,7 +137,7 @@ Bedrock の `InvokeModel` 権限はフォールバック用に残している。
 1. 宛先の条件キー（`sts:IdentityTokenAudience`）を持たない STS の操作をすべて拒否する。この条件キーを持つのは `GetWebIdentityToken` だけなので、`AssumeRole` などはこれまでどおり拒否のまま。AWS が STS に新しい操作を足しても、条件キーを持たなければここで止まる
 2. 宛先に Anthropic 以外が 1 つでも混ざった `GetWebIdentityToken` を拒否する
 
-このロールを乗っ取っても、作れる JWT で入れるのは Claude Console のルールが認めたワークスペースの推論だけで、AWS や他のサービスには入れない。
+このロールで作れる JWT で入れるのは Claude Console のルールが認めたワークスペースの推論だけで、AWS や他のサービスには入れない。
 
 ### ネットワーク
 

@@ -541,7 +541,7 @@ aidlc/           # AI-DLC のルールと成果物
 | [docs/log-group-import.md](docs/log-group-import.md) | 既存ロググループのスタック取り込み（`logRetention` からの移行） |
 | [docs/agent-verify-permission-set.md](docs/agent-verify-permission-set.md) | クラウドセッションから AWS を見るための読み取り専用 Permission Set |
 | [docs/operations.md](docs/operations.md) | 手で打つ運用手順（ソムリエの手動デプロイと確認・利用料金通知のデプロイ・OIDC の初回セットアップ） |
-| [docs/npm-audit.md](docs/npm-audit.md) | npm の脆弱性の対応状況（本番に入る依存の見分け方・残しているものとその理由） |
+| [docs/npm-audit.md](docs/npm-audit.md) | npm audit への対応の記録（本番に入る依存の見分け方・依存の更新） |
 | [CLAUDE.md](CLAUDE.md) | 開発の進め方（ブランチ運用・AI-DLC・AWS 確認の認証フロー） |
 
 ## セットアップ
