@@ -493,16 +493,13 @@ function siteDeliveryStatements(siteZone: string): iam.PolicyStatement[] {
         },
       },
     }),
-    // 証明書は cdkd では作れないため、コンソールで作っている（site-stack.ts の冒頭）
+    // 証明書は cdkd では作れないため、コンソールで作っている（site-stack.ts の冒頭）。
+    // cdkd は ARN で取り込むだけなので、読み取りだけを持つ
     new iam.PolicyStatement({
-      sid: 'ManageSiteCertificate',
+      sid: 'ReadSiteCertificate',
       actions: [
-        'acm:RequestCertificate',
         'acm:DescribeCertificate',
-        'acm:DeleteCertificate',
         'acm:ListCertificates',
-        'acm:AddTagsToCertificate',
-        'acm:RemoveTagsFromCertificate',
         'acm:ListTagsForCertificate',
       ],
       resources: ['*'],
