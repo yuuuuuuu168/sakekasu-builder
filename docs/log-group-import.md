@@ -1,5 +1,7 @@
 # 既存のロググループをスタックへ取り込む手順
 
+> 2026-08 に完了した CloudFormation 時代の記録。いまは実行しない（cdkd 管理のスタックに手元から `cdk deploy` を打つと既存リソースとぶつかる）。
+
 Lambda のログ保持期間の設定を、非推奨の `logRetention` から明示的な `logs.LogGroup` へ移すための AWS 側の作業メモ（[36b5020](https://github.com/yuuuuuuu168/sakekasu-builder/commit/36b5020aa2306d679b0a889b8cbfa21983a05090)）。
 
 コードの変更だけでは移行が終わらない。既に存在するロググループを CloudFormation のスタックへ取り込む操作が要る。**2026-08-18 に dev の3スタックで実施済み。** ここに残すのは、実際に通った手順と、通らなかった道の記録。
@@ -26,15 +28,9 @@ Lambda のログ保持期間の設定を、非推奨の `logRetention` から明
 
 CloudFormation の [auto-import](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/import-resources-automatically.html) を使う。通常の更新の中で、テンプレートに書かれた名前と一致する既存リソースを取り込む仕組み。`AWS::Logs::LogGroup` は対応する型に入っている。
 
-`infra/` で、1スタックずつ実行する。
+当時は `infra/` で `cdk deploy` に `--import-existing-resources` を付け、`sakekasu-dev-auth` / `sakekasu-dev-api` / `sakekasu-dev-monitoring` の順に1スタックずつ流した。
 
-```sh
-AWS_PROFILE=sakekasu-builder npx cdk deploy --import-existing-resources sakekasu-dev-auth
-AWS_PROFILE=sakekasu-builder npx cdk deploy --import-existing-resources sakekasu-dev-api
-AWS_PROFILE=sakekasu-builder npx cdk deploy --import-existing-resources sakekasu-dev-monitoring
-```
-
-これだけで済む。ロググループの取り込み、`Custom::LogRetention` とプロバイダー Lambda の削除、関数の `LoggingConfig` の配線が同じ更新に収まる。
+これだけで済んだ。ロググループの取り込み、`Custom::LogRetention` とプロバイダー Lambda の削除、関数の `LoggingConfig` の配線が同じ更新に収まる。
 
 取り込みの条件は次のとおりで、`lambdaLogGroup()` が作るロググループはすべて満たしている。
 
@@ -43,17 +39,15 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy --import-existing-resources sakekasu
 - 他のスタックに属していない
 - 主識別子（`LogGroupName`）がテンプレートにある
 
-**`--import-existing-resources` を `deploy.yml` に入れないこと。** 以後のデプロイで既存リソースを黙って取り込む口になる。名前がぶつかったときに気づけなくなるので、移行のときだけ手で打つ。
+`--import-existing-resources` は当時の `deploy.yml` に入れなかった。以後のデプロイで既存リソースを黙って取り込む口になり、名前がぶつかったときに気づけなくなるため、移行のときだけ手で打った。
 
-`--all` も使わない。1スタックずつ流して、それぞれの結果を見てから次へ進む。
+`--all` も使わず、1スタックずつ流してそれぞれの結果を見てから次へ進んだ。
 
 ## 順番
 
-取り込みを先に、マージを後に。逆にすると、マージで走る `deploy.yml`（`cdk deploy --all`）が上のエラーで落ちる。
+取り込みを先に、マージを後にした。逆にすると、マージで走る当時の `deploy.yml`（`cdk deploy --all`）が上のエラーで落ちる。
 
-順番が入れ替わってしまっても壊れる方向には倒れない。#174 で実際に踏んだが、事前検証で止まるだけで何も適用されなかった。`cdk deploy --all` はスタックを1つずつ流すので、最初の `sakekasu-dev-auth` で止まり、後続には進まない。落ち着いて上の手順を流し、そのあと Actions から `deploy` を再実行すればよい。
-
-取り込みが終わるまで `infra/` の変更を main に入れないこと。入れると同じところで落ち続ける。
+順番が入れ替わっても壊れる方向には倒れなかった。#174 で実際に踏んだが、事前検証で止まるだけで何も適用されなかった。当時の `cdk deploy --all` はスタックを1つずつ流すので、最初の `sakekasu-dev-auth` で止まり、後続には進まない。取り込みを済ませてから Actions の `deploy` を再実行して収まった。
 
 ## 対象
 
@@ -61,17 +55,13 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy --import-existing-resources sakekasu
 | --- | --- | --- | --- |
 | `sakekasu-dev-auth` | <アプリのアカウント ID> | `/aws/lambda/dev-sakekasu-signup-notifier` | 取り込み済み（2026-08-18） |
 | `sakekasu-dev-api` | <アプリのアカウント ID> | `/aws/lambda/dev-sakekasu-presigned-url`<br>`/aws/lambda/dev-sakekasu-ocr-analyzer` | 取り込み済み（2026-08-18） |
-| `sakekasu-dev-monitoring` | <アプリのアカウント ID> | `/aws/lambda/dev-sakekasu-slack-notifier`<br>`/aws/lambda/dev-sakekasu-health-check`<br>`/aws/lambda/dev-sakekasu-sommelier-canary` | 取り込み済み（2026-08-18） |
+| `sakekasu-dev-monitoring` | <アプリのアカウント ID> | `/aws/lambda/dev-sakekasu-slack-notifier`<br>`/aws/lambda/dev-sakekasu-health-check`<br>`/aws/lambda/dev-sakekasu-sommelier-canary` | 取り込み済み（2026-08-18）<br>カナリアはその後削除した |
 | `sakekasu-billing-notifier` | <管理アカウント ID> | `/aws/lambda/sakekasu-billing-notifier`<br>`/aws/lambda/sakekasu-billing-slack-notifier` | 取り込み済み（2026-08-19）<br>保持期間は手で設定 |
 | `sakekasu-dev-devops-agent` | <アプリのアカウント ID> | `/aws/lambda/dev-sakekasu-devops-agent-webhook` | 取り込み不要 |
 
-`sakekasu-dev-devops-agent` は `agentSpaceArn` の context が入っているときだけ合成される。いまは入っておらずデプロイもされていないため、ロググループの実物が無い。初回デプロイのときに素直に作られる。
+`sakekasu-dev-devops-agent` は `agentSpaceArn` の context が入っているときだけ合成される。当時は入っておらずデプロイもされていなかったため、ロググループの実物が無く、取り込む必要が無かった。
 
-課金通知は管理アカウント側の手動デプロイ専用スタックなので別作業になる。同じフラグを付けて打つ。
-
-```sh
-npx cdk deploy --import-existing-resources sakekasu-billing-notifier -c billing=true
-```
+課金通知は管理アカウント側の手動デプロイ専用スタックなので別作業にし、同じフラグを付けて取り込んだ。
 
 このスタックの2つは取り込む前の保持期間が無期限だったため、取り込みのあとに手で 30 日を設定した。理由は次の節にある。
 
@@ -170,8 +160,8 @@ auto-import は通常の更新なので、この制約がまるごと掛から�
 `sakekasu-github-oidc` スタックに、保持期間が無期限のロググループが2つ残る（[643de48](https://github.com/yuuuuuuu168/sakekasu-builder/commit/643de48aa4ae2b98281458d298621344d637ca9a) の拾い漏れ）。
 
 ```
-/aws/lambda/sakekasu-github-oidc-CustomAWSCDKOpenIdConnectProv-NiSIARa7Eld2
-/aws/lambda/sakekasu-github-oidc-CustomAWSCDKOpenIdConnectProv-rzUg12vb0oOJ
+/aws/lambda/sakekasu-github-oidc-CustomAWSCDKOpenIdConnectProv-<サフィックス1>
+/aws/lambda/sakekasu-github-oidc-CustomAWSCDKOpenIdConnectProv-<サフィックス2>
 ```
 
 `iam.OpenIdConnectProvider` が内部で作るカスタムリソースのものなので、`NodejsFunction` の `logGroup` では触れない。コンストラクト側にも保持期間を渡す口が無い（`OpenIdConnectProviderProps` は `url` / `clientIds` / `thumbprints` / `removalPolicy` だけ）。ロググループ名も CloudFormation が付けた関数名から決まるため合成時には分からず、CDK 側から同じ名前のロググループを書くこともできない。
@@ -180,8 +170,8 @@ auto-import は通常の更新なので、この制約がまるごと掛から�
 
 ```sh
 for name in \
-  /aws/lambda/sakekasu-github-oidc-CustomAWSCDKOpenIdConnectProv-NiSIARa7Eld2 \
-  /aws/lambda/sakekasu-github-oidc-CustomAWSCDKOpenIdConnectProv-rzUg12vb0oOJ
+  /aws/lambda/sakekasu-github-oidc-CustomAWSCDKOpenIdConnectProv-<サフィックス1> \
+  /aws/lambda/sakekasu-github-oidc-CustomAWSCDKOpenIdConnectProv-<サフィックス2>
 do
   AWS_PROFILE=sakekasu-builder aws logs put-retention-policy \
     --log-group-name "$name" --retention-in-days 30

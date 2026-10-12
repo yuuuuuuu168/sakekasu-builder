@@ -4,7 +4,7 @@ GitHub Actions の CDK デプロイを、CloudFormation を経由しない [cdkd
 
 cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control API で直接デプロイする CLI。CDK のコードは変更不要で、`cdk deploy` を `cdkd deploy` に置き換えるだけで動く。
 
-このファイルは AWS 側の作業手順そのもので、コードの変更だけでは移行は完了しない。
+移行は完了している。いまは main へのマージで `.github/workflows/deploy.yml` が cdkd でインフラをデプロイする。このファイルは移行の記録で、中のコマンドはいま打つためのものではない。手元からの `cdk deploy` / `cdkd deploy` は禁止で、例外は `sakekasu-github-oidc` と `sakekasu-billing-notifier`（管理アカウント）だけ（[aws-infra-rules.md](aws-infra-rules.md)）。
 
 ## 現在どこまで進んでいるか
 
@@ -21,7 +21,7 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | 6 | 影響の小さいスタックで CFn への戻しを確認 | 済（要・回避策） |
 | 7 | `cdkd import` で既存スタックを取り込む | 済（2026-10-03。4スタックとも失敗0） |
 | 8 | `cdkd drift` で state と実物の一致を確認 | 済（2026-10-03。差分は文字化けのみ） |
-| 9 | `deploy.yml` / `cdk-diff.yml` を cdkd に差し替え | PR 用意済み（マージ前に下の「取りこぼした4リソース」を取り込む） |
+| 9 | `deploy.yml` / `cdk-diff.yml` を cdkd に差し替え | 済（マージ前に下の「取りこぼした4リソース」を取り込んだ） |
 
 手順3と3.5 は 2026-10-03 に完了を確認した。`sakekasu-cdkd-deploy` ロールと `sakekasu-role-boundary` ポリシーはどちらも 2026-08-16 付で実在し、境界の `PermissionsBoundaryUsageCount` は 13。合成した4スタックの IAM ロール数（api 8 / auth 1 / monitoring 3 / health-global 1 = 13）と一致するので、全ロールに境界が付いている。
 
@@ -33,9 +33,9 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 
 **OIDC スタック（手順3）を、アプリのスタックより先にデプロイする。** アプリの全ロールが `sakekasu-role-boundary` を参照するようになったので、境界ポリシーが存在しない状態で `cdk deploy --all` を打つと、存在しないポリシーを指しているとして CloudFormation が落ちる。
 
-**手順7を始めたら、手順9のマージまで `infra/**` を main に入れない。** `cdkd import --migrate-from-cloudformation` は CloudFormation のスタックを削除する（リソースは Retain で残る）。その状態でいまの `deploy.yml`（`cdk deploy --all`）が走ると、スタックが消えている以上ゼロから作り直そうとして、既存リソースと名前がぶつかる。取り込みから差し替えまでの窓は短いほどよい。手順9の PR を先に用意しておき、取り込みが終わったらすぐマージする。
+**手順7から手順9のマージまでは `infra/**` を main に入れない約束にした。** `cdkd import --migrate-from-cloudformation` は CloudFormation のスタックを削除する（リソースは Retain で残る）。その状態で当時の `deploy.yml`（`cdk deploy --all`）が走ると、スタックが消えている以上ゼロから作り直そうとして、既存リソースと名前がぶつかる。そのため手順9の PR を先に用意しておき、取り込みが終わったらすぐマージした。
 
-**手順9を先にマージしない。** 取り込みが済んでいない状態で cdkd が走ると、state が空なので既存リソースの存在を知らないまま全部を新規作成しにいく。
+**手順9を先にマージしなかった。** 取り込みが済んでいない状態で cdkd が走ると、state が空なので既存リソースの存在を知らないまま全部を新規作成しにいく。
 
 ## cdkd の版と、先行リポジトリで判明している不具合
 
@@ -45,7 +45,7 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | --- | --- | --- |
 | [sakekasu-kakeibo](https://github.com/yuuuuuuu168/sakekasu-kakeibo) | 0.291.16 | deploy ワークフローが毎回 `migrate-to-cdkd.sh` を呼ぶ。人が打つものは無い |
 | [sakekasu-learning](https://github.com/yuuuuuuu168/sakekasu-learning) | 0.291.16 | 手元で `cdkd-stacks.sh migrate` を打つ |
-| sakekasu-builder | 0.291.31 | deploy ワークフローが `migrate-to-cdkd.sh` を呼ぶ（下の「`deploy.yml` から migrate-to-cdkd.sh を呼ぶ」） |
+| sakekasu-builder | 0.291.31 | deploy ワークフローが毎回 `migrate-to-cdkd.sh` を呼ぶ |
 
 **版を 0.291.16 に揃えなかった。** 他2本が踏んだ不具合のうち1件は 0.291.23 で直っている（[#3701](https://github.com/go-to-k/cdkd/issues/3701) `complete a bare CloudFormation id to the Cloud Control composite identifier`）。16 に固定すると、上流で直っているものに対して回避コードを新しく書くことになる。揃える先は「他2本がたまたま使っていた版」ではなく最新とし、他2本は後から追随して回避を1つ落とせばよい。
 
@@ -138,16 +138,13 @@ GitHub Actions（main への push）
 
 ### Permissions Boundary
 
-アプリのスタックが作るロール全部に `sakekasu-role-boundary` を付けている（`infra/lib/role-boundary.ts`、PR #151 のセキュリティレビューで入れた）。境界は「許可の上限」なので、ロールの実効権限は「自身のポリシー ∩ 境界」になる。デプロイ用ロールが作り替えるロールを通して、権限がデプロイ用ロールの枠の外に広がらないようにするため。境界は `iam:*` と `sts:*` を拒否している。
+ロール名の絞り込みだけでは権限昇格を塞げないため、境界を付けている。
 
-cdkd 側は、権限を増やしうる IAM の API（`CreateRole` / `PutRolePolicy` / `AttachRolePolicy` / `PutRolePermissionsBoundary` など）を `iam:PermissionsBoundary` の条件付きにしてある。境界の無いロールは作れず、境界を外すこともできない。
+アプリのスタックが作るロール全部に `sakekasu-role-boundary` を付けている（`infra/lib/role-boundary.ts`）。境界は「許可の上限」なので、ロールの実効権限は「自身のポリシー ∩ 境界」になる。
 
-条件キーを付ける場所には制約があるので、触るときは注意する。
+cdkd 側は、ロールを作る・権限を足す IAM の API を `iam:PermissionsBoundary` の条件付きにしてある。境界の無いロールは作れず、境界を外すこともできない。
 
-- `iam:PassedToService` は `PassRole` 専用。他のアクションと同じステートメントに入れると、そちらが常に拒否される
-- `iam:PermissionsBoundary` は `CreateRole` / `DeleteRole` / `PutRolePolicy` / `DeleteRolePolicy` / `AttachRolePolicy` / `DetachRolePolicy` / `PutRolePermissionsBoundary` で使える。`TagRole` や `UpdateRole` には効かないので、付けると恒久的な AccessDenied になる
-
-境界を外すのは管理者の仕事で、デプロイ用の identity からは切り離してある。手で外す必要が出たときは、人間様のプロファイルで `cdk deploy sakekasu-github-oidc` を打つ。
+境界を外すのは管理者の仕事で、デプロイ用の identity からは切り離してある。
 
 ## 手順
 
@@ -164,14 +161,11 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc -c github-oidc=
 
 アプリのスタックより先にこれを流す。境界が存在しない状態でアプリをデプロイすると、存在しないポリシーを参照しているとして落ちる。
 
-**`sakekasu-cdkd-deploy` に入れるのは `sakekasu-github-actions-deploy` だけ。** 人間が `AdministratorAccess` で入ろうとしても `sts:AssumeRole` が拒否される。CI 用に絞ったロールなので、手元から cdkd を打つときは `CDKD_ROLE_ARN` を渡さず、自分の権限で直接実行する（手順6・手順7 を参照）。state バケット `cdkd-state-<アプリのアカウント ID>` のバケットポリシーはアカウント外からのアクセスを拒否するだけなので、同一アカウントの管理者なら読み書きできる。
+**`sakekasu-cdkd-deploy` に入れるのは `sakekasu-github-actions-deploy` だけ。** 人間が `AdministratorAccess` で入ろうとしても `sts:AssumeRole` が拒否される。CI 用に絞ったロールなので、手元から cdkd を打つときは `CDKD_ROLE_ARN` を渡さず、自分の権限で直接実行する（手順6・手順7 を参照）。
 
 ### 3.5. アプリの全ロールに境界を付ける
 
-```bash
-AWS_PROFILE=sakekasu-builder npx cdk diff --all -c env=dev
-AWS_PROFILE=sakekasu-builder npx cdk deploy --all -c env=dev
-```
+（実施済み。いまは打たない。cdkd 移行後に cdk deploy を打つと二重作成になる）
 
 13個のロールに `PermissionsBoundary` が付くだけの差分になる。ロールの作り直しは発生しない。
 
@@ -286,7 +280,7 @@ cdkd は削除する名前を**リソースの物理 ID から**作っていて�
 | | 値（`health-global` の例） |
 | --- | --- |
 | IAM 上の名前（`PolicyName`） | `HealthForwarderRoleDefaultPolicy087A304B` |
-| CloudFormation の物理 ID | `sakek-Healt-8lWbKTx3dWdM` |
+| CloudFormation の物理 ID | `<物理 ID>` |
 
 存在しない名前に対する削除なので IAM は `NoSuchEntityException` を返すが、cdkd がこれを「もう無いので成功」として握りつぶし、`✓ deleted <物理ID>` と出す。実体は残ったままフェーズ2 に入り、CFn の CREATE が名前の衝突で落ちる。
 
@@ -308,30 +302,13 @@ CREATE_FAILED: The policy HealthForwarderRoleDefaultPolicy087A304B already exist
 - CFn スタックは `UPDATE_ROLLBACK_COMPLETE`。IMPORT 済みのリソースは入っているが、ポリシーが欠けている
 - cdkd state は手つかずで3リソースとも残る。CFn と cdkd の両方が同じリソースを持つ状態
 
-この状態で `cdkd deploy` を打たない（cdkd 自身も警告を出す）。また、直すまで `infra/**` を main に入れない。`deploy` の `cdk deploy --all` が同じ衝突で落ちる。
+この状態で `cdkd deploy` を打たない（cdkd 自身も警告を出す）。
 
-復旧は CloudFormation 管理に戻す方向で3手。
+2026-10-03 の1回目は、インラインポリシーを名前で消し、`health-global` を CloudFormation に作り直させ、cdkd の古い state を `state orphan` で片付ける3手で CloudFormation 管理に戻した。
 
-```bash
-cd infra
-export AWS_PROFILE=sakekasu-builder
+（実施済み。いまは打たない。cdkd 移行後に cdk deploy を打つと二重作成になる）
 
-# 1. インラインポリシーを名前で消す。ここから 2 が終わるまで権限が落ちる
-aws iam delete-role-policy \
-  --role-name dev-sakekasu-health-forwarder \
-  --policy-name HealthForwarderRoleDefaultPolicy087A304B
-
-# 2. CFn に作り直させる
-npx cdk diff sakekasu-dev-health-global -c env=dev
-npx cdk deploy sakekasu-dev-health-global -c env=dev
-
-# 3. cdkd の古い state を片付ける
-AWS_REGION=us-east-1 npx cdkd state orphan sakekasu-dev-health-global
-```
-
-cdkd のエラーメッセージは `aws cloudformation create-change-set` を手で組む手順を案内するが、`cdk deploy` が同じテンプレートで同じことをするので、普段の道具で済ませてよい。
-
-手順2 の `cdk diff` では、cdkd が IMPORT 用に注入した `DeletionPolicy: Delete` の削除も差分に出る。これは戻って正しい。
+`health-global` のスタックはその後アプリから外したので、この手順を当てる先はもう無い。
 
 ### 7. 既存スタックの取り込み
 
@@ -376,7 +353,7 @@ Summary:  9 imported, 0 not found, 0 unsupported, 0 out of scope, 0 failed   ←
 engine=cdkd
 ```
 
-4スタックとも `CloudFormation stack '...' retired.` まで進み、CloudFormation 側のスタックは残っていない。`identifier_overrides` の手当ては api で2件・auth で3件が `already overridden by --resource` として効いた（`UserPoolUserPoolClient40176907 (ap-northeast-1_eZOfInCT4|3a4unc2dbutrkm2hjn887s1h9m)`、`SakekasuApiED3BBF54 (6mtw5cju3naydf7mxnaoulowta)` など）。
+4スタックとも `CloudFormation stack '...' retired.` まで進み、CloudFormation 側のスタックは残っていない。`identifier_overrides` の手当ては api で2件・auth で3件が `already overridden by --resource` として効いた（`UserPoolUserPoolClient40176907 (<UserPoolId>|<ClientId>)`、`SakekasuApiED3BBF54 (<AppSync API ID>)` など）。
 
 出力に混じった2種類のメッセージは、どちらも想定どおり。
 
@@ -512,7 +489,7 @@ npx cdkd import sakekasu-dev-monitoring -c env=dev --dry-run \
 
 `4 imported, 0 not found, 0 failed` を確かめてから `--dry-run` を外して打つ。`--auto` は付けない。付けると残り48個も解決し直そうとするが、CloudFormation のスタックが無いので物理 ID を引けない型（UserPoolClient / GraphQLApi など）で落ちる。
 
-**教訓として、窓の約束は約束のままだった。** 取り込み中に `infra/**` を main に入れさせない仕掛けは無かった。次に同じことをするなら、取り込みの直前に `infra/**` を触る PR を止める手立てを先に用意する。
+**教訓として、窓の約束は約束のままだった。** デプロイ側で止める歯止めを入れた（下記）。
 
 ### 最初の `cdkd deploy` で何が起きるか
 
@@ -525,7 +502,7 @@ npx cdkd import sakekasu-dev-monitoring -c env=dev --dry-run \
 | アラーム8件の `Dimensions`、HealthCheck と Canary の環境変数、Canary のポリシー | 直値 → `Fn::ImportValue`。解決後の値は同じ |
 | `OcrAvailabilitySloBreach` / `OcrLatencySloBreach` の説明文 | #231 の実変更 |
 
-**デプロイ後に `Fn::ImportValue` の解決を確かめる。** CloudFormation のスタックはもう無いので、cdkd は自分の state から解決する。失敗すると `Dimensions` に `{"Fn::ImportValue": ...}` がそのまま入り、**何も監視していないアラームが静かにできあがる**。アラームは壊れても鳴らないだけで、壊れたことに気づく手立てが無い。
+**デプロイ後に Dimensions の解決を確かめる。** CloudFormation のスタックはもう無いので、cdkd は `Fn::ImportValue` を自分の state から解決する。
 
 ```bash
 aws cloudwatch describe-alarms --region ap-northeast-1 \
@@ -533,7 +510,7 @@ aws cloudwatch describe-alarms --region ap-northeast-1 \
   --query 'MetricAlarms[].[AlarmName,Dimensions]' --output json
 ```
 
-`dev-sakekasu-ocr-analyzer` や `6mtw5cju3naydf7mxnaoulowta` のような実際の値が入っていればよい。`Fn::ImportValue` の文字列が見えたら解決に失敗している。
+`dev-sakekasu-ocr-analyzer` や `<AppSync API ID>` のような実際の値が入っていればよい。`Fn::ImportValue` の文字列が見えたら解決に失敗している。
 
 同じ経路で入れ替わるものが他に3つある。あわせて見る。
 
@@ -541,19 +518,17 @@ aws cloudwatch describe-alarms --region ap-northeast-1 \
 - `SommelierCanaryFunction` の `USER_POOL_ID` / `USER_POOL_CLIENT_ID`
 - `SommelierCanaryFunctionServiceRoleDefaultPolicy` の `cognito-idp:AdminInitiateAuth` のリソース
 
-前者2つは外形監視とカナリアが失敗すれば `WatcherFailure*` アラームで気づけるが、アラーム自身の `Dimensions` には見張り役がいない。
-
 ### 2026-10-03 の初回デプロイの結果
 
 成功した。確かめた3点のうち2つは想定どおり、1つは余の読み違いだった。
 
-**`Fn::ImportValue` は正しく解決された。** アラームの `Dimensions` には実際の値が入っている（`dev-sakekasu-ocr-analyzer` / `6mtw5cju3naydf7mxnaoulowta` / `dev-sakekasu-presigned-url`）。`Fn::ImportValue` の文字列は残っていない。解決後の値が state の直値と同じだったため、cdkd は API を呼ばずに済ませている（`dev-sakekasu-ocr-errors` の `AlarmConfigurationUpdatedTimestamp` が 04:06:53 のまま）。「17 to update」の大半はこれで、実際の書き込みが起きたのは #231 の説明文変更とアセットの張り替えだけだった。
+**`Fn::ImportValue` は正しく解決された。** アラームの `Dimensions` には実際の値が入っている（`dev-sakekasu-ocr-analyzer` / `<AppSync API ID>` / `dev-sakekasu-presigned-url`）。`Fn::ImportValue` の文字列は残っていない。解決後の値が state の直値と同じだったため、cdkd は API を呼ばずに済ませている（`dev-sakekasu-ocr-errors` の `AlarmConfigurationUpdatedTimestamp` が 04:06:53 のまま）。「17 to update」の大半はこれで、実際の書き込みが起きたのは #231 の説明文変更とアセットの張り替えだけだった。
 
 **実変更は適用された。** `dev-sakekasu-ocr-slo-availability` の説明文と Lambda 3本のコードの取得元が 05:14:53 に更新されている。
 
 **文字化けは直らなかった。** 上の「2026-10-03 の drift の結果」を参照。`cdkd drift --revert` が要る。
 
-Lambda の環境変数（`HEALTH_CHECK_TARGETS` / `USER_POOL_ID` / `USER_POOL_CLIENT_ID`）は読み取り専用プロファイルからは確かめられない。`kms:Decrypt` が Permission Set で明示的に拒否されているため、`get-function-configuration` が `Environment.Error` を返す（設計どおり）。外形監視とカナリアが動き続けているかを、メトリクスの発行とアラームの状態で代わりに見る。
+Lambda の環境変数（`HEALTH_CHECK_TARGETS` / `USER_POOL_ID` / `USER_POOL_CLIENT_ID`）は読み取り専用プロファイルからは確かめられない。外形監視とカナリアが動き続けているかを、メトリクスの発行とアラームの状態で代わりに見る。
 
 外形監視はデプロイ後の 05:16 にメトリクスを発行しており、環境変数は壊れていない。カナリアは実行間隔が長く、デプロイ直後の時点では次の実行がまだ来ていなかった。止まれば `WatcherSilentsommeliercanary` が鳴る。デプロイ直後のアラームは27件すべて OK。
 
@@ -743,8 +718,7 @@ pathToFileURL(argv[1])          : .../com%7Eapple%7ECloudDocs/probe.mjs
 | state 無し | 4本すべて残存 | 失敗 | `engine=cfn`（従来どおり。戻して安全） |
 | 4本すべて state あり | 4本すべて退役 | 通さない | `engine=cdkd` |
 
-**`infra/**` を main に入れさせない仕掛けより、こちらが先。** 窓を守りたかった理由は「その状態でデプロイが走ると壊れる」ことだった。デプロイの側で止まるなら、何が main に入ったかに依らず守られる。PR の側で止める仕掛けは、目印の置き忘れで効かなくなる。
-
+**`infra/**` を main に入れさせない仕掛けより、こちらが先。** 窓を守りたかった理由は「その状態でデプロイが走ると壊れる」ことだった。デプロイの側で止まるなら、何が main に入ったかに依らず守られる。
 検査を4件足した（`infra/__tests__/migrate-to-cdkd.test.ts`）。`engine=cfn` の前で state を調べていること、移行済みがあれば止めること、止めるときに `engine=` を書かないこと、`migrated` の展開が bash 3.2 の `set -u` で落ちない書き方であること。歯止めを外す変異・`exit 1` を外す変異・素の配列展開に変える変異のどれでも落ちる。
 
 ### 取り込み済みリソースへの初回更新は改名になる（2026-10-04）
@@ -755,7 +729,7 @@ pathToFileURL(argv[1])          : .../com%7Eapple%7ECloudDocs/probe.mjs
 
 ```
 Resource SignupNotifierFunctionServiceRole180FCFE5 was replaced:
-  sakekasu-dev-auth-SignupNotifierFunctionServiceRole-uF3uXTOrV5Pb
+  <CloudFormation が生成したロール名>
   → sakekasu-dev-auth-SignupNotifierFunctionServiceRole180FCFE5
 ```
 
@@ -767,15 +741,15 @@ Resource SignupNotifierFunctionServiceRole180FCFE5 was replaced:
 Failed to update log group SignupNotifierLogGroupF4C03A83: Invalid resourceArn
 ```
 
-さらに、デプロイロールに `iam:ListInstanceProfilesForRole` が無いため古いロールを削除できず、ロールバックで新しいロールを消すこともできなかった。結果として両方のロールが残り、Lambda は古い方を指したまま動き続けた。
+さらに、デプロイロールでは古いロールを削除できず、ロールバックで新しいロールを消すこともできなかった。結果として両方のロールが残り、Lambda は古い方を指したまま動き続けた。
 
 #### どう収めたか
 
 [6cd964a](https://github.com/yuuuuuuu168/sakekasu-builder/commit/6cd964a82e1972989ba8aca3f94fc21ff56ca366) でタグを revert した。revert 前に `cdkd diff` を取ると `0 to create, 3 to update, 0 to delete` で、置き換えも削除も起きないことが先に分かった。cdkd の state はすでに新しいロールを自分のものとして持っていて、取り残された Lambda と権限ポリシーの参照先をそちらに揃えるだけだった。
 
-**`iam:ListInstanceProfilesForRole` は足さなかった。** あれはロールの削除に要る権限で、足せば置き換えのたびに13個のロールが削除されうる状態になる。無かったことが結果的に安全装置として働いた。
+ロール削除に要る権限は意図して付けていない。
 
-古いロール `sakekasu-dev-auth-SignupNotifierFunctionServiceRole-uF3uXTOrV5Pb` は管理対象から外れて孤児として残っている。誰も使っていないので害は無い。削除は手作業。
+古いロールは管理対象から外れて孤児として残っている。誰も使っていないので害は無い。削除は手作業。
 
 #### 教訓
 
@@ -794,9 +768,8 @@ DevOps Agent の webhook 転送 Lambda が、ログを1行も書けない状態�
 実行ロールに CloudWatch Logs の権限が無かった。
 
 ```
-sakekasu-dev-devops-agent-WebhookForwarderFunctionServi-002870db
+<ロール名>
   AttachedPolicies: []                          ← AWSLambdaBasicExecutionRole が無い
-  インラインポリシー: secretsmanager:GetSecretValue のみ
 ```
 
 合成テンプレートは `ManagedPolicyArns` に `AWSLambdaBasicExecutionRole` を置いている。
@@ -822,7 +795,7 @@ CloudFormation ならロールバックで巻き戻るところだが、cdkd に
 ```sh
 aws iam attach-role-policy \
   --profile sakekasu-builder \
-  --role-name sakekasu-dev-devops-agent-WebhookForwarderFunctionServi-002870db \
+  --role-name <ロール名> \
   --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 ```
 
@@ -849,7 +822,7 @@ state が「作成済み」と言っている以上、差分は出ない。
 `cdkd diff` を打つたびに、先行リポジトリの state を読めないという行が大量に流れる。
 
 ```
-Failed to read state for stack sakekasu-kakeibo-dev-api: Unsupported state schema version 10 ...
+Failed to read state for stack <他アプリのスタック>: Unsupported state schema version 10 ...
   This cdkd binary supports versions 1, 2, 3, 4, 5, 6, 7, 8.
 ```
 
@@ -976,9 +949,7 @@ account <アプリのアカウント ID> (or access is denied). Refusing to use 
 
 あわせて、セキュリティレビュー（PR #151）で挙がった2件をここで入れる。
 
-**合成と差分を分ける。** いまの `cdk-diff.yml` は認証情報を入れたあとに `cdk diff` を走らせている。`--ignore-scripts` は npm のインストール時スクリプトを止めるが、CDK アプリのコードは合成時に実行されるため、PR に AWS SDK の呼び出しを仕込めば認証情報付きで動く。認証情報を入れる前に `npx cdk synth --all -q` を済ませ、そのあとは合成済みのアセンブリだけを読ませる（[#29](https://github.com/yuuuuuuu168/sakekasu-builder/pull/29) の1番）。
-
-**依存の取得元は取得の前に確かめる。** `infra/package-lock.json` は PR で書き換えられるので、`infra/scripts/check-lockfile-registry.mjs` が取得元が npm レジストリだけかを、依存の取得そのものより前に確かめる。ジョブには `id-token: write` があるので、認証ステップの前に置くだけでは足りないため。
+**合成と差分を分ける。** 合成は認証情報より前に済ませ、フォークと Dependabot の PR では diff を走らせない（`cdk-diff.yml` の `if:`）。依存の取得元を確かめる `infra/scripts/check-lockfile-registry.mjs` は、依存の取得そのものより前に置いてある。
 
 **取得元の検査は10本すべてを見る。** 認証情報の有無にかかわらずワークフローが取得・import する lockfile は、infra 本体の1本と lambda ごとの9本。`deploy.yml` は lambda ごとに `npm ci` を回し、`npm test` は `vitest.config` の include が lambda 配下の `__tests__` を拾うので、それらのモジュールと依存が読み込まれる。最初に書いた版は infra 本体しか見ておらず、9本が素通りしていた（PR #230 で aws-security-agent が指摘、HIGH）。
 
@@ -1037,7 +1008,7 @@ builder から外したのは2つ。
 
 一度だけの `cdkd state destroy` を deploy に入れる案もあったが採らなかった。
 
-- **CI のロールでは消せない。** `sakekasu-cdkd-deploy` の IAM の権限（`DeleteRole` / `DeleteRolePolicy`）は `role/sakekasu-*` に絞ってある。転送ロールの名前は `dev-sakekasu-health-forwarder` で、この範囲に入らない。ルールを消したところでロールの削除が AccessDenied になり、deploy が赤くなって state も中途半端に残る
+- **CI のロールでは消せない。**
 - 通すにはデプロイロールの範囲を広げる必要があり、それには OIDC スタックの手動デプロイが要る。一度きりの削除のために、main への push から届く権限を広げるのは割に合わない
 - 一度きりの破壊的な手順を CI に置くと、外し忘れたときに何をするのか読み手に分かりにくい
 
@@ -1078,7 +1049,7 @@ CloudFormation のスタックが無くなるので、コンソールのスタ�
 | 用途 | いままで | これから |
 | --- | --- | --- |
 | 差分の確認 | `cdk diff --all` | `cdkd diff --all` |
-| デプロイ | `cdk deploy --all` | `cdkd deploy --all --yes` |
+| デプロイ | `cdk deploy --all` | main へのマージ（`deploy.yml`） |
 | スタック一覧 | CFn コンソール | `cdkd state list` |
 | リソース一覧 | CFn コンソールのリソースタブ | `cdkd state resources <stack>` |
 | スタックの中身 | CFn のテンプレート | `cdkd state show <stack>` |
@@ -1108,7 +1079,7 @@ aws iam delete-role-policy --role-name <ロール名> --policy-name <論理ID>
 AWS_REGION=<スタックのリージョン> npx cdkd export sakekasu-dev-api
 ```
 
-`AWS_REGION` をスタックのリージョンに合わせるのは `import` と同じ。落ちたときの復旧は手順6 の「戻しがフェーズ2 で落ちたとき」にある。
+`AWS_REGION` をスタックのリージョンに合わせるのは `import` と同じ。落ちたときの状態と復旧の流れは手順6 の「戻しがフェーズ2 で落ちたとき」にある。
 
 `Custom::LogRetention` が残っているスタックは、そのままだと「CFn が IMPORT できない型がある」として中断する。その場合は2フェーズ移行を使う。dev の3スタックからは #129 で消えているので、いまは当たらない。
 
@@ -1137,7 +1108,7 @@ cdkd 自体はまだ 0.x で、公式に「dev/test 用。production-ready で�
 1. エラーメッセージから足りないアクションを特定する
 2. `infra/lib/cdkd-policies.ts` の該当ステートメントに足す
 3. `npx cdk deploy sakekasu-github-oidc -c github-oidc=true` で反映する
-4. `npx cdkd deploy --dry-run --role-arn arn:aws:iam::<アプリのアカウント ID>:role/sakekasu-cdkd-deploy` で確認する
+4. マージ後の deploy で確認する
 
 面倒でも AdministratorAccess を貼らずにこの手順を回す。貼った瞬間に「main への push から到達できる管理者権限」がひとつ増える。
 
