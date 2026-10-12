@@ -771,7 +771,7 @@ cd sommelier/agentcore/cdk
 npm ci && npm test
 ```
 
-同じものを PR とマージのたびに GitHub Actions が走らせる（`.github/workflows/test.yml`）。フロントは lint と型検査も込みで、系統ごとに別のジョブに分けてある。片方が落ちても、もう片方の結果が残るようにするため。
+同じものを PR のたびに GitHub Actions が走らせる（`.github/workflows/test.yml`）。マージ後は deploy 系のワークフローがデプロイの前に同じテストを通す。フロントは lint と型検査も込みで、系統ごとに別のジョブに分けてある。片方が落ちても、もう片方の結果が残るようにするため。
 
 ## デザイン
 

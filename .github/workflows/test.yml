@@ -1,4 +1,4 @@
-# infra/ のテストを PR とマージ時に走らせる（Issue #82 のレビュー指摘）。
+# infra/ のテストを PR で走らせる（Issue #82 のレビュー指摘）。
 #
 # これまで infra のテストは CI のどこでも実行していなかった。cdk-diff は diff を
 # 出すだけ、deploy は deploy するだけで、このリポジトリは無料プランのため
@@ -29,19 +29,13 @@ on:
       - 'tsconfig*.json'
       - 'vite.config.ts'
       - '.github/workflows/**'
-  push:
-    branches: [main]
-    paths:
-      - 'infra/**'
-      - 'src/**'
-      - 'theme/**'
-      - 'sommelier/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'eslint.config.js'
-      - 'tsconfig*.json'
-      - 'vite.config.ts'
-      - '.github/workflows/**'
+
+# PR に続けて push したら、前の実行は打ち切る。結果を見るのは最新のコミットだけなので。
+# main へのマージ後には走らせない。PR の時点で main と混ぜた結果を検査していて、
+# deploy 系のワークフローもデプロイの前に同じ npm test を通すため、二重になる。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
