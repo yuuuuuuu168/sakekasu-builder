@@ -22,8 +22,8 @@ independently. To use a memory or credential from an agent, the application code
    - **Modifying** other fields (descriptions, config) will update the resource **in-place**.
 3. **1:1 Validation:** The schema maps directly to valid CloudFormation. If your JSON conforms to the types in
    `.llm-context/`, it will deploy successfully.
-4. **Resource Removal:** To remove all resources, use `agentcore remove all`. To tear down deployed infrastructure, run
-   `agentcore deploy` after removal — it will detect the empty state and offer a teardown flow.
+4. **Resource Removal:** To remove resources, use `agentcore remove`. Tearing down deployed infrastructure also goes
+   through a merge to `main` (see Deployment below); do not run `agentcore deploy` locally.
 
 ## Directory Structure
 
@@ -90,16 +90,10 @@ deployment options are available.
 
 The `agentcore/cdk/` subdirectory contains an AWS CDK node project.
 
-Deployments of this project are primarily intended to be orchestrated through the `agentcore deploy` command in the CLI.
-
-Alternatively, the project can be deployed directly as a traditional CDK project:
-
-```bash
-cd agentcore/cdk
-npm install
-npx cdk synth   # Preview CloudFormation template
-npx cdk deploy  # Deploy to AWS
-```
+Deployment happens on merge to `main` via `.github/workflows/deploy-sommelier.yml`. Do not deploy from a local
+machine. Note that `npx cdk deploy` inside `agentcore/cdk` runs the CDK app rather than the CDK CLI and silently
+succeeds without deploying anything, and `agentcore deploy` rewrites the project's dependencies. For the rare case that
+needs a manual step, see `docs/operations.md` at the repository root.
 
 ## Editing Schemas
 

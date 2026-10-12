@@ -45,7 +45,6 @@ builder 用クライアントに許されている OAuth スコープは `openid
 
 > 2026-10-04 に `sake.sakekasu-builder.com` へ移るまでは、apex と www（`https://sakekasu-builder.com/`・
 > `https://www.sakekasu-builder.com/`）を登録していた（[sake-subdomain.md](sake-subdomain.md)）。
-Amplify Hosting のプレビュー URL（`*.amplifyapp.com`）は登録していないので、そこからはログインできない。
 
 未サインインでアプリを開くと、ボタンを押させずにマネージドログインへ自動で送る（タブごとに一度だけ）。
 送る前に sessionStorage へ印を置き、戻ってきてもまだ未サインイン（取り消した、`?error=` 付きで戻った等）なら
@@ -63,9 +62,11 @@ Amplify Hosting のプレビュー URL（`*.amplifyapp.com`）は登録してい
 
 ## 旧ユーザープール（`sakekasu-dev-auth`）を外す（2 段）
 
-データの付け替え（下の「データの付け替え」）が済み、利用者（本人）が旧プールを消してよいと判断したので外す。
-プールは RETAIN で、スタックは cdkd の管理下にある。プールを消すと旧 sub は二度と戻らないので、
-共通ログインへの切り替えを revert して旧プールへ戻す道はここで閉じる。
+2 段とも済み、旧プールは消してある。この節は外したときの手順の記録。
+
+データの付け替え（下の「データの付け替え」）が済み、利用者（本人）が旧プールを消すと判断したので外した。
+プールは RETAIN で、スタックは cdkd の管理下にあった。プールを消すと旧 sub は二度と戻らないので、
+共通ログインへの切り替えを revert して旧プールへ戻す道はここで閉じた。
 
 外す順番は「読む側から参照を外す → 次のデプロイで読まれる側を外す」の 2 段。
 監視スタック（`sakekasu-dev-monitoring`）が auth の Export（ユーザープール ID とカナリア用クライアント ID）を
@@ -165,7 +166,7 @@ state にしか無いスタックには触らない（0.291.31。health-global �
 
 | 論理 ID | 型 | 名前 | `state destroy` で |
 | --- | --- | --- | --- |
-| `UserPool6BA7E5F2` | `AWS::Cognito::UserPool` | `dev-sakekasu-userpool`（`ap-northeast-1_eZOfInCT4`） | **残る**（Retain）。手順 5 で消す |
+| `UserPool6BA7E5F2` | `AWS::Cognito::UserPool` | `dev-sakekasu-userpool`（`<旧プール ID>`） | **残る**（Retain）。手順 5 で消す |
 | `UserPoolUserPoolClient40176907` | `AWS::Cognito::UserPoolClient` | `dev-sakekasu-client` | 消える |
 | `UserPoolCanaryUserPoolClientD962CFED` | `AWS::Cognito::UserPoolClient` | `dev-sakekasu-canary-client` | 消える |
 | `UserPoolPostConfirmationCognito0E6001F8` | `AWS::Lambda::Permission` | トリガーの呼び出し許可 | 消える |
@@ -202,7 +203,7 @@ npx cdkd state show sakekasu-dev-auth --json \
 
 # 2. プールの中身を確かめる。Name が dev-sakekasu-userpool、DeletionProtection が INACTIVE、
 #    Domain と CustomDomain が null であること
-aws cognito-idp describe-user-pool --user-pool-id ap-northeast-1_eZOfInCT4 \
+aws cognito-idp describe-user-pool --user-pool-id <旧プール ID> \
   --query 'UserPool.{Name:Name,DeletionProtection:DeletionProtection,Domain:Domain,CustomDomain:CustomDomain,Users:EstimatedNumberOfUsers}'
 
 # 3. スタックを消す。リソースを消してから state も消す。確認を訊かれたら y
@@ -212,8 +213,8 @@ npx cdkd state destroy sakekasu-dev-auth --stack-region ap-northeast-1
 npx cdkd state list
 
 # 5. 残ったユーザープールを消す。ここで旧 sub は二度と戻らなくなる
-aws cognito-idp delete-user-pool --user-pool-id ap-northeast-1_eZOfInCT4
-aws cognito-idp describe-user-pool --user-pool-id ap-northeast-1_eZOfInCT4   # ResourceNotFoundException
+aws cognito-idp delete-user-pool --user-pool-id <旧プール ID>
+aws cognito-idp describe-user-pool --user-pool-id <旧プール ID>   # ResourceNotFoundException
 
 # 6. 残ったロググループを消す（新規登録通知と、1 段目で外したカナリアのもの）
 aws logs delete-log-group --log-group-name /aws/lambda/dev-sakekasu-signup-notifier
@@ -221,9 +222,9 @@ aws logs delete-log-group --log-group-name /aws/lambda/dev-sakekasu-sommelier-ca
 ```
 
 手順 2 で `Domain` か `CustomDomain` に値があったら、5 の前に
-`aws cognito-idp delete-user-pool-domain --user-pool-id ap-northeast-1_eZOfInCT4 --domain <その値>` で外す。
+`aws cognito-idp delete-user-pool-domain --user-pool-id <旧プール ID> --domain <その値>` で外す。
 `DeletionProtection` が `ACTIVE` だったら、5 の前に
-`aws cognito-idp update-user-pool --user-pool-id ap-northeast-1_eZOfInCT4 --deletion-protection INACTIVE` で外す
+`aws cognito-idp update-user-pool --user-pool-id <旧プール ID> --deletion-protection INACTIVE` で外す
 （`update-user-pool` は渡さなかった設定を既定に戻すが、直後に消すので構わない）。
 
 3 が途中で落ちたら state は残るので、原因を直してもう一度 3 を打てばよい。同じリソースで落ち続けるときに限り、
@@ -240,7 +241,7 @@ export AWS_PROFILE=sakekasu-builder AWS_REGION=ap-northeast-1
 # 7. 取り残されたロール。全スタックへのタグ付け（#245）で cdkd が新しい名前のロールを作ったときに
 #    管理から外れたもの（cdkd-migration.md の「取り込み済みリソースへの初回更新は改名になる」）。
 #    get-role が NoSuchEntity なら何もしなくてよい
-role=sakekasu-dev-auth-SignupNotifierFunctionServiceRole-uF3uXTOrV5Pb
+role='sakekasu-dev-auth-SignupNotifierFunctionServiceRole-<サフィックス>'
 aws iam get-role --role-name "$role" --query 'Role.{Name:RoleName,LastUsed:RoleLastUsed}'
 for arn in $(aws iam list-attached-role-policies --role-name "$role" \
     --query 'AttachedPolicies[].PolicyArn' --output text); do
@@ -250,29 +251,21 @@ for name in $(aws iam list-role-policies --role-name "$role" --query 'PolicyName
   aws iam delete-role-policy --role-name "$role" --policy-name "$name"
 done
 aws iam delete-role --role-name "$role"
-
-# 8. カナリアの監視ユーザーの認証情報（Secrets Manager）。まず同じ置き場に他に何があるかを見る
-aws secretsmanager list-secrets --filters Key=name,Values=dev-sakekasu/monitoring/ \
-  --query 'SecretList[].{Name:Name,LastAccessed:LastAccessedDate}' --output table
-aws secretsmanager delete-secret --secret-id dev-sakekasu/monitoring/canary-user \
-  --recovery-window-in-days 7
 ```
 
-8 は 7 日間は `aws secretsmanager restore-secret --secret-id dev-sakekasu/monitoring/canary-user` で戻せる。
-一覧にカナリア用の別の秘密（以前の名前など）が出たら、それも同じように消す。Slack の Webhook URL は
-SSM パラメータ（`/dev-sakekasu/monitoring/slack-webhook-url`）なので、この一覧には出ない（2026-10 に builder の Slack 通知を共通基盤へ寄せてからは使っていない）。
+カナリアの監視ユーザーの認証情報と、builder の Slack 通知が使っていた設定も、このとき消した。
 
 #### 旧 sub の下の画像を消す
 
-付け替えでは旧 sub（`e7d42a18-6071-70f4-dbe2-8f67cb896483`）の下の画像を新 sub（`37c47a88-30a1-7052-0fe7-98ec1af2d32e`）の下へ写し、旧キーは残した。
-旧プールを消すと旧 sub で開ける人はいなくなるので、消してよい。先に、写し漏れが無いことを確かめる。
+付け替えでは旧 sub の下の画像を新 sub の下へ写し、旧キーは残した。
+旧プールを消すと旧 sub で開ける人はいなくなるので、旧キーも消す。消す前に、写し漏れが無いことを確かめる。
 
 ```bash
 cd "$(mktemp -d)"   # キーの一覧を書き出す作業場所
 export AWS_PROFILE=sakekasu-builder AWS_REGION=ap-northeast-1
 bucket=dev-sakekasu-images
-old=e7d42a18-6071-70f4-dbe2-8f67cb896483
-new=37c47a88-30a1-7052-0fe7-98ec1af2d32e
+old='<旧 sub>'
+new='<新 sub>'
 
 # 9-1. 旧 sub と新 sub の下のキーを、sub を外した形で並べる。
 #      {sub}/tmp/ は 1 日で消える一時領域で写していないので、旧の側から外す
@@ -324,35 +317,9 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc -c github-oidc=
 打たなくても困らない。デプロイ済みのロールが広いままになるだけで、アプリのデプロイは通る。
 diff に `ManageCognitoUserPools` の削除と `ReadCognitoUserPools` の追加以外が出たら、デプロイせずに止まる。
 
-## カナリア（ソムリエとの実会話の監視）は消した
+## カナリア
 
-カナリアは監視用ユーザーでパスワードを使って直接サインインし（`ADMIN_USER_PASSWORD_AUTH`）、
-ソムリエに短い相談を投げていた。共通ログインではこれができない。
-
-- builder 用クライアントは `authFlows` が空で、パスワードによる直接の認証を受け付けない
-- 共通プールは MFA 必須なので、パスワードだけではトークンが出ない
-- ソムリエの Runtime の JWT Authorizer が見られるプールは 1 つだけ（`discoveryUrl`）。
-  共通プールに切り替えると、旧プールでサインインしたカナリアのトークンは必ず 401/403 になる
-
-共通ログインへ移ったときはいったん止め（スケジュールを無効にし、アラームの通知を切る）、
-旧プールを外す 1 段目でコード（`infra/lambda/sommelier-canary`）ごと消した。止めたまま残すと、
-旧プールのユーザーと Export を読み続けるので、旧プールを外せない。
-
-ソムリエの外形監視（認証なしで叩いて 401/403 が返ることを見る）と、認証拒否・システムエラーの
-アラームは残っている。無くなったのは「実際に会話できるか」の確認だけ。
-
-作り直すなら、共通ログイン側（sakekasu-integrated_environment）の変更が要る。このリポジトリだけでは直せない。選択肢:
-
-1. **共通プールにカナリア用のクライアントを足す**（`ADMIN_USER_PASSWORD_AUTH` のみ。ブラウザ向けとは分ける）。
-   MFA 必須なので、カナリアは `SOFTWARE_TOKEN_MFA` のチャレンジに TOTP コードで答える必要がある。
-   監視ユーザーの TOTP の秘密鍵を Secrets Manager に置き、Lambda でコードを計算して `AdminRespondToAuthChallenge` を返す。
-   ソムリエの `allowedClients` と `COGNITO_APP_CLIENT_ID` にそのクライアントを足す（以前と同じ 2 か所）
-2. **M2M（client credentials）のクライアントを足す**。ユーザーも MFA も要らないが、トークンに利用者の sub が無い
-   （sub がクライアント ID になる）。ソムリエ側で「記録を持たない利用者」として扱えるか確かめる必要があり、
-   M2M のトークン発行は課金対象。リソースサーバーとカスタムスコープも要る
-
-以前の実装（Lambda、アラーム、テスト）は git の履歴にある。1 段目の PR を revert するのではなく、
-選んだ方式に合わせて書き直す。
+カナリアは共通ログインへの移行時に削除した。
 
 ## データの付け替え（旧 sub → 新 sub）
 
@@ -379,7 +346,7 @@ DynamoDB の主キーは `id` だけで、`owner` は通常の属性。だから
 
 付け替えは済んだ。スクリプト（`infra/scripts/migrate_owner_sub.py`）を Mac から管理者権限で流し、
 
-- S3: 旧 sub（`e7d42a18-6071-70f4-dbe2-8f67cb896483/`）の下の 648 件を、新 sub（`37c47a88-30a1-7052-0fe7-98ec1af2d32e/`）の下へ写した。旧キーは残した
+- S3: 旧 sub の下の 648 件を、新 sub の下へ写した。旧キーは残した
 - DynamoDB: 2 つのテーブルの `owner` と `imageKey` / `imageKeys` を新 sub に書き換えた
 
 スクリプトとテストは、旧プールを外す 2 段目で消した（git の履歴にある）。旧プールを消したあとは、

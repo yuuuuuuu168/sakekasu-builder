@@ -91,6 +91,13 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
     // IAM の接頭辞は `application-signals`（ハイフンあり）。CloudFormation の型名や CDK の
     // モジュール名につられて `applicationsignals:` と書くと、IAM は黙って何も許さない。
     // 2026-10 まではその綴りで、この文も下の Deny も効いていなかった
+    //
+    // 列挙は CloudFormation の型の handlers.*.permissions（`aws cloudformation describe-type
+    // --type-name AWS::ApplicationSignals::ServiceLevelObjective`）に合わせる。SLO の更新ハンドラは
+    // 除外ウィンドウ（ListServiceLevelObjectiveExclusionWindows / BatchUpdateExclusionWindows）と
+    // RUM の定義も読み書きしにいく。2026-10-11 にタグを足すだけの更新が
+    // ListServiceLevelObjectiveExclusionWindows の AccessDenied で4つとも落ちた。
+    // RUM の2つは読み取りだけで、SLI に RUM を使わない限り中身は何も返らない
     new iam.PolicyStatement({
       sid: 'ManageServiceLevelObjectives',
       actions: [
@@ -102,6 +109,10 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
         'application-signals:TagResource',
         'application-signals:UntagResource',
         'application-signals:ListTagsForResource',
+        'application-signals:ListServiceLevelObjectiveExclusionWindows',
+        'application-signals:BatchUpdateExclusionWindows',
+        'rum:GetAppMonitor',
+        'rum:BatchGetRumMetricDefinitions',
       ],
       resources: ['*'],
     }),
@@ -243,8 +254,8 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
     //
     // 権限を書き換える系の API は、対象ロールに Permissions Boundary が
     // 付いていることを条件にする。境界の無いロールは作れず、境界の付いた
-    // ロールに管理者相当を書き込んでも実効権限は境界で頭打ちになるため、
-    // 「ロールに書き込む → その権限で動かす」という昇格の連鎖が切れる。
+    // ロールの実効権限は境界で頭打ちになるため、作り替えたロールを通して
+    // 権限がこのポリシーの外に広がらない。
     //
     // 条件を付けられるのは iam:PermissionsBoundary に対応したアクションだけ。
     // TagRole などに付けると、キーが渡らないため常に不一致となり
@@ -270,10 +281,8 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
     // 渡らないアクションなので条件は付けられない。
     //
     // iam:UpdateAssumeRolePolicy はここに入れてはいけない。信頼ポリシーを
-    // まるごと書き換える API で、「誰がそのロールになれるか」を変えられる。
-    // 外部のアカウントを信頼先に足せば、そのロールの権限をそのまま使える。
-    // 境界は iam と sts しか拒否しないので、たとえば OCR 関数のロールを
-    // 乗っ取れば DynamoDB の記録や S3 の画像に届いてしまう。
+    // まるごと書き換える API で、「誰がそのロールになれるか」を決める。
+    // 信頼ポリシーは境界とは別に守る。
     //
     // cdkd がこれを必要とするのは、CDK 側で assumedBy を変えたときだけ。
     // 起きたら AccessDenied で止まるので、そのときは人間が手で直す
@@ -484,9 +493,7 @@ function siteDeliveryStatements(siteZone: string): iam.PolicyStatement[] {
         },
       },
     }),
-    // いまは使っていない。証明書は cdkd では作れず、コンソールで作ることにした
-    // （site-stack.ts の冒頭）。外すと OIDC スタックの手動更新が要るので、次に
-    // そのスタックを更新するときにまとめて外す
+    // 証明書は cdkd では作れないため、コンソールで作っている（site-stack.ts の冒頭）
     new iam.PolicyStatement({
       sid: 'ManageSiteCertificate',
       actions: [
@@ -500,8 +507,8 @@ function siteDeliveryStatements(siteZone: string): iam.PolicyStatement[] {
       ],
       resources: ['*'],
     }),
-    // ResponseHeadersPolicy は cdkd の対応表に無く Cloud Control API で作られる
-    // （docs/amplify-exit.md）。その先で cloudfront の API が呼ばれるので、ここで許可する
+    // ResponseHeadersPolicy は cdkd の対応表に無く Cloud Control API で作られる。
+    // その先で cloudfront の API が呼ばれるので、ここで許可する
     new iam.PolicyStatement({
       sid: 'ManageSiteDistribution',
       actions: [
@@ -560,6 +567,8 @@ export function cdkdDiffStatements(account: string): iam.PolicyStatement[] {
         'application-signals:GetServiceLevelObjective',
         'application-signals:ListServiceLevelObjectives',
         'application-signals:ListTagsForResource',
+        // 読み取りハンドラも除外ウィンドウを読む（デプロイロールの ManageServiceLevelObjectives を参照）
+        'application-signals:ListServiceLevelObjectiveExclusionWindows',
         'appsync:Get*',
         'appsync:List*',
         'lambda:Get*',

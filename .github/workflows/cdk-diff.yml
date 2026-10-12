@@ -28,7 +28,7 @@ env:
 
 jobs:
   diff:
-    # 本人が push した PR だけで走らせる（Issue sakekasu-builder-archive#131）。
+    # 本人が push した PR だけで走らせる（sakekasu-builder#29）。
     #
     # フォークからの PR には GitHub が OIDC トークンを渡さないので、走っても AWS には
     # 入れず落ちるだけ。条件で先に外し、赤い diff を残さない。
@@ -56,17 +56,13 @@ jobs:
           cache-dependency-path: infra/package-lock.json
       # 依存の取得元がレジストリだけかを、取得より前に確かめる。
       #
-      # lockfile は PR が書き換えられる。resolved を自前のターゲットへ向けて
-      # 整合性ハッシュをそれに合わせると、認証後に動く cdkd 自体が PR のコードに
-      # なる（aws-security-agent の指摘）。版を上げる PR は resolved が
-      # レジストリのまま変わるだけなので、この検査では止まらない。
-      # 塞げない範囲はスクリプトのコメントと Issue #131 にある
+      # lockfile は PR で書き換えられるので、取得元がレジストリ以外を指していないかを
+      # 見る（aws-security-agent の指摘）。
       - name: 依存の取得元を確かめる
         run: node scripts/check-lockfile-registry.mjs
       # 依存の取得は AWS の認証情報を入れる前に済ませる（deploy.yml と同じ理由）。
-      # このワークフローは PR のブランチをそのまま checkout するので、lock を
-      # 差し替えた PR を出せばインストール時スクリプトを走らせられる。認証後だと
-      # そのスクリプトが diff ロールのセッショントークンを読める
+      # このワークフローは PR のブランチをそのまま checkout するので、インストール時
+      # スクリプトが diff ロールの認証情報に触れないようにする
       - run: npm ci --ignore-scripts
       # 合成で Lambda をバンドルするのに要る。@aws-sdk/* は実行環境にあるので
       # バンドルから外しているが、Claude API の SDK（lambda/shared の
@@ -85,10 +81,6 @@ jobs:
       # CDK アプリのコードは合成時に実行される。認証後に合成すると、PR に
       # 仕込んだ AWS SDK の呼び出しが diff ロールの認証情報付きで動いてしまう。
       # 合成を先に済ませ、以降は CDKD_APP=cdk.out でこの成果物だけを読ませる。
-      #
-      # 消えるのは「合成時にアプリのコードが走る」経路だけ。lockfile は PR が
-      # 書き換えられるので、認証後に動く cdkd 自体が PR 由来である点は残る
-      # （Issue #131 の1番。この順序替えは部分的な対処）
       - name: 合成
         # CDK_DEFAULT_ACCOUNT は本来 CDK CLI が認証情報から入れる。認証前に
         # 合成するとこれが undefined になり、bin/app.ts の env.account が

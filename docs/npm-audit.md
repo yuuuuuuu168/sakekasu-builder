@@ -1,6 +1,6 @@
 # npm の脆弱性への対応
 
-`npm audit` の結果と、直さずに残しているものの理由。2026-10-04 時点。
+`npm audit` への対応の記録。2026-10-04 時点。
 
 ## どこに入るか
 
@@ -32,8 +32,7 @@ Lambda のバンドルも esbuild 0.28 で中身が同一だった。
 ### shadcn を依存から外した理由
 
 画面が `shadcn` パッケージから読んでいたのは `shadcn/tailwind.css`（カスタムバリアントとキーフレームだけの CSS）だけだった。
-一方で CLI 本体は `fast-glob` → `micromatch` → `braces` を引いており、`braces` には修正版が出ていない。
-CSS を `src/styles/shadcn-tailwind.css` に写してパッケージを外した。ビルド後の CSS はハッシュまで同一。
+CLI 本体の依存が audit の指摘の多くを占めていたので、CSS を `src/styles/shadcn-tailwind.css` に写してパッケージを外した。ビルド後の CSS はハッシュまで同一。
 コンポーネントを足すときは `npx shadcn@latest add <名前>` を使う（依存に入れなくても動く）。
 CLI が `src/index.css` に `@import "shadcn/tailwind.css";` を書き足したら、その行は消す。
 
@@ -42,18 +41,6 @@ CLI が `src/index.css` に `@import "shadcn/tailwind.css";` を書き足した�
 Node.js 22 同梱の npm 10.9 では、ルートと `infra/` の `npm audit fix` / `npm install <名前>` が
 `Cannot read properties of null (reading 'edgesOut')` で止まる。`npx npm@11 audit fix` なら通る。
 lock の形式（lockfileVersion 3）は同じで、CI の `npm ci`（npm 10）はそのまま入る。
-
-## 残しているもの
-
-どれも開発・デプロイのときにしか動かず、外から入力が届かない。
-
-| 場所 | パッケージ | 残す理由 |
-| --- | --- | --- |
-| `infra/` | `braces`、`micromatch`、`fast-glob`、`@aws-cdk/cdk-assets-lib`、`@aws-cdk/toolkit-lib`、`cdk-local`、`@go-to-k/cdkd`（7 件） | すべて cdkd の依存。`braces` は修正版が無い。audit の提案は cdkd 0.169.0 への巻き戻しで、デプロイの挙動が変わるため取らない。overrides で動かすのも同じ理由で避ける。glob に渡るのはリポジトリ内の固定パターンと `cdk.out` のパスだけで、DoS を起こす入れ子のパターンが外から入る経路が無い |
-| `infra/`、`sommelier/agentcore/cdk` | `brace-expansion`（`aws-cdk-lib` 同梱。infra は 5.0.9、sommelier は 5.0.6） | `aws-cdk-lib` に bundled されているため overrides が効かない。最新の 2.272.0 でもまだ 5.0.9。合成時に CDK が自分の asset の除外パターンを展開するのに使うだけ。`aws-cdk-lib` が上がったら消える |
-
-sommelier の `aws-cdk-lib`（~2.261）は上げていない。上げても同梱の `brace-expansion` が直らず、
-デプロイされる中身だけが変わるため。
 
 ## 取り直し方
 

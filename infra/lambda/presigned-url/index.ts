@@ -74,15 +74,6 @@ interface AppSyncEvent {
 interface UploadUrlResponse {
   uploadUrl: string;
   key: string;
-  /**
-   * この URL で付与されるタグ（一時領域以外では null）。
-   *
-   * 参考情報として返すだけで、クライアントはヘッダに載せてはいけない。
-   * SDK はタグを署名済み URL のクエリ（`x-amz-tagging`）に入れるため、
-   * ヘッダでも送ると二重指定になり S3 が 403 を返す（実機で確認済み）。
-   * 値の確認や運用調査のために残している
-   */
-  taggingHeader: string | null;
 }
 
 /** そのキーがサムネイルを指しているか */
@@ -202,7 +193,7 @@ function assertNewUploadFileName(fileName: string): void {
 }
 
 /**
- * アップロードする大きさを検証する（Issue sakekasu-builder-archive#173）。
+ * アップロードする大きさを検証する（sakekasu-builder#30・#31）。
  *
  * 検証した値は `ContentLength` として署名に含める。SDK はこれを
  * `content-length` の署名対象ヘッダにするので、クライアントは申告した大きさで
@@ -239,7 +230,7 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
 
   // 必須の判定はここで行う。大きさの無い URL は S3 の上限（5TB）まで置けてしまう。
   // スキーマは Int のまま（理由は schema.graphql の fileSize の説明）
-  // （Issue sakekasu-builder-archive#173）
+  // （sakekasu-builder#30・#31）
   if (fileSize === undefined || fileSize === null) {
     throw new Error('Missing required argument: fileSize');
   }
@@ -268,7 +259,7 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
     expiresIn: UPLOAD_EXPIRY,
   });
 
-  return { uploadUrl, key, taggingHeader: temporary ? TEMP_OBJECT_TAGGING : null };
+  return { uploadUrl, key };
 }
 
 /** 1 件分のダウンロード用 Presigned URL を作る（所有者チェック込み） */

@@ -32,18 +32,10 @@ agentcore dev
 
 ### Deployment
 
-Deploy to AWS:
-
-```bash
-agentcore deploy
-```
-
-Or use CDK directly:
-
-```bash
-cd agentcore/cdk
-npx cdk deploy
-```
+Deployment happens on merge to `main` via `.github/workflows/deploy-sommelier.yml`. Do not deploy from a local
+machine. Note that `npx cdk deploy` inside `agentcore/cdk` runs the CDK app rather than the CDK CLI and silently
+succeeds without deploying anything, and `agentcore deploy` rewrites the project's dependencies. For the rare case that
+needs a manual step, see `docs/operations.md` at the repository root.
 
 ## Configuration
 
@@ -61,7 +53,7 @@ The project uses a **flat resource model** where agents, memories, and credentia
 | `agentcore add`      | Add resources (agent, memory, credential, target) |
 | `agentcore remove`   | Remove resources                                |
 | `agentcore dev`      | Run agent locally                               |
-| `agentcore deploy`   | Deploy to AWS                                   |
+| `agentcore deploy`   | Not used here: rewrites dependencies; deploys go through CI on merge to `main` |
 | `agentcore status`   | Show deployment status                          |
 | `agentcore invoke`   | Invoke agent (local or deployed)                |
 | `agentcore package`  | Package agent artifacts                         |

@@ -338,8 +338,7 @@ describe('GithubOidcStack', () => {
     const statements = statementsFor(template, /^CdkdDeployRole/);
 
     // 権限を増やしうる IAM の API は、すべて境界の条件付きでなければならない。
-    // 1つでも素通しがあると、Lambda の実行ロールに管理者相当を書き込んで
-    // その関数を呼ぶ、という昇格の連鎖が通ってしまう
+    // 1つでも条件の無いものがあると、境界で権限を頭打ちにする前提が崩れる
     const escalating = [
       'iam:CreateRole',
       'iam:PutRolePolicy',
@@ -389,10 +388,8 @@ describe('GithubOidcStack', () => {
   it('cdkd のデプロイロールは信頼ポリシーを書き換えられない', () => {
     const statements = statementsFor(template, /^CdkdDeployRole/);
 
-    // 信頼ポリシーを書き換えられると「誰がそのロールになれるか」を変えられる。
-    // 外部アカウントを信頼先に足してロールを乗っ取れば、境界が拒否しない
-    // DynamoDB や S3 には届いてしまう。iam:PermissionsBoundary はこの
-    // アクションに渡らないため、条件で縛ることもできない
+    // 信頼ポリシーは「誰がそのロールになれるか」を決めるもので、境界とは別に守る。
+    // iam:PermissionsBoundary はこのアクションに渡らないため、条件では縛れない
     expect(allows(statements, 'iam:UpdateAssumeRolePolicy')).toBe(false);
 
     // 「Allow に無い」だけだと、誰かが Allow を広げた瞬間に消える。
@@ -449,6 +446,27 @@ describe('GithubOidcStack', () => {
     expect(allows(statements, 'application-signals:TagResource')).toBe(true);
   });
 
+  // SLO の作成・更新ハンドラは除外ウィンドウも読み書きする（CloudFormation の型の
+  // handlers.update.permissions）。2026-10-11 にタグを足すだけの更新がここで AccessDenied になった
+  it('cdkd のデプロイロールは SLO の更新ハンドラが要る権限を全部持つ', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+
+    for (const action of [
+      'application-signals:UpdateServiceLevelObjective',
+      'cloudwatch:GetMetricData',
+      'application-signals:TagResource',
+      'application-signals:UntagResource',
+      'application-signals:GetServiceLevelObjective',
+      'application-signals:ListTagsForResource',
+      'application-signals:ListServiceLevelObjectiveExclusionWindows',
+      'application-signals:BatchUpdateExclusionWindows',
+      'rum:GetAppMonitor',
+      'rum:BatchGetRumMetricDefinitions',
+    ]) {
+      expect(allows(statements, action), `${action} が許可されていない`).toBe(true);
+    }
+  });
+
   // サービス検出はアカウントに1つの設定で、スタックから外して守っている。
   // 一度これを消しかけてソムリエの可観測性を道連れにしている。
   // application-signals:* にすると IAM の側から素通りで触れてしまう
@@ -471,6 +489,8 @@ describe('GithubOidcStack', () => {
 
     expect(allows(statements, 'application-signals:GetServiceLevelObjective')).toBe(true);
     expect(allows(statements, 'application-signals:ListServiceLevelObjectives')).toBe(true);
+    // 読み取りハンドラ（handlers.read.permissions）も除外ウィンドウを読む
+    expect(allows(statements, 'application-signals:ListServiceLevelObjectiveExclusionWindows')).toBe(true);
   });
 
   // diff ロールは読み取り専用。SLO も例外ではない
@@ -481,6 +501,7 @@ describe('GithubOidcStack', () => {
       'application-signals:CreateServiceLevelObjective',
       'application-signals:UpdateServiceLevelObjective',
       'application-signals:DeleteServiceLevelObjective',
+      'application-signals:BatchUpdateExclusionWindows',
       'application-signals:StartDiscovery',
     ]) {
       expect(allows(statements, action), `${action} が許可されている`).toBe(false);

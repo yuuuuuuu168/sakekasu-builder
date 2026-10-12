@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * 公開リポジトリに AWS アカウント ID を書き戻さないための見張り
- * （Issue sakekasu-builder-archive#106）。
+ * （sakekasu-builder#32）。
  *
  * 本物の ID はここにも書けないので、「許したもの以外の 12 桁の数字があれば落とす」形にする。
  * アカウント ID が要る場所は、Actions では secrets.AWS_ACCOUNT_ID、CDK では

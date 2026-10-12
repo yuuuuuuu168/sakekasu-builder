@@ -4,7 +4,7 @@
 
 ## 機能
 
-ここに載っているものはすべて実装済み。これから作るものは [GitHub Issue](https://github.com/yuuuuuuu168/sakekasu-builder/issues) で管理している。
+ここに載っているものはすべて実装済み。
 
 ### 記録する
 
@@ -17,7 +17,7 @@
 | 飲みきりステータス管理 | 未開封 / 飲み中 / 飲みきり。まとめ買いは1本ずつ飲みきれる |
 | 開封後経過日数の表示 | 飲み中のカードに「開封から◯日」を出す |
 | 購入記録からの飲酒登録連携 | 「これを飲む」で在庫と飲酒記録が紐づく |
-| 詳細スペックの記録 | 蔵元・産地・度数・容量・精米歩合・日本酒度・酸度・アミノ酸度・酒米・酵母・特定名称・紹介文。全項目任意で、フォームでは折りたたみ（[#87](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/87)） |
+| 詳細スペックの記録 | 蔵元・産地・度数・容量・精米歩合・日本酒度・酸度・アミノ酸度・酒米・酵母・特定名称・紹介文。全項目任意で、フォームでは折りたたみ（[60ff478](https://github.com/yuuuuuuu168/sakekasu-builder/commit/60ff4784d9d18a9661fa48a47b150263f08041f6)） |
 
 ### 見つける・振り返る
 
@@ -26,22 +26,22 @@
 | 購入・飲酒記録の一覧表示 | |
 | 検索・フィルタ | キーワード横断検索（蔵元・産地・酒米・酵母も対象）・評価フィルタ・価格帯フィルタ・日付範囲フィルタ・条件の保持・表記ゆれ吸収 |
 | 在庫本数サマリー | 一覧上部にウイスキー・日本酒の在庫本数を表示 |
-| 統計ダッシュボード | 月別飲酒量・カテゴリ別支出・お気に入り TOP。記録数が少なく実データでの表示確認は未実施 |
-| カレンダー表示 | 飲んだ日・買った日をドットで可視化（[#46](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/46)） |
+| 統計ダッシュボード | 月別飲酒量・カテゴリ別支出・お気に入り TOP |
+| カレンダー表示 | 飲んだ日・買った日をドットで可視化（[ba52551](https://github.com/yuuuuuuu168/sakekasu-builder/commit/ba5255112b3ef6b0e90ff95864fd26705cd63a9f)） |
 | リピート判定リマインド | 購入時に同じ銘柄の過去評価を出す |
 
 ### AI
 
 | 機能 | 補足 |
 |------|------|
-| ラベル画像の OCR | 銘柄名・カテゴリに加え、裏ラベルの詳細スペック12項目を抽出。項目ごとの確信度つきで、低確信の項目は入力欄に「要確認」を出す（[#88](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/88)）。既存の記録は一覧から、付いている写真をまとめて読み取れる |
+| ラベル画像の OCR | 銘柄名・カテゴリに加え、裏ラベルの詳細スペック12項目を抽出。項目ごとの確信度つきで、低確信の項目は入力欄に「要確認」を出す（[60ff478](https://github.com/yuuuuuuu168/sakekasu-builder/commit/60ff4784d9d18a9661fa48a47b150263f08041f6)）。既存の記録は一覧から、付いている写真をまとめて読み取れる |
 | テイスティングノートの自動記載 | 購入登録の時点で備考に書き足す。ウイスキーは飲み方も。知らない銘柄は Tavily で調べてから書く。既存の記録は一覧から一括で追記できる |
-| 写真1枚で購入登録 | 画像を選ぶと自動で OCR が走る。価格・店名は手入力（[#49](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/49)） |
-| ソムリエ相談 | 在庫相談・ペアリング・銘柄レコメンド・酒知識 Q&A（[#51](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/51)） |
-| ソムリエへの写真添付 | 店の棚や品書きの写真から、好みに合う1〜3本を選んでもらう（[#44](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/44)） |
+| 写真1枚で購入登録 | 画像を選ぶと自動で OCR が走る。価格・店名は手入力（[c57a1f9](https://github.com/yuuuuuuu168/sakekasu-builder/commit/c57a1f94031622a95e1f354d478ba0d498530c7c)） |
+| ソムリエ相談 | 在庫相談・ペアリング・銘柄レコメンド・酒知識 Q&A（[ca3759a](https://github.com/yuuuuuuu168/sakekasu-builder/commit/ca3759abb71702f8a20d9e1bac110e977e247246)） |
+| ソムリエへの写真添付 | 店の棚や品書きの写真から、好みに合う1〜3本を選んでもらう（[b619fa4](https://github.com/yuuuuuuu168/sakekasu-builder/commit/b619fa43f927320dedf15de8c9276590284a7a31)） |
 | 好み学習 | AgentCore Memory。セッションをまたいで好みが育つ |
-| 会話の記憶 | AgentCore Memory。履歴はサーバー側に持ち、クライアントからは送らない（[#93](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/93)） |
-| ソムリエの Web 検索 | 新酒の発売・蔵元・相場など記録の外の話は Tavily で調べて出典つきで答える（[#122](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/122)） |
+| 会話の記憶 | AgentCore Memory。履歴はサーバー側に持ち、クライアントからは送らない（[010fd59](https://github.com/yuuuuuuu168/sakekasu-builder/commit/010fd5969fb60a71e3513f109757fbdb39132dda)） |
+| ソムリエの Web 検索 | 新酒の発売・蔵元・相場など記録の外の話は Tavily で調べて出典つきで答える（[52a7b94](https://github.com/yuuuuuuu168/sakekasu-builder/commit/52a7b947258ff425b17139245761c8c5cb886118)） |
 
 ### アカウント・セキュリティ
 
@@ -56,10 +56,10 @@
 | 機能 | 補足 |
 |------|------|
 | 監視とアラート通知 | 22アラーム（AI・サービス正常性・外形監視・SLO）を、共通基盤のトピック経由で Slack と DevOps Agent へ |
-| 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[#92](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/92)） |
-| DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。プライベートチャンネルではメンションで調査の開始や照会もできる。コンソール側の設定あり（[#67](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/67)） |
+| 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[52c4ee7](https://github.com/yuuuuuuu168/sakekasu-builder/commit/52c4ee7aa89f69eee5dfca2ee02279a1f8df87d4)） |
+| DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。プライベートチャンネルではメンションで調査の開始や照会もできる。コンソール側の設定あり（[6360410](https://github.com/yuuuuuuu168/sakekasu-builder/commit/63604109ac4cba7a3413623b056d606c55d16c84)） |
 | Application Signals による APM | OCR と画像アップロードの2関数を計装。OCR には SLO を2本置き、割ったらアラーム（[#11](https://github.com/yuuuuuuu168/sakekasu-builder/issues/11)） |
-| デプロイの自動化 | main へのマージで GitHub Actions がデプロイする（OIDC 認証、[#94](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/94)）。infra は [cdkd](https://github.com/go-to-k/cdkd)、ソムリエは CDK、画面は S3 への同期で、対象ごとにワークフローを分ける |
+| デプロイの自動化 | main へのマージで GitHub Actions がデプロイ（OIDC 認証、[3f8e0ef](https://github.com/yuuuuuuu168/sakekasu-builder/commit/3f8e0efe765e660089e05b04623164acbb487895)）。infra は [cdkd](https://github.com/go-to-k/cdkd)、ソムリエは CDK、画面は S3 への同期で、対象ごとにワークフローを分ける |
 | 配信 | S3 + CloudFront（OAC）で `sake.sakekasu-builder.com` から配信する。画面は `deploy-site.yml` が同期する |
 | 一覧画面の画像表示高速化 | サムネイル生成・Presigned URL キャッシュ・遅延読み込み |
 | PR ごとのテスト・lint・型検査 | GitHub Actions がフロント・infra・ソムリエの3系統を並べて走らせる |
@@ -73,8 +73,8 @@
 - **キーワード横断検索**: 酒名だけでなく、店名・場所名・飲み方・メモも検索対象にした。酒名は従来どおり曖昧検索（各文字が順番に出現すればヒット）で、うろ覚えや部分入力から辿れる。それ以外の項目は部分一致にしている。メモまで曖昧検索にすると、離れた位置の文字が拾われて無関係な記録が大量に混ざるため
 - **表記ゆれの吸収**: 「アラン」「あらん」「ｱﾗﾝ」「Allan」「Arran」のどれで打っても同じ記録に辿り着く（詳細は下記）
 - **評価フィルタ**: 「★4以上」のように星数のしきい値で絞る。評価を持つのは飲酒記録だけなので、選ぶと記録種別も自動で飲酒記録に切り替わる（飲みきりステータスを選ぶと購入記録に切り替わるのと同じ挙動）
-- **価格帯フィルタ**: 「1,000円未満」「10,000円以上」など5つの帯で絞る（[#47](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/47)）。帯どうしは重ならず隙間もない（`min` 以上 `max` 未満）ので、どの金額もちょうど1つの帯に入る。価格が未入力の記録は、価格帯を選んだ時点で外す。金額の分からない記録が「3,000円以上」に混ざると絞り込んだ意味が無くなるため
-- **日付範囲フィルタ**: 今月・直近3ヶ月・今年・カスタム範囲（[#47](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/47)）。カスタム範囲は片側だけの指定も許して「この日以降すべて」を出せるようにし、開始日に `max`・終了日に `min` を渡して逆転した範囲を選べないようにしてある
+- **価格帯フィルタ**: 「1,000円未満」「10,000円以上」など5つの帯で絞る（[ec693c7](https://github.com/yuuuuuuu168/sakekasu-builder/commit/ec693c71525baef18f04762c3b242c311d30b70c)）。帯どうしは重ならず隙間もない（`min` 以上 `max` 未満）ので、どの金額もちょうど1つの帯に入る。価格が未入力の記録は、価格帯を選んだ時点で外す。金額の分からない記録が「3,000円以上」に混ざると絞り込んだ意味が無くなるため
+- **日付範囲フィルタ**: 今月・直近3ヶ月・今年・カスタム範囲（[ec693c7](https://github.com/yuuuuuuu168/sakekasu-builder/commit/ec693c71525baef18f04762c3b242c311d30b70c)）。カスタム範囲は片側だけの指定も許して「この日以降すべて」を出せるようにし、開始日に `max`・終了日に `min` を渡して逆転した範囲を選べないようにしてある
   - 「今月」「今年」は暦の区間なので月末・年末までを含み、「直近3ヶ月」は今日から遡る区間なので上限が今日になる。先の日付を入れた記録の見え方が変わるが、どちらもラベルの読みどおりなので揃えていない
   - 基準日（今日）は `filterRecords` の引数にしてあり、テストからは固定日を渡す。3ヶ月前に同じ日が無い場合（5/31 → 2/28）は月末に丸める。`new Date(2026, 1, 31)` は 3/3 へ繰り上がってしまうため
 - **価格帯・日付範囲では記録種別を切り替えない**: どちらも購入記録・飲酒記録の両方が持つ項目なので、評価や飲みきりステータスのような自動切り替えはしない
@@ -124,7 +124,7 @@
 
 #### まとめ買いを1本ずつ飲みきる
 
-本数2以上の購入記録は、1本飲んでも残りが在庫に残る（[#159](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/159)）。
+本数2以上の購入記録は、1本飲んでも残りが在庫に残る（[ae856df](https://github.com/yuuuuuuu168/sakekasu-builder/commit/ae856df02000b1508c30ba2f3e3aacb3bc2f6aff)）。
 
 - 購入記録に**残本数**（`remainingQuantity`）を持たせ、飲みきり操作のたびに減らす。0本になったときにはじめて記録が「飲みきり」になる
 - ステータスは残っているうちの**先頭の1本**にかかる。本数3・残り3で飲み中なら「飲み中1本 / 未開封2本」
@@ -160,7 +160,7 @@
 - **失敗しても登録は止めない**。ノートが取れなければ備考は元のまま保存される。付随情報のために記録そのものを落とさない
 - **同じ行を積み上げない**。備考の行頭が `テイスティングノート:` なら記載済みとして扱い、再編集・再保存でも書き足さない
 - **一覧では2行で切る**。備考はカードに出すが、ノートが入ると複数行になるので、長いものは2行で切ってクリックで全文に広げる。一覧の見通しを保ったまま、その場で読める
-- **既存の記録は一覧から一括で追記**。ノート未記載のウイスキー・日本酒があれば一覧上部に件数が出て、そこから追記できる。1件ずつ直列に処理するので、Bedrock を呼ぶ Lambda の予約枠を一人で使い切らない
+- **既存の記録は一覧から一括で追記**。ノート未記載のウイスキー・日本酒があれば一覧上部に件数が出て、そこから追記できる。1件ずつ直列に処理する
 
 生成は AppSync の `generateTastingNote` ミューテーション（Lambda `tasting-note`）が受ける。カテゴリの判定は画面側だけでなく Lambda 側でも行い、対象外のカテゴリでは Bedrock を呼ばずに落とす。呼び出し1回が課金につながるため、API を直接叩かれたときの歯止めをサーバー側にも置いている。
 
@@ -180,7 +180,7 @@
 - 検索するのは1回目で書けなかった銘柄だけ。有名な銘柄に検索の費用と待ち時間を払わない
 - 1回で取れなければ条件を緩めてもう1回だけ試す。1本目は「銘柄名 + カテゴリ + 味わい 特徴」、2本目は「銘柄名 + カテゴリ」。限定品や季節商品は前者だと一致するページが無いことがある。通信に失敗した場合もこの2本目が受け皿になる
 - それでも取れなければ、その記録は書けないものとして扱う（一括追記の対象から外す）
-- 検索結果は `<web_data>` で囲んでモデルへ渡し、「資料であって指示ではない」と明示する。山括弧・中括弧などは Lambda 側で落としてから入れる
+- 検索結果は資料として、指示とは分けてモデルへ渡す
 - 検索できない（鍵が無い・失敗した）ときは1回目の結果をそのまま返す。ノートが付かないだけで、登録も一括追記も止まらない
 - 検索結果がその銘柄の話でなければ、やはり書かせない。Web を見たかどうかで「知らないことは書かない」は変えない
 
@@ -195,17 +195,9 @@ Bedrock では Anthropic のホスト型 Web 検索ツールが使えないた�
 - **Presigned URL のメモリキャッシュ**: 有効期限内は再利用し、同一キーへの同時リクエストを1本に束ねる
 - **既存画像のバックフィル**: `infra/scripts/backfill-thumbnails.py`（EXIF の向きを補正してから縮小する。忘れると写真が横倒しになる）
 
-ここから先（Presigned URL のバッチ取得、CloudFront + OAC でのエッジキャッシュ）は [Issue #7](https://github.com/yuuuuuuu168/sakekasu-builder/issues/7) に置いてある。
-
 ## AgentCore ソムリエエージェント
 
 アプリに **「パーソナル酒ソムリエ」AI エージェント** を導入し、単発の AI 呼び出しでは実現できない「対話・ツール連携」を活用する。
-
-| Phase | 内容 | 状態 |
-|-------|------|------|
-| 1 | 対話 UI + 記録参照（在庫相談・ペアリング・銘柄レコメンド・Q&A・好み学習） | ✅ 完了 |
-| 2 | 外部情報収集（新発売情報・レビュー要約） | Web 検索は導入済み（[#122](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/122)）。残りは [#5](https://github.com/yuuuuuuu168/sakekasu-builder/issues/5) |
-| 3 | 定期実行系（月次レポート・節酒プランナー・傾向分析） | [#6](https://github.com/yuuuuuuu168/sakekasu-builder/issues/6) |
 
 ### 構成
 
@@ -242,7 +234,7 @@ Tavily 検索 API（記録の外。API キーは Secrets Manager）
 - **モデル**: `jp.anthropic.claude-haiku-4-5-20251001-v1:0`（OCR と共通）
 - **会話の継続**: Runtime はステートレスだが、履歴は AgentCore Memory に置く。クライアントはセッション ID を送るだけで、エージェントが自分の記憶から直近10件を読み戻す
 - **画面の表示**: ブラウザの localStorage にユーザー単位で保存（最大50件）。あくまで表示用の写しで、送信内容にはならない。セッション ID も同じ単位で保存し、**どちらもサインアウト時に削除**
-- **入力の安全対策**: プロンプト・履歴・記録の値はすべて正規化（HTML エンティティ展開＋NFKC を固定点まで反復）し、`<user_data>` で囲んで指示と区別。プロンプト長・DynamoDB 読み取りページ数にも上限
+- **入力の安全対策**: プロンプト・記録の値など外部から来る文字列は、指示と区別してモデルへ渡す
 - **今日の日付**: 相談を受けた日（日本時間）をシステムプロンプトに毎回差し込む
 
 #### 今日の日付を渡す理由
@@ -262,7 +254,7 @@ Tavily 検索 API（記録の外。API キーは Secrets Manager）
 
 前者が**セッション内の文脈**、後者が**セッションをまたぐ好み**を担う。
 
-履歴をサーバー側に置いたのは、文脈を長持ちさせるためだけではない。以前はクライアントが直近の履歴を自己申告で送っていたため、細工した「アシスタントの発言」を文脈に混ぜられる構造だった（無害化はしていたが経路そのものは残っていた）。いまはエージェントが自分で書いたものしか読まない。
+履歴をサーバー側に置いているので、エージェントは自分で書いたものだけを文脈として読む。
 
 | 決めごと | 内容 |
 |---------|------|
@@ -274,26 +266,21 @@ Tavily 検索 API（記録の外。API キーは Secrets Manager）
 
 「新しい相談」を押したときとサインアウトしたときは、画面の写しと一緒にセッション ID も捨てる。同じ端末の次の利用者が前の会話の続きとして相談できないようにするため。逆に**リロードでは捨てない**。画面には前の会話が残るので、セッションだけ作り直すと目の前に見えている会話をエージェントだけが知らない状態になる。
 
-デバイスをまたいだ会話の同期はこの範囲では実現していない（セッション ID が端末に閉じているため）。会話をまたぐ好みのほうは `actorId` 単位なので、スマホと PC で同じ好みプロファイルが育つ。
+好みは `actorId` 単位なので、スマホと PC で同じ好みプロファイルが育つ。
 
-安全側の作りは記録の取得と揃えている。記憶は「LLM がユーザー入力から抽出した文章」「ユーザーの発話とそこから誘導された応答」なので、記録と同じ正規化を通してから渡す（好みはさらに `<user_data>` で囲む）。正規化が収束しない文字列は、記録と違って丸ごと捨てる（好みは無くても相談は成立するため）。
-
-記録の取得と違うのは**1行に畳む**ところ。ツール結果は JSON として渡るので改行は文字列の中に収まるが、システムプロンプトは地の文なので改行がそのまま構造になる。山括弧を潰すだけでは `\n# 新しいルール` のような見出しを差し込まれたときに、`<user_data>` の囲みの中にいながら `# セキュリティ` と同じ高さの節に見えてしまう。そのため空白ごと畳んで、箇条書きの1項目から出られないようにしている。
-
-記憶に**書く**ときも、ユーザーの発話とエージェントの応答の両方を無害化してから渡す。ユーザーの発話を無害化しても、そこから誘導された応答の文面までは縛れない。書いたものは次のリクエストで会話履歴として、また好みの抽出を経て次回のシステムプロンプトとして戻ってくるため、読み出し側と二重にかけている。
+記憶はユーザー入力に由来する文章なので、記録と同じく指示と区別してからモデルへ渡す。
 
 記憶 ID は CDK が `MEMORY_PREFERENCE_ID` 環境変数としてエージェントへ渡す（`agentcore.json` の `memories[].name` から自動導出）。この環境変数が無ければ記憶は自動的に無効になるので、ローカル開発では何も設定しなくてよい（会話の続きは効かなくなるが、1回ごとの相談は成立する）。
 
 #### Web 検索（Tavily）
 
-記録の中の話は DynamoDB のツールで足りるが、**新酒が出ているか・蔵元はどこか・いま買えるのか**といった記録の外の話は、モデルの学習知識に頼るとうろ覚えのまま断定してしまう。ここが一番ハルシネーションの害が大きいので、Tavily の検索 API をツール（`search_web`）として渡し、必要なときだけモデル自身に調べさせている（[#122](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/122)）。
+記録の中の話は DynamoDB のツールで足りるが、**新酒が出ているか・蔵元はどこか・いま買えるのか**といった記録の外の話は、モデルの学習知識に頼るとうろ覚えのまま断定してしまう。ここが一番ハルシネーションの害が大きいので、Tavily の検索 API をツール（`search_web`）として渡し、必要なときだけモデル自身に調べさせている（[52a7b94](https://github.com/yuuuuuuu168/sakekasu-builder/commit/52a7b947258ff425b17139245761c8c5cb886118)）。
 
 | 決めごと | 内容 |
 |---------|------|
-| API キー | Secrets Manager（`dev-sakekasu/sommelier/tavily-api-key`）。エージェントに渡すのは**名前だけ** |
+| API キー | Secrets Manager。エージェントに渡すのは**シークレットの名前だけ** |
 | キーの取得 | 初回の検索で1回だけ取ってメモリに保持。失敗したら60秒は再取得しない |
 | 件数・深さ | 既定3件・最大5件、`search_depth` は `basic` 固定。要約生成と本文の全文取得は使わない |
-| 検索回数 | 1回の相談で3回まで（失敗した検索も1回として数える） |
 | 失敗したとき | 相談は止めない。ツールがエラーを返し、モデルは分かる範囲で答える（フェイルソフト） |
 | 出典 | 回答に URL を載せる。チャットの吹き出し側でリンクとして描画する |
 | 情報源の国 | `country: japan` で日本に寄せる。プロンプト側でも日本語の情報源を優先させる |
@@ -302,37 +289,11 @@ Tavily 検索 API（記録の外。API キーは Secrets Manager）
 
 なお `country` パラメータの仕様は Tavily の公式ドキュメントで裏取りできていない（クラウドセッションからは `docs.tavily.com` へ到達できない）。受け付けられなかった場合に検索そのものが死なないよう、**400 / 422 が返ったら国指定を外して1回だけ取り直し、以降はそのプロセスでは付けない**ようにしている。外したことは警告ログに残るので、そこで気づける。500 やタイムアウトでは取り直さない（失敗のたびに費用と待ち時間が倍になるため）。
 
-検索結果は**外部サイトの本文がそのままモデルの入力に入る**ので、記録やメモよりも疑ってかかる相手になる。扱いは記録と同じ経路（HTML エンティティ展開＋NFKC を固定点まで反復してから山括弧を潰す）を通したうえで、囲みのタグだけ `<web_data>` に分けている。`<user_data>` と同じ印を付けてしまうと、検索でヒットした他人のブログの文章が「このユーザーの好み」として通ってしまうため。
-
-URL だけは無害化を通さない。山括弧を丸括弧に潰した URL はもう開けず、出典として役に立たなくなる。代わりに `web_search.py` 側で **http / https であること・非 ASCII や引用符は percent-encode すること・エンティティ経由で山括弧に戻らないこと・`user@host` の形でないこと**を確かめ、通らないものは結果ごと捨てている（出典を示せない引用は、作り話と見分けが付かない）。
-
-`user@host` を弾くのは、`https://有名な酒屋.jp@attacker.example/...` が「表示は信頼できるドメイン・実際の接続先は別」になるため。出典はそのままリンクになるので、通すと出典自体を偽装できる。同じ判定は描画側（`linkify.tsx`）にも置いている。吹き出しに流れてくるのはモデルが書いた本文で、検索結果の抜粋に載っていた URL を書き写すこともあるため、上流の検証を当てにしない。長さの上限（500文字）も同じ理由で両側に置いている。
+検索結果は外部サイトの本文なので、記録やメモとは別の印を付けて指示と分けてモデルへ渡す。他人のブログの文章が「このユーザーの好み」として扱われないようにするため。出典の URL は形式を確かめ、通らないものは結果ごと捨てる（出典を示せない引用は、作り話と見分けが付かない）。
 
 キーを読む権限は Runtime ロールに `secretsmanager:GetSecretValue` を1つ、**そのシークレットの ARN だけ**に付ける。テーブル名と同じく `agentcore.json` の `envVars` を唯一の定義元にして、CDK 側はそれを読むだけにしている（設定ドリフト防止）。`TAVILY_API_KEY_SECRET_ID` を消せば権限も付かず、エージェント側も検索ツールを持たないまま動く。
 
-#### Tavily の API キーを登録する（デプロイ前に1回）
-
-キーはリポジトリにも `agentcore.json` にも置かない。[Tavily](https://tavily.com/) でキーを取ってから、先に Secrets Manager へ入れる。
-
-```bash
-AWS_PROFILE=<アプリ用のプロファイル> aws secretsmanager create-secret \
-  --name dev-sakekasu/sommelier/tavily-api-key \
-  --secret-string 'tvly-xxxxxxxxxxxxxxxxxxxxxxxx' \
-  --region ap-northeast-1
-```
-
-登録せずにデプロイしても壊れない。キーが読めなければ検索は無効のままで、記録と一般知識だけで相談に答える。
-
-#### 記憶まわりの IAM の線引き
-
-名前空間の条件を付けられるのは、条件キー `bedrock-agentcore:namespace` を受け付ける `ListMemoryRecords` / `RetrieveMemoryRecords` の**2つだけ**。残りの `CreateEvent` `GetEvent` `ListEvents` `DeleteEvent` などは条件キーを持たないので、条件を書いても常に不一致になり全拒否になってしまう。
-
-| | IAM でどこまで守られるか |
-|---|---|
-| 好みの読み出し（Retrieve / List MemoryRecords） | 名前空間の条件つき。`sommelier/preference/*` の外は引けない |
-| それ以外（CreateEvent・会話履歴の `ListEvents`・イベントの削除など） | 条件なし。ただし対象はこの記憶の ARN ただ1つに限られる |
-
-つまり**「本人の棚にしか読み書きしない」を保証しているのは IAM ではなくアプリ側**（`conversation_memory.py` の `actorId` 検証と、`owner_sub` を検証済み JWT からしか取らない作り）。`actorId` は英数字・`-`・`_` だけを通し、区切り文字を含む値では読み書きしない。`sessionId` はクライアントのヘッダー由来なので同じ形式検査を通し、合わなければ会話履歴を引かない。エージェントに記憶を触るツールは持たせていないので、モデルの判断でこの範囲が広がることもない。
+キーはデプロイ前に1回、Secrets Manager へ手で登録する（[docs/operations.md](docs/operations.md)）。登録せずにデプロイしても壊れない。キーが読めなければ検索は無効のままで、記録と一般知識だけで相談に答える。
 
 ### 失敗したときの切り分け
 
@@ -347,15 +308,7 @@ AWS_PROFILE=<アプリ用のプロファイル> aws secretsmanager create-secret
 
 ブラウザのコンソールには `ソムリエへの問い合わせに失敗しました [種類]:` の形で種類が出る。停止ボタンによる中断はエラー扱いせず、受信済みの内容を残して静かに終わる。
 
-Runtime まで届いていたかどうかは、CloudWatch Logs でも確認できる。
-
-```bash
-AWS_PROFILE=<アプリ用のプロファイル> aws logs tail \
-  /aws/bedrock-agentcore/runtimes/sommelier_sommelier-Cn5eM865GE-DEFAULT \
-  --since 1h --region ap-northeast-1
-```
-
-アイドル15分で実行環境が落ちるため、久しぶりの呼び出しは必ず起動ログから始まる。**起動ログすら無ければ、リクエストが Runtime に到達していない**（＝ `auth` か `network`）と判断できる。
+Runtime まで届いていたかどうかは、CloudWatch Logs でも確認できる（[docs/operations.md](docs/operations.md)）。
 
 ### ソムリエの開発・デプロイ
 
@@ -380,65 +333,7 @@ cd sommelier/agentcore/cdk && npm ci && npm test
 
 ワークフローを infra 側（`deploy.yml`）と分けているのは、`paths` がワークフロー単位でしか効かないため。1つにまとめると、ソムリエだけの変更で infra のデプロイまで走る。
 
-手で打つのは、ワークフローが使えないとき（Actions の障害、ワークフロー自体の修正中）と、`agentcore` CLI でしかできない操作をするとき（`agentcore add` でのリソース追加など）だけ。
-
-```bash
-# 1. main を最新にする
-#    デプロイされるのは「手元のファイル」であって main の内容ではない。
-#    ブランチが古いまま打つと、古い版を本番へ出すことになる
-git switch main && git pull
-
-# 2. デプロイ（--target は aws-targets.json の name）
-cd sommelier
-AWS_PROFILE=<アプリ用のプロファイル> agentcore deploy --target dev
-
-# 3. cdk/ の依存が勝手に上がっていないか見る（下記）
-git status --short sommelier/agentcore/cdk
-
-# 4. 反映を確認（lastUpdatedAt が今なら出ている）
-AWS_PROFILE=<アプリ用のプロファイル> aws bedrock-agentcore-control list-agent-runtimes \
-  --region ap-northeast-1 \
-  --query "agentRuntimes[?agentRuntimeName=='sommelier_sommelier'].[agentRuntimeVersion,lastUpdatedAt]" \
-  --output text
-```
-
-`agentcore deploy` は CLI 内部で `.cli/deployed-state.json` を更新する。ワークフロー側は CDK を直接叩くのでこのファイルを書かないが、記録されているのはリソース ID と `deployHash` で、次に手で `agentcore deploy` を打ったときに「変更あり」と判定されて出し直されるだけ。害はない。
-
-#### agentcore deploy は CDK の依存を勝手に上げる
-
-`agentcore deploy` は本体の処理に入る前に `agentcore/cdk` の依存を最新へ書き換えて `npm install` まで走らせる。**CI が確かめた版と、実際にデプロイされる版が別物になりうる**（2026-08-09 のデプロイでは `@aws/agentcore-cdk` が alpha.20 から alpha.45 へ飛び、`Namespaces` が `NamespaceTemplates` に改名されていた）。
-
-デプロイしたら `package.json` と `package-lock.json` の差分を見て、`npm test` を新しい版で通し直す。テストが落ちたらデプロイ済みのものが落ちているということなので、先に中身を確かめる。この自動更新を止めるなら `agentcore config disableDependencyManagement true`。
-
-ワークフローが `agentcore deploy` ではなく CDK を直接叩いているのはこれが理由で、`npm ci` で lock どおりに入れたものをそのまま出す。
-
-#### `npx cdk` は CDK CLI ではない
-
-`sommelier/agentcore/cdk/package.json` は自分自身の `bin.cdk` として CDK アプリ（`dist/bin/cdk.js`）を宣言している。npx は自パッケージの bin を優先するため、**`npx cdk deploy` は CLI ではなくアプリを引数なしで実行して、何もせず成功する**。CLI を使うときは `npx aws-cdk` と書く。
-
-```bash
-npx cdk ls        # 何も出力せず終了コード 0（アプリが動いただけ）
-npx aws-cdk ls    # AgentCore-sommelier-dev
-```
-
-#### デプロイ後に好み学習が生きているか確かめる
-
-好み学習はフェイルオープンなので、**動いていなくても画面上は「好みを覚えていないだけ」にしか見えない**。抽出はサービス側の非同期処理で、Memory の実行ロールに権限が足りなければ黙って止まる。デプロイしたら数往復会話してから、レコードが増えているか一度だけ確認する。
-
-```bash
-MEMORY_ID=$(AWS_PROFILE=<アプリ用のプロファイル> aws bedrock-agentcore-control list-memories \
-  --region ap-northeast-1 --query "memories[?contains(id,'sommelier_preference')].id | [0]" --output text)
-
-AWS_PROFILE=<アプリ用のプロファイル> aws bedrock-agentcore list-memory-records \
-  --region ap-northeast-1 --memory-id "$MEMORY_ID" \
-  --namespace "sommelier/preference/<Cognitoのsub>"
-```
-
-抽出は非同期だが、2026-08-09 に確かめたかぎりでは会話の1〜2分後にはレコードが入っていた。空のまましばらく変わらないなら、どちら側が止まっているかで切り分ける。イベント自体が入っていないなら書き込み側（`CreateEvent`）の問題で、Runtime のログに「好みの記録に失敗しました」が出ているはず。
-
-イベントはあるのにレコードが増えないなら抽出側の問題。ここで実行ロールを疑いたくなるが、**疑わなくてよい**。L3 コンストラクトが作る Memory の実行ロールには信頼ポリシーだけで権限ポリシーが1つも付いておらず、それでも抽出は動いている（2026-08-09 に実測）。プロンプトもモデルも差し替えていない素の組み込みストラテジは AWS 側の推論で動くため、`memoryExecutionRoleArn` に Bedrock の権限は要らない（[Customize a built-in strategy or create your own strategy](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory-custom-strategy.html) が権限を要求しているのは、組み込みを上書きした場合と自前ストラテジの場合）。
-
-ストラテジを上書きするよう変えたときは話が別で、そのときは実行ロール（`AgentCore-sommelier-dev` スタックが作る `...MemoryPreferenceExecutionRole...`）に `AmazonBedrockAgentCoreMemoryBedrockModelInferenceExecutionRolePolicy` が要る。
+手で打つのは、ワークフローが使えないとき（Actions の障害、ワークフロー自体の修正中）と、`agentcore` CLI でしかできない操作をするときだけ。手順と、`agentcore deploy` の落とし穴（CDK の依存を勝手に上げる・`npx cdk` が CLI ではない）、デプロイ後に好み学習が生きているかの確かめ方は [docs/operations.md](docs/operations.md) にある。
 
 Runtime の ARN はフロントの `src/features/sommelier/config.ts` に持つ（`VITE_SOMMELIER_RUNTIME_ARN` で上書き可）。Runtime を作り直したら更新する。
 
@@ -495,9 +390,7 @@ AWS Health の通知は共通基盤（[sakekasu-integrated_environment](https://
 
 ### デプロイ前の準備
 
-監視スタックのデプロイ前に手で登録するものは無い。Slack の Webhook URL は共通基盤の
-SSM パラメータ（`/sakekasu-integrated/monitoring/slack-webhook-url`）にあり、builder は持たない。
-以前使っていた `/dev-sakekasu/monitoring/slack-webhook-url` はもう読まれていないので、消してよい。
+監視スタックのデプロイ前に手で登録するものは無い。Slack の Webhook URL は共通基盤が持ち、builder は持たない。
 
 デプロイは main へのマージで `deploy.yml` が cdkd で行う（下の「デプロイ（CDK）」）。
 
@@ -531,35 +424,7 @@ EventBridge（毎日 00:05 UTC）→ billing-notifier Lambda → Cost Explorer A
 
 ### デプロイ手順（管理アカウント）
 
-```bash
-# 0. 管理アカウントに書き込めるプロファイル名を入れる（リポジトリには書かない）
-ORG_PROFILE=<管理アカウントのプロファイル>
-
-# 1. 管理アカウントの認証情報で入っていることを確認し、その ID を控える（以降の手順で使う）
-BILLING_ACCOUNT_ID=$(AWS_PROFILE=$ORG_PROFILE aws sts get-caller-identity --query Account --output text)
-echo "$BILLING_ACCOUNT_ID"
-
-# 2. （初回のみ）管理アカウントを CDK bootstrap する
-cd infra
-AWS_PROFILE=$ORG_PROFILE npx cdk bootstrap aws://$BILLING_ACCOUNT_ID/ap-northeast-1 -c billing=true -c billingAccount=$BILLING_ACCOUNT_ID
-
-# 3. Slack の Incoming Webhook URL を管理アカウント側に登録する
-AWS_PROFILE=$ORG_PROFILE aws ssm put-parameter \
-  --name /sakekasu-billing/slack-webhook-url \
-  --type SecureString \
-  --value 'https://hooks.slack.com/services/XXX/YYY/ZZZ' \
-  --region ap-northeast-1
-
-# 4. デプロイ（内訳に出すアプリ本体のアカウントの ID も、リポジトリに書かず渡す）
-APP_ACCOUNT_ID=$(AWS_PROFILE=<アプリ用のプロファイル> aws sts get-caller-identity --query Account --output text)
-AWS_PROFILE=$ORG_PROFILE npx cdk deploy sakekasu-billing-notifier -c billing=true \
-  -c billingAccount=$BILLING_ACCOUNT_ID -c appAccount=$APP_ACCOUNT_ID
-
-# 5. 動作確認（手動で1回実行して Slack に届くか見る）
-AWS_PROFILE=$ORG_PROFILE aws lambda invoke \
-  --function-name sakekasu-billing-notifier \
-  --region ap-northeast-1 /dev/stdout
-```
+Actions の対象外で、管理アカウントへ手でデプロイする。手順は [docs/operations.md](docs/operations.md) にある。
 
 数値は Cost Explorer の集計途中の概算（UTC 日単位）で、確定額は請求書と一致しないことがある。月初日の実行では「今月累計」が空になるため、前月まるごとを「確定」として通知する。Cost Explorer API は 1 リクエスト $0.01 で、1日3回の呼び出し（アカウント別の今月・昨日、サービス別の今月）なので**月1ドル前後**。
 
@@ -579,11 +444,11 @@ SNS（共通基盤の sakekasu-integrated-alerts）┬→ Slack 通知 Lambda �
 転送 Lambda は以前このリポジトリにあり、builder のトピックだけを購読していた。kakeibo・learning・reinvent のアラームも調査に回すため、共通基盤へ移した（2026-10）。
 builder のアラームも共通トピックへ送るようにしたので、調査に回る範囲は前と変わらない。
 
-Agent Space は運用ツール専用アカウント（`ops-tooling`）に置き、調査対象はアプリ本体のアカウント（`<アプリのアカウント ID>`）。このリポジトリの CDK が作るのは、調査用のクロスアカウントロール（読み取り専用）だけ。アカウント全体を読むロールなので本来は共通基盤のものだが、共通基盤のロールの境界が `iam:*` を拒否していて作れないため、ここに残している。Agent Space の作成・Slack 連携・GitHub 連携・Webhook の発行はコンソールでの手作業になる。
+Agent Space は運用ツール専用アカウント（`ops-tooling`）に置き、調査対象はアプリ本体のアカウント（`<アプリのアカウント ID>`）。このリポジトリの CDK が作るのは、調査用のクロスアカウントロール（読み取り専用）だけ。Agent Space の作成・Slack 連携・GitHub 連携・Webhook の発行はコンソールでの手作業になる。
 
 エージェントは秒課金なので、投げるものを絞っている。アラームは `ALARM` に変わったときだけ（復旧では投げない）、AWS Health は障害（`issue`）だけ、転送 Lambda 自身の失敗アラームは捨てる。判定は共通基盤の `infra/lambda/devops-agent-webhook` にある。
 
-調査結果を読んだ先で追加の指示を出したくなるぶんは、双方向用のプライベートチャンネルで受ける。メンションで調査を始めたり、経過や根拠を聞いたりできて、返答は元メッセージのスレッドに積まれる。双方向はプライベートチャンネルでしか有効にできず、有効化には `AIDevOpsChannelAccessPolicy` を付けた IAM ロールが要る。CloudFormation 側にまだ双方向のフィールドが無いため、この設定はコンソールでの手作業になる。
+調査結果を読んだ先で追加の指示を出したくなるぶんは、双方向用のプライベートチャンネルで受ける。メンションで調査を始めたり、経過や根拠を聞いたりできて、返答は元メッセージのスレッドに積まれる。双方向はプライベートチャンネルでしか有効にできず、有効化には `AIDevOpsChannelAccessPolicy` を付けた IAM ロールが要る。CloudFormation 側に双方向のフィールドが無いため、この設定はコンソールでの手作業になる。
 
 エージェントに渡してある権限は読み取り専用のクロスアカウントロールだけなので、Slack から何を頼んでもアプリ側のリソースは変わらない。
 
@@ -599,11 +464,9 @@ Agent Space は運用ツール専用アカウント（`ops-tooling`）に置き�
 
 計装が入っているのは OCR（`ocr-analyzer`）と画像アップロードの入口（`presigned-url`）の2つ。アカウント側の設定（サービス検出・Transaction Search）はソムリエの GenAI Observability を入れたときから有効で、アカウントに1つの設定なので CDK では管理していない。
 
-監視系の関数（health-check / slack-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。この2つは従来どおり Lambda 標準メトリクス由来のエラー率と実行時間までしか見えない。計装が無かった頃でもエラー率は追えたので、それで既存のバグを1件見つけている（[#115](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/115)）。
+外形監視の関数（health-check）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。この関数は従来どおり Lambda 標準メトリクス由来のエラー率と実行時間までしか見えない。計装が無かった頃でもエラー率は追えたので、それで既存のバグを1件見つけている（[51be30d](https://github.com/yuuuuuuu168/sakekasu-builder/commit/51be30d1a106bc1251501bbb7a831b555f0ca3f8)）。
 
 SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 90% と「90% が15秒未満」。しきい値は日次の実測（p50/p90/p99）から決めた。割ったらアラームが鳴り、そのしきい値は SLO の目標と同じ定数から取っている。別々に書くと、片方だけ動かしたときに「SLO は未達なのにアラームは鳴らない」が黙って生まれる。
-
-`presigned-url` の SLO はまだ作っていない。計装が後から入ったぶん材料が足りず、SLO は Application Signals の課金対象なので数を絞っている。
 
 計装の対象を絞った理由、デプロイ後の確認手順、しきい値の根拠、費用は [docs/application-signals.md](docs/application-signals.md) にまとめてある。
 
@@ -636,7 +499,7 @@ SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 9
 - AWS CDK + [cdkd](https://github.com/go-to-k/cdkd)（AppSync + DynamoDB）
 - Amazon Cognito（4 アプリ共通のユーザープールとマネージドログイン。[docs/shared-login.md](docs/shared-login.md)）
 - AWS S3（画像ストレージ）
-- S3 + CloudFront + Route 53（フロントエンドの配信）。`aws-amplify` はライブラリとして認証と GraphQL のクライアントに使う
+- S3 + CloudFront + Route 53（フロントエンドの配信。[docs/sake-subdomain.md](docs/sake-subdomain.md)）。`aws-amplify` はライブラリとして認証と GraphQL のクライアントに使う
 - Amazon Bedrock AgentCore Runtime + AgentCore Memory + Strands Agents（Python）※ソムリエ
 - Claude API（Claude Haiku 5.5。API キーなしの Workload Identity Federation）※OCR・テイスティングノート・ソムリエ。失敗したら Amazon Bedrock（Claude Haiku 4.5）でやり直す（[docs/claude-api.md](docs/claude-api.md)）
 - Tavily ※テイスティングノートとソムリエの Web 検索
@@ -686,16 +549,15 @@ aidlc/           # AI-DLC のルールと成果物
 |------------|------|
 | [docs/claude-api.md](docs/claude-api.md) | Claude API への切り替え（ID 連携・Bedrock へのフォールバック・環境変数・IAM の差分・有効にする手順） |
 | [docs/shared-login.md](docs/shared-login.md) | 共通ログインへの切り替え（変わったこと・旧プールを外す手順・カナリア・旧 sub から新 sub へのデータの付け替えの記録） |
-| [docs/agentcore-phase1-design.md](docs/agentcore-phase1-design.md) | ソムリエ Phase 1 の設計（認証の二段構え・ツール設計・決定事項） |
 | [docs/devops-agent.md](docs/devops-agent.md) | DevOps Agent のセットアップ手順・Slack の双方向通信・優先度の割り当て・カスタムスキル・費用 |
 | [docs/application-signals.md](docs/application-signals.md) | Application Signals の計装対象・デプロイ後の確認手順・SLO の決め方・費用 |
 | [docs/claude-code-web.md](docs/claude-code-web.md) | Claude Code on the web での開発環境（外出先から PR まで） |
-| [docs/cdkd-migration.md](docs/cdkd-migration.md) | cdkd（CDK Direct）への移行の記録と、cdkd の運用コマンド |
+| [docs/cdkd-migration.md](docs/cdkd-migration.md) | cdkd（CDK Direct）への移行の手順と記録 |
+| [docs/log-group-import.md](docs/log-group-import.md) | 既存ロググループのスタック取り込み（`logRetention` からの移行） |
 | [docs/sake-subdomain.md](docs/sake-subdomain.md) | `sake.sakekasu-builder.com` への移行（S3 + CloudFront での配信とサブドメインの委任）の手順と記録 |
-| [docs/amplify-exit.md](docs/amplify-exit.md) | Amplify Hosting をやめるかの検討の記録（移行は済んでいる） |
-| [docs/log-group-import.md](docs/log-group-import.md) | 既存ロググループのスタック取り込みの記録（CloudFormation の頃に実施済み） |
 | [docs/agent-verify-permission-set.md](docs/agent-verify-permission-set.md) | クラウドセッションから AWS を見るための読み取り専用 Permission Set |
-| [docs/npm-audit.md](docs/npm-audit.md) | npm の脆弱性の対応状況（本番に入る依存の見分け方・残しているものとその理由） |
+| [docs/operations.md](docs/operations.md) | 手で打つ運用手順（ソムリエの手動デプロイと確認・利用料金通知のデプロイ・OIDC の初回セットアップ） |
+| [docs/npm-audit.md](docs/npm-audit.md) | npm audit への対応の記録（本番に入る依存の見分け方・依存の更新） |
 | [CLAUDE.md](CLAUDE.md) | 開発の進め方（ブランチ運用・AI-DLC・AWS 確認の認証フロー） |
 
 ## セットアップ
@@ -733,7 +595,7 @@ infra のスタックは [cdkd](https://github.com/go-to-k/cdkd) の管理下に
 
 ### アカウント ID の渡し方
 
-公開リポジトリなので、AWS アカウント ID はリポジトリに書かない（[sakekasu-builder-archive#106](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/106)）。`infra/__tests__/no-account-ids.test.ts` が、ダミー以外の 12 桁の数字が入ると落ちる。
+公開リポジトリなので、AWS アカウント ID はリポジトリに書かない（[#32](https://github.com/yuuuuuuu168/sakekasu-builder/pull/32)）。`infra/__tests__/no-account-ids.test.ts` が、ダミー以外の 12 桁の数字が入ると落ちる。
 
 | 使う場所 | 渡し方 |
 | --- | --- |
@@ -749,14 +611,11 @@ infra のスタックは [cdkd](https://github.com/go-to-k/cdkd) の管理下に
 - `sakekasu-billing-notifier`（管理アカウント宛て。`-c billing=true`）
 - `sakekasu-github-oidc`（OIDC 連携自体。Actions に自分のロールを触らせないため。`-c github-oidc=true`）
 
-### OIDC 連携（手動）
+手順は [docs/operations.md](docs/operations.md) にある。
 
-```bash
-cd infra
-AWS_PROFILE=<アプリ用のプロファイル> npx cdk deploy sakekasu-github-oidc -c github-oidc=true
-```
+### cdkd（CDK Direct）
 
-OIDC プロバイダーと deploy / diff / site ロール、それに cdkd 用のデプロイロール（`sakekasu-cdkd-deploy`）が入る。初回のほか、これらのロールを変えたときも同じコマンドで入れ直す。
+infra のデプロイは CloudFormation を経由しない [cdkd](https://github.com/go-to-k/cdkd) で行う。移行の手順と記録は [docs/cdkd-migration.md](docs/cdkd-migration.md) にある。
 
 ## テスト
 
@@ -778,7 +637,7 @@ cd sommelier/agentcore/cdk
 npm ci && npm test
 ```
 
-同じものを PR とマージのたびに GitHub Actions が走らせる（`.github/workflows/test.yml`）。フロントは lint と型検査も込みで、系統ごとに別のジョブに分けてある。片方が落ちても、もう片方の結果が残るようにするため。
+同じものを PR のたびに GitHub Actions が走らせる（`.github/workflows/test.yml`）。マージ後は deploy 系のワークフローがデプロイの前に同じテストを通す。フロントは lint と型検査も込みで、系統ごとに別のジョブに分けてある。片方が落ちても、もう片方の結果が残るようにするため。
 
 ## デザイン
 

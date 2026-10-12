@@ -33,6 +33,9 @@ In a new terminal, you can invoke that server with:
 
 # Deployment
 
-After providing credentials, `agentcore deploy` will deploy your project into Amazon Bedrock AgentCore.
+Deployment happens on merge to `main` via `.github/workflows/deploy-sommelier.yml`. Do not deploy from a local
+machine. Note that `npx cdk deploy` inside `sommelier/agentcore/cdk` runs the CDK app rather than the CDK CLI and silently
+succeeds without deploying anything, and `agentcore deploy` rewrites the project's dependencies. For the rare case that
+needs a manual step, see `docs/operations.md` at the repository root.
 
-Use `agentcore invoke` to invoke your deployed agent.
+Use `agentcore invoke` to invoke the deployed agent.

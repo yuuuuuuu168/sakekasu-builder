@@ -89,6 +89,9 @@ sakekasu の 5 リポジトリ（reinvent、builder、kakeibo、learning、integ
   | kakeibo | `sakekasu-kakeibo-github-oidc` | `github-oidc` |
   | learning | `sakekasu-learning-github-oidc` | `github-oidc` |
 
+  builder の `sakekasu-billing-notifier` も例外で、管理アカウントに人が手で入れる。手順は builder の
+  `docs/operations.md` にある
+
   kakeibo の `sakekasu-kakeibo-cdkd-deploy` と integrated の cdkd-deploy スタックは、deploy ワークフローが
   cdkd より先に毎回入れる。手で打たなくてよい
 
@@ -102,8 +105,7 @@ sakekasu の 5 リポジトリ（reinvent、builder、kakeibo、learning、integ
 ## 5. デプロイ用ロールのガードレール
 
 cdkd 用ロールは AdministratorAccess を持つ（builder と integrated は、使うサービスだけを並べた許可リスト）。その上に Deny だけのポリシー
-`deploy-guardrail` を重ねて、壊れる範囲を自分のアプリに留める。防ぎたいのは cdkd の誤った差分などの事故で、
-悪意のある main の変更は止められない（このポリシー自体を書き換えられる）。
+`deploy-guardrail` を重ねて、壊れる範囲を自分のアプリに留める。防ぎたいのは cdkd の誤った差分などの事故。
 
 | Sid | 何を止めるか |
 | --- | --- |
@@ -135,9 +137,8 @@ builder と integrated は管理ポリシー、ほかはインラインポリシ
 
 ## 6. アプリのロールの Permissions Boundary
 
-デプロイ用ロールは自分の接頭辞のロールを作り替えられるので、Lambda の実行ロールに管理者相当を書き込み、
-関数を差し替えて呼べば、ガードレールの外に届く。アプリのロールには境界を付けて、実効権限を
-「ロール自身のポリシー ∩ 境界」で頭打ちにする。
+アプリのロールには境界を付けて、実効権限を「ロール自身のポリシー ∩ 境界」で頭打ちにする。
+デプロイ用ロールが作るロールを通して、権限がガードレールの外に広がらないようにするため。
 
 | アプリ | 境界の管理ポリシー | 作るスタック |
 | --- | --- | --- |
@@ -199,9 +200,6 @@ builder と integrated は管理ポリシー、ほかはインラインポリシ
 - **ロールバックで残った新しいリソースは cdkd の管理外になる。** `UpdateReplacePolicy: Retain` のリソースは、
   ロールバックで新しい方が残り、状態から外れる。次のデプロイで同じ名前を作れずに止まるので、手で消してから
   デプロイし直す（ロールバックのログに `is RETAINED by this rollback` と出る）
-- **資産の上書きは止められない。** 資産置き場のキーは中身のハッシュだけで、アプリの接頭辞が無い。cdkd は
-  `HeadObject` で有無を見てから `PutObject` するだけで、上書きを拒む条件を付けていない。止められるのは削除と、
-  削除と同じ結果になるバケットの設定変更まで
 - **cdkd は全スタックの状態を読もうとする。** diff 用ロールを自分の状態だけに絞っていると、他のアプリの状態で
   `AccessDenied` が大量に出る。結果には影響しないが、ログにアカウント ID とバケット名がそのまま出る。
   公開リポジトリでは、diff の結果を PR のコメントに貼る前にこれらを伏せる

@@ -2,7 +2,7 @@
 
 iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク指示 → PR 確認 → マージ → 自動デプロイ」を Mac なしで完結させるための設定（Issue #95）。
 
-セッションは Anthropic 管理のクラウド VM で動き、完了するとブランチを push して PR を作る。マージ後は Amplify（フロント）と GitHub Actions（バックエンド CDK、Issue #94）が自動デプロイする。
+セッションは Anthropic 管理のクラウド VM で動き、完了するとブランチを push して PR を作る。マージ後は GitHub Actions が自動デプロイする。フロントは `deploy-site.yml`、バックエンドの CDK は `deploy.yml`、ソムリエは `deploy-sommelier.yml` が受け持つ。
 
 ## 初回セットアップ（ブラウザで1回だけ）
 
@@ -10,7 +10,7 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 2. リポジトリアクセスの注意: **App のインストール範囲 ＝ セッションのアクセス範囲ではない**。セッションは連携した GitHub アカウントが見えるリポジトリ全体にアクセスできる。絞りたい場合は GitHub 側でアカウント権限を制限する
 3. 画面上部の雲アイコン → 「Add cloud environment」で環境を作る
    - **Network access**: まずはデフォルトの Trusted（GitHub / npm / PyPI / AWS SDK 系ドメインを許可済み）で開始。足りないドメインが出たら Custom に切り替えて追加する（「Also include default list of common package managers」は残す）
-   - **Environment variables**: 現時点では不要（Issue #96 で `TAVILY_API_KEY` を追加予定）。AWS の確認を毎セッションするなら `SAKEKASU_AWS_LOGIN=1` を入れると、セッション開始の時点で SSO ログインまで進む
+   - **Environment variables**: 現時点では不要（Tavily を使うなら `TAVILY_API_KEY`）。AWS の確認を毎セッションするなら `SAKEKASU_AWS_LOGIN=1` を入れると、セッション開始の時点で SSO ログインまで進む
    - **Setup script**: 空でよい。依存インストールはリポジトリ側の SessionStart フックで自動実行される（下記）
 
 ## 依存インストールの自動実行（リポジトリ側・設定済み）
@@ -49,12 +49,12 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 - ログインまでセッション開始時に済ませたい場合は、環境設定の Environment variables に `SAKEKASU_AWS_LOGIN=1` を入れる。既定で走らせないのは、AWS を触らないセッションにまで AWS CLI の 70MB 超のダウンロードを負わせないため
 - [scripts/setup-aws-profile.sh](../scripts/setup-aws-profile.sh) が `~/.aws/config` に `sso-session verify` と、それを共有する `verify`（アプリ）・`verify-org`（管理アカウント）・`verify-ops`（運用ツール用）の各プロファイルを書き出す。プロファイルとアカウントの対応は [scripts/aws-verify.conf](../scripts/aws-verify.conf) の `SSO_ACCOUNT_ID` と `SSO_EXTRA_PROFILES` で決める。認証は毎セッション `aws sso login --profile verify --use-device-code` で取得し、同じ SSO セッションのトークンで全プロファイルに入れる。長期キーは VM にもリポジトリにも置かない。呼ぶたびに `~/.aws/config` を書き直して控えを増やすため、`aws-sso-login.sh` は AWS CLI v2 が無いときと、`aws-verify.conf` の中身が書き出し済みの設定と違うときだけ呼ぶ
 - クラウドのコンテナには AWS CLI が入っていないため、同じスクリプトが先に v2 を導入する（v2 が入っていれば飛ばす）。SSO のデバイスコードフローは v1 では動かないので、有無ではなくバージョンで判定している。SessionStart フックではなくこちらに置いたのは、AWS を触らないセッションにまで 70MB 超のダウンロードを負わせないため
-- インストーラは実行前に PGP 署名を検証する。公開鍵は [scripts/aws-cli-public-key.asc](../scripts/aws-cli-public-key.asc) に同梱し、指紋 `FB5DB77FD5C118B80511ADA8A6310ACC4672475C` まで突き合わせる。配信元と同じホストから落とすハッシュでは配信側が乗っ取られたときに検証にならないため、ハッシュではなく署名を見る（AWS はこの zip に `.sha256` を公開しておらず、`.sig` だけを出している）。判定は `gpg` の終了コードではなく `--status-fd` の出力で行う。鍵が期限切れでも終了コードは 0 のままで `VALIDSIG` も出るため、期限切れ時に消える `GOODSIG` と併せて見る。守れるのは配信経路であってリポジトリ自体ではないので、鍵を差し替える PR は AWS の公式手順の記載と照らしてレビューする
+- インストーラは実行前に PGP 署名を検証する。公開鍵は [scripts/aws-cli-public-key.asc](../scripts/aws-cli-public-key.asc) に同梱し、指紋 `FB5DB77FD5C118B80511ADA8A6310ACC4672475C` まで突き合わせる。配信元と同じホストから落とすハッシュでは配信側が乗っ取られたときに検証にならないため、ハッシュではなく署名を見る（AWS はこの zip に `.sha256` を公開しておらず、`.sig` だけを出している）。判定は `gpg` の終了コードではなく `--status-fd` の出力で行う。鍵が期限切れでも終了コードは 0 のままで `VALIDSIG` も出るため、期限切れ時に消える `GOODSIG` と併せて見る。鍵を差し替える PR は AWS の公式手順の記載と照らしてレビューする
 - 参照する Permission Set は `AgentVerifyAccess`。作成手順と権限の考え方は [agent-verify-permission-set.md](agent-verify-permission-set.md) にまとめてある
 - このスクリプトも `$CLAUDE_CODE_REMOTE` を見てクラウド VM でだけ動く。ローカルの `~/.aws/config` を上書きしないため
 - 変更操作は [scripts/deny-aws-writes.sh](../scripts/deny-aws-writes.sh)（`PreToolUse` フック）が止める。読み取り操作だけを通す許可リスト方式で、`get-` / `list-` / `describe-` などの接頭辞と、`sso login` / `logs tail` / `s3 ls` のような明示リストに載るものだけが通る。明示リストに足すときは、`ecs execute-command` のように名前が読み取りっぽくても実質が違うものがあるため、一つずつ実際の権限を確かめる。`invoke` や `assume-role` のように動詞が read でも write でもない操作を数え漏らさないため、拒否リストではなく許可リストにしている
-- **接頭辞では通ってしまう操作を明示的に落とす側のリストもある。** 二種類ある。ひとつは IAM で認証されない操作で、SSO Portal API（`sso`）、`sso-oidc`、`agent-toolkit`、Cognito の利用者向け操作がこれにあたる。これらは SigV4 で署名されず利用者側のトークンだけで通るため、`AgentVerifyAccess` に重ねた Deny も `ReadOnlyAccess` の枠も一切効かず、このフックが唯一の関門になる。とくに `sso get-role-credentials` は、ログインした人に割り当てられた任意のロール（`AdministratorAccess` を含む）の一時認証情報を返す。もうひとつは IAM の枠内だが資格情報そのものを返す操作（`sts get-session-token`、`ecr get-login-password`、`eks get-token` など）で、手に入れば以降の操作は環境変数や SDK 経由になりフックから見えなくなる。落とす一覧は CLI 同梱の botocore モデルから機械的に出した。署名されない操作を持つサービスは7つで、うち `sso` / `sso-oidc` / `agent-toolkit` は全操作が署名されないためサービスごと落とす（`sso login` だけ通す）。`cognito-identity` / `cognito-idp` は署名される読み取りも多く、そちらは deny ポリシーの担当なので、署名されない操作だけを名指しで落とす。残る `signin` / `sts` の署名されない操作は名前が読み取りの接頭辞に当たらないため既に落ちている
-- このフックはうっかり変更操作を打つのを止める関門であって、サンドボックスではない。コマンド文字列を読むだけなので、引用符の内側に隠した呼び出しや変数展開、SDK 経由の操作までは見えない。多くの操作では本当の境界は `AgentVerifyAccess` の IAM 側にあるが、上に書いたとおり **SSO Portal と Cognito の利用者向け操作には IAM が届かない**。そちらの本当の境界は IAM ではなく、ログインする人に何の Permission Set が割り当たっているか（Identity Center 側の割り当て）にある。`aws sso login` が成功した時点でトークンは `~/.aws/sso/cache/` に置かれるので、CLI の動詞を止めるだけでは塞ぎきれない
+- 名前が読み取りに見えても、資格情報を返す操作や IAM で認証されない操作は明示的に落とす。一覧は CLI 同梱の botocore モデルから機械的に出した
+- このフックはうっかり変更操作を打つのを止める関門であって、権限の境界ではない。本当の境界は `AgentVerifyAccess` の IAM 側と、Identity Center の割り当てにある
 - 判定のテストは [scripts/deny-aws-writes.test.mjs](../scripts/deny-aws-writes.test.mjs) にある。`node --test scripts/deny-aws-writes.test.mjs` で走り、CI では `.github/workflows/claude-hooks.yml` が回す
 - このフックも**クラウドでだけ判定する**。`permissions.deny` に書くとリポジトリ共有のためローカルの正当な管理作業（`sso-admin create-permission-set` など）まで止まり、実際に一度それで詰まった
 - Network access は `awsapps.com` と `*.amazonaws.com` への到達が必要。認証エラーに見える失敗はまずここを疑う
@@ -62,12 +62,12 @@ iPhone のブラウザ／Claude アプリからタスクを投げ、「タスク
 
 ## コスト・利用枠の注意
 
-- Web 版の利用は Max プランの共有枠（5時間枠＋週次枠）を消費する。ローカルの Claude Code やチャットと合算される
+- Web 版の利用は契約の共有枠（5時間枠＋週次枠）を消費する。ローカルの Claude Code やチャットと合算される
 - 残枠は `/usage` コマンドまたは Web／アプリの設定画面で確認する
 - Extra Usage（従量課金）を有効化する場合は Spending cap の設定を必須とする
 
 ## 動作確認の手順
 
 1. iPhone から小さなタスク（README の誤字修正など）を1件投げる
-2. PR が作られ、`infra/**` を触った場合は cdk diff がコメントされることを確認する
+2. PR が作られ、`infra/**` を触った場合は cdkd diff がコメントされることを確認する
 3. マージ後、GitHub Actions の deploy ワークフローが成功することを確認する

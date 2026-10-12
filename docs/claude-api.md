@@ -61,7 +61,7 @@ SDK の再試行はしない（`maxRetries: 0`、ソムリエは Strands の `re
 [llm] fallback {"fallback":true,"feature":"ocr","from":"anthropic","to":"bedrock","errorType":"credit_balance","status":400,"message":"..."}
 ```
 
-OCR とテイスティングノートはメトリクスフィルタ（`{env}-sakekasu` / `LlmFallbackCount`）で数え、1 時間に 3 回以上でアラーム `{env}-sakekasu-llm-fallback` が Slack に鳴る。ソムリエのログは Runtime のロググループ（`/aws/bedrock-agentcore/runtimes/...-DEFAULT`）に同じ形で出るが、フィルタはまだ作っていない。
+OCR とテイスティングノートはメトリクスフィルタ（`{env}-sakekasu` / `LlmFallbackCount`）で数え、1 時間に 3 回以上でアラーム `{env}-sakekasu-llm-fallback` が Slack に鳴る。ソムリエのログは Runtime のロググループ（`/aws/bedrock-agentcore/runtimes/...-DEFAULT`）に同じ形で出るが、メトリクスフィルタでは数えていない。
 
 ### 消費の記録
 
@@ -95,8 +95,6 @@ fields @timestamp, @message
 ソムリエのシステムプロンプトは、指示・今日の日付・検索の節（日付が変わるまで同じ）の後ろに `cachePoint` を置き、相談ごとに変わる「覚えている好み」をその後ろに回している。記録を引く tool を挟んでモデルを呼び直すたびに、前半はキャッシュから読まれる。
 
 OCR 用の画像は、フロントで長辺 1568px に縮小済み（[imageCompressor.ts](../src/features/image/utils/imageCompressor.ts)）。ソムリエのチャットに添付する写真も同じ関数を通る。サーバー側で縮め直してはいない。
-
-即時性の要らない OCR を Message Batches API に回せるよう、頼み方の組み立て（`buildLabelRequest`）と送信を分けてある。バッチ処理そのものは作っていない。
 
 ### AgentCore Memory
 
@@ -137,7 +135,7 @@ Bedrock の `InvokeModel` 権限はフォールバック用に残している。
 1. 宛先の条件キー（`sts:IdentityTokenAudience`）を持たない STS の操作をすべて拒否する。この条件キーを持つのは `GetWebIdentityToken` だけなので、`AssumeRole` などはこれまでどおり拒否のまま。AWS が STS に新しい操作を足しても、条件キーを持たなければここで止まる
 2. 宛先に Anthropic 以外が 1 つでも混ざった `GetWebIdentityToken` を拒否する
 
-このロールを乗っ取っても、作れる JWT で入れるのは Claude Console のルールが認めたワークスペースの推論だけで、AWS や他のサービスには入れない。
+このロールで作れる JWT で入れるのは Claude Console のルールが認めたワークスペースの推論だけで、AWS や他のサービスには入れない。
 
 ### ネットワーク
 
@@ -222,26 +220,7 @@ PR にしてマージすると、ロールに `sts:GetWebIdentityToken` が付�
 
 ## 2026-10-11 のデプロイ失敗
 
-切り替えの PR をマージした後のデプロイ（cdkd）が、古い実行ロールを消す段で止まった。cdkd のデプロイロール（`sakekasu-cdkd-deploy`）に `iam:ListInstanceProfilesForRole` が無かったため。cdkd はロールを消す前に、管理ポリシー・インラインポリシーを外し、インスタンスプロファイルを一覧してから `DeleteRole` を呼ぶ。cdkd に移ってからロールを消すのはこれが初めてで、それまで抜けに気づけなかった。
-
-巻き戻しは途中までしか戻らなかった。
-
-- OCR とテイスティングノートの Lambda は古いロールに戻ったが、そのロールの権限（インライン・管理ポリシーとも）は先に消えていて戻らなかった。ログも書けず、S3 も Bedrock も呼べない状態になった
-- 新しく作った `sakekasu-dev-llm-ocr-analyzer` / `sakekasu-dev-llm-tasting-note` は、同じ権限不足で消せずに残った。cdkd の state には「作成済み」として載っている（次の `cdkd diff` でロール本体が作成に出ない）。ただし巻き戻しの途中で管理ポリシーが外れていて、state の上では付いたままになっている。cdkd は state と比べて差分を当てるので、デプロイしても付け直さない
-
-直し方は次の順。
-
-1. デプロイロールに `iam:ListInstanceProfilesForRole` を足す（[cdkd-policies.ts](../infra/lib/cdkd-policies.ts)）。デプロイロールは `sakekasu-github-oidc` スタックなので、手動でデプロイする。このとき Permissions Boundary の変更も一緒に反映される
-2. 新しいロールに、外れた管理ポリシーを手で付け直す。テンプレートが期待しているのは次の 3 つ（ロールは消さない。消すと state と食い違い、次のデプロイがインラインポリシーを付ける段で落ちる）
-   ```sh
-   aws iam attach-role-policy --role-name sakekasu-dev-llm-ocr-analyzer \
-     --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-   aws iam attach-role-policy --role-name sakekasu-dev-llm-ocr-analyzer \
-     --policy-arn arn:aws:iam::aws:policy/CloudWatchLambdaApplicationSignalsExecutionRolePolicy
-   aws iam attach-role-policy --role-name sakekasu-dev-llm-tasting-note \
-     --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-   ```
-3. デプロイをやり直す（修正の PR をマージすると走る）。インラインポリシー（S3・Bedrock・X-Ray など）は新しく作られ、Lambda が新しいロールに付け替わり、古いロールが消える。古いロールのインラインポリシーは state から外れ済みで、残りも cdkd は「すでに無い」を飛ばして進む
+切り替え後のデプロイが、古い実行ロールを消す段で止まった。cdkd のデプロイロールに `iam:ListInstanceProfilesForRole` が無かったためで、[cdkd-policies.ts](../infra/lib/cdkd-policies.ts) に足し、外れた管理ポリシーを付け直してからデプロイし直して直した。
 
 ## 戻し方
 
@@ -260,13 +239,4 @@ PR にしてマージすると、ロールに `sts:GetWebIdentityToken` が付�
 | ソムリエ | [sommelier/app/sommelier/tests/test_llm_fallback.py](../sommelier/app/sommelier/tests/test_llm_fallback.py) | 呼び先の決め方、応答前だけのフォールバック、履歴の写し、キャッシュの区切り、usage のログ |
 | CDK（ソムリエ） | [sommelier/agentcore/cdk/test/cdk.test.ts](../sommelier/agentcore/cdk/test/cdk.test.ts) | ロール名、環境変数、STS の権限と条件 |
 
-実際に Claude API を呼ぶ確認（3 ターンの会話、長期記憶、実画像の OCR）は、ID 連携を有効にした後に手順 5 で行う。
-
-## やっていないこと
-
-- Bedrock 関連コードの削除
-- AgentCore Memory のリソース・ストラテジー・保存と取得の処理の変更
-- Claude Console 側の設定（手順 3。利用上限も手動）
-- ソムリエのフォールバックのメトリクスフィルタとアラーム（ログは出している）
-- ソムリエでモデルが断った（`stop_reason: refusal`）ときの Bedrock へのやり直し。Strands はこれを例外にしないので、応答が空のまま終わる。OCR とノートはやり直す
-- Batch API での OCR（頼み方の組み立てを分けただけ）
+実際に Claude API を呼ぶ確認（3 ターンの会話、長期記憶、実画像の OCR）は、手順 5 で行う。
