@@ -10,9 +10,9 @@
                                                                    │
                                                                    └→ 転送 Lambda → DevOps Agent Webhook
                                                                                          ↓
-                                                                      自動調査 → Slack（#sakekasu-builder-agent）
+                                                                      自動調査 → Slack（双方向用のプライベートチャンネル）
 
-人 ⇄ Slack（#sakekasu-builder-agent・プライベート）⇄ DevOps Agent
+人 ⇄ Slack（双方向用のプライベートチャンネル）⇄ DevOps Agent
      メンションで調査の開始・経過の照会・追加の指示
 ```
 
@@ -51,35 +51,8 @@ Agent Space は運用ツール専用のメンバーアカウント `ops-tooling`
 
 ### アラーム転送 Lambda（共通基盤へ移した）
 
-いまは共通基盤の `sakekasu-integrated-devops-agent-webhook`（同リポジトリの `infra/lambda/devops-agent-webhook/`）。
-共通トピックを購読し、DevOps Agent の Webhook に調査依頼を投げる。設定は Secrets Manager ではなく SSM の
-`/sakekasu-integrated/devops-agent/webhook` から読む（共通基盤のロールの境界が SSM だけを許すため）。
-以下はこのリポジトリにあった頃の `sakekasu-builder-dev-devops-agent-webhook` の説明で、考え方は共通基盤の版も同じ。
-優先度の表は 4 アプリのアラーム名に広げてある（共通基盤の `docs/monitoring.md`）。
-
-調査に回すのは、次の条件を満たすものだけ。エージェントは秒課金なので、鳴ったもの全部を投げると費用が読めなくなる。
-
-- CloudWatch アラームが `ALARM` に変わったとき。復旧（`OK`）とデータ不足では投げない
-- AWS Health のうち `issue`（実際の障害）だけ。予定された変更やお知らせは投げない。ただし AWS Health の通知は共通基盤（sakekasu-integrated_environment）へ移したので、いまはこのトピックに流れてこない。転送 Lambda の判定は残してある
-- 転送 Lambda 自身の失敗アラーム（`sakekasu-builder-dev-devops-agent-webhook-failure`）は捨てる。届かないことを届けようとして調査が積み上がるのを避けるため
-
-調査の識別子は「アラーム名 + 状態が変わった時刻」で作る。SNS が再試行しても同じ値になるので調査は1件に収まり、2度目の発報では別の値になるので重複として捨てられない。
-
-優先度は人間が「今すぐ見るべきか」を判断するためのもの。エージェントの調査の深さは変わらない。
-
-| 優先度 | 対象 |
-|--------|------|
-| CRITICAL | GraphQL が 5xx（`appsync-5xx`）。サイトが開けないことは共通基盤の外形監視（`sakekasu-integrated-health-check-builder`）が見ていて、共通基盤の転送が CRITICAL で調査に回す |
-| HIGH | ソムリエ・OCR・記録の読み書きの故障、その他の外形監視 |
-| MEDIUM | 利用者から見えない失敗（通知の失敗、画像削除の失敗、監視の停止） |
-
-表に無いアラームは HIGH に倒す。増やしたときに黙って埋もれるより、鳴りすぎて表を直す方を選んでいる。
-
-判定は上から順に見て最初に当たったものを使うが、MEDIUM だけは HIGH より先に評価する。監視の停止を表すアラーム（`watcher-*`）が名前に監視対象（`sommelier` など）を含むと、順に見たときに「その機能の故障」として HIGH に落ちてしまうため。壊れているのは監視の側なので MEDIUM が正しい。以前のソムリエのカナリア（`watcher-failure-sommelier-canary`）が実際にこの形だった。カナリアは消したが、並びはそのまま残してある。
-
-認証は HMAC を使う。本文と時刻をまとめて署名鍵でハッシュ化し、`x-amzn-event-signature` ヘッダーで送る。Bearer トークンより設定は面倒だが、鍵そのものが通信に乗らず、時刻が署名に入るので再送も弾ける。
-
-送り先のホストは `*.api.aws` だけを許している（実際の形は `https://event-ai.<region>.api.aws/webhook/generic/<id>`）。内部向けのアドレスを1つずつ弾く書き方もできるが、同じ宛先は `::ffff:169.254.169.254` のような別表記でも書けるため、塞ぎ漏れを追いかけ続けることになる。送り先が1つに決まっているなら、許す形だけを書く方が確実で、任意の外部ドメインへの送信も同時に塞げる。AWS 側がホスト名を変えたら `assertHttpsUrl` の許可パターンも直す（疎通確認で気づける）。リダイレクトは追わない設定にしてあるので、検証を通っていない先へ本文が渡ることもない。
+転送 Lambda はいま共通基盤（sakekasu-integrated_environment）にあり、共通トピックを購読して DevOps Agent の Webhook に調査依頼を投げる。
+調査に回す条件や優先度、認証などの作りは、共通基盤の `docs/monitoring.md` の「DevOps Agent への転送」にある。
 
 ## セットアップ手順
 
@@ -93,7 +66,7 @@ Security Agent の Agent Space（Issue #107 で同じ `ops-tooling` に移して
 
 ### 2. Slack を繋ぐ
 
-アカウントレベルで Slack を Capability Provider として登録し、Agent Space にチャンネル ID を紐付ける。紐付け先は双方向用の `#sakekasu-builder-agent` で、アラーム本体が流れる `#sakekasu-builder-alarm` とは分ける。調査の経過報告が細かく量も多いため、混ぜるとアラートが流れていく。
+アカウントレベルで Slack を Capability Provider として登録し、Agent Space にチャンネル ID を紐付ける。紐付け先は双方向用のプライベートチャンネルで、アラーム本体が流れる `#sakekasu-builder-alarm` とは分ける。調査の経過報告が細かく量も多いため、混ぜるとアラートが流れていく。
 
 認可のときに Enterprise Grid を選ばない。ワークスペース単位でインストールする。またインストールした Slack アプリはアンインストールしない。再インストールできなくなる可能性があると公式に注意書きがある。
 
@@ -109,22 +82,9 @@ Security Agent の Agent Space（Issue #107 で同じ `ops-tooling` に移して
 
 Agent Space の Capabilities タブから Webhook を作る。認証方式は HMAC を選ぶ（転送 Lambda がその前提で署名している）。表示される URL と署名鍵はこの1回しか見られないので、その場で控える。
 
-### 5. Webhook の設定をセカンダリに登録する
+### 5. Webhook の設定を登録する
 
-> いまの転送 Lambda（共通基盤）は、この Secrets Manager ではなく SSM の `/sakekasu-integrated/devops-agent/webhook` を読む。
-> この秘密から写す手順は共通基盤の `docs/monitoring.md` の「設定を登録する」にある。写し終えて共通基盤の転送が
-> 動いたのを確かめたら、この秘密は消してよい（このリポジトリのコードはもう読まない）。
-
-URL と鍵はリポジトリに置けないため、先に Secrets Manager へ入れる。CDK は名前で参照するだけ。
-
-```bash
-AWS_PROFILE=sakekasu-builder aws sts get-caller-identity
-
-AWS_PROFILE=sakekasu-builder aws secretsmanager create-secret \
-  --name dev-sakekasu/devops-agent/webhook \
-  --secret-string '{"webhookUrl":"https://event-ai.ap-northeast-1.api.aws/webhook/generic/XXXX","signingSecret":"<署名鍵>"}' \
-  --region ap-northeast-1
-```
+URL と鍵の登録先と手順は、共通基盤の `docs/monitoring.md` の「設定を登録する」にある。
 
 ### 6. デプロイする
 
@@ -181,7 +141,7 @@ DevOps Agent 自身のリソース（webhook の Lambda・ロググループ・�
 PROFILE=sakekasu-builder
 REGION=ap-northeast-1
 ACCOUNT=<アプリのアカウント ID>
-API_ID=6mtw5cju3naydf7mxnaoulowta
+API_ID='<API ID>'
 
 {
   aws lambda list-functions --profile $PROFILE --region $REGION \
@@ -219,36 +179,15 @@ done
 
 ### 8. 動作を確認する
 
-> 下の手順の関数 `sakekasu-builder-dev-devops-agent-webhook` は消した。いまは共通基盤の
-> `sakekasu-integrated-devops-agent-webhook` を呼ぶ（共通基盤の `docs/monitoring.md` の「動作を確かめる」）。
-
-Slack を鳴らさずに転送だけ試すなら、Lambda を直接呼ぶ。
-
-```bash
-AWS_PROFILE=sakekasu-builder aws lambda invoke \
-  --function-name sakekasu-builder-dev-devops-agent-webhook \
-  --region ap-northeast-1 \
-  --payload '{"Records":[{"Sns":{"Message":"{\"AlarmName\":\"TEST-devops-agent\",\"AlarmDescription\":\"[TEST] 疎通確認です。調査は不要です\",\"NewStateValue\":\"ALARM\",\"NewStateReason\":\"[TEST] Webhook の疎通確認\",\"Region\":\"Asia Pacific (Tokyo)\"}","Timestamp":"2026-08-09T00:00:00.000Z"}}]}' \
-  --cli-binary-format raw-in-base64-out /dev/stdout
-```
-
-DevOps Agent の Web アプリで `CloudWatch アラーム: TEST-devops-agent` の調査が始まれば通っている。
-
-HTTP 200 が返るのに調査が始まらないときは、本文の形式を疑う。4xx が返るときは署名かヘッダーの問題。
-
-識別子は `AlarmName` と `Timestamp` を繋いだもので、転送 Lambda のログに残る。
-
-```
-INFO 調査を依頼しました: TEST-devops-agent-20261004-2-2026-10-04T05:00:00.000Z（優先度 HIGH）
-```
+転送の疎通確認は共通基盤の `docs/monitoring.md` の「動作を確かめる」にある。
 
 **同じ識別子でなくても、内容が近ければ進行中の調査に合流する。** 2026-10-04 に `-2` を付けた
 2本目を流したところ、新しい調査は立たず Slack にも何も出なかった。API で見ると
 `LINKED` になっていた。
 
 ```
-73796125  CloudWatch アラーム: TEST-devops-agent-20261004    IN_PROGRESS
-2a08a9c4  CloudWatch アラーム: TEST-devops-agent-20261004-2  LINKED
+<タスク ID>  CloudWatch アラーム: TEST-devops-agent-20261004    IN_PROGRESS
+<タスク ID>  CloudWatch アラーム: TEST-devops-agent-20261004-2  LINKED
 ```
 
 捨てられたのではなく、既存の調査に紐付いている。進行中の調査がある状態でテストを流すときは、
@@ -260,21 +199,6 @@ aws devops-agent list-backlog-tasks \
   --profile verify-ops --region ap-northeast-1
 ```
 
-#### 転送 Lambda のログが空のとき
-
-ロググループはあるのにストリームが1つも無い、`storedBytes` が 0 のまま、という状態は
-実行ロールに CloudWatch Logs の権限が無い。
-
-```sh
-aws iam list-attached-role-policies \
-  --role-name sakekasu-dev-devops-agent-WebhookForwarderFunctionServi-002870db \
-  --profile verify
-```
-
-`AWSLambdaBasicExecutionRole` が出なければそれ。途中で落ちたデプロイが残した state のずれが
-原因で、`cdkd diff` には出てこない（[docs/cdkd-migration.md](cdkd-migration.md) の
-「途中で落ちたデプロイは state と実物をずらして残る」）。
-
 #### セカンダリのリソースが見えているかを確かめる
 
 双方向のチャンネルで直接訊く。これが一番早い。
@@ -283,15 +207,7 @@ aws iam list-attached-role-policies \
 @AWS DevOps Agent - AP (Tokyo) <アプリのアカウント ID> のアカウントで見えているリソースを教えて
 ```
 
-2026-10-04 に試したところ、S3 バケット12個・Lambda 関数33個・DynamoDB テーブル5個などが
-アカウント構成つきで返ってきた。デプロイしたばかりの `sakekasu-builder-dev-devops-agent-webhook` も
-「10/4作成」として認識されていた。
-
-返ってきた一覧には、タグを付けていないリソース（`sakekasu-kakeibo-dev-*`・`ReinventPlanner-*`・
-`sakekasu-learning-dev-*`・CDK のブートストラップ用バケット）も混ざっていた。これは仕様で、
-**タグはトポロジを組み立てる材料であって、エージェントが読める範囲の制限ではない**。
-AWS のドキュメントも、調査はトポロジに載っているリソースに限られず、サービス API を直接
-叩くことがあると書いている。読める範囲を絞りたければロールのポリシー側で絞る。
+タグはトポロジを組み立てる材料であって、エージェントが読める範囲の制限ではない。読める範囲はロールのポリシーで絞る。
 
 ## Slack の双方向通信
 
@@ -304,7 +220,7 @@ AWS のドキュメントも、調査はトポロジに載っているリソー�
 | チャンネル | 用途 | 向き |
 |-----------|------|------|
 | `#sakekasu-builder-alarm`（パブリック） | Slack 通知 Lambda が投げるアラーム本体 | 一方向 |
-| `#sakekasu-builder-agent`（プライベート・2026-10-04 新設） | エージェントとの会話 | 双方向 |
+| 双方向用のプライベートチャンネル（2026-10-04 新設） | エージェントとの会話 | 双方向 |
 
 当初は自動調査の経過用に DevOps Agent 専用チャンネルをもう1つ置く案だったが、作っていない。
 まずこの2つで運用し、調査の投稿が多すぎるようなら分ける。
@@ -312,7 +228,7 @@ AWS のドキュメントも、調査はトポロジに載っているリソー�
 アラームチャンネルを双方向に作り替えず別に足したのは、会話を始めたい人だけをメンバーにしたいため。
 アラームは広く見せておきたいので、パブリックのまま残す。
 
-**自動調査の投稿は `#sakekasu-builder-agent` だけに出る**（2026-10-04 にテストアラームで確認）。
+**自動調査の投稿は双方向用のプライベートチャンネルだけに出る**（2026-10-04 にテストアラームで確認）。
 Agent Space に紐付いている Slack の関連付けは1つで、投稿先はそのチャンネル1つだけ。
 `#sakekasu-builder-alarm` に流れるのは SNS → Slack 通知 Lambda の別系統なので、二重投稿は起きない。
 
@@ -374,7 +290,7 @@ Slack ワークスペースのアカウントレベル登録は済んでいる�
 ### 反応しないときに見るところ
 
 - **投げているチャンネルが双方向のものか。** パブリックチャンネルで話しかけても無反応のまま返事は来ない。
-  アラームが流れてくる `#sakekasu-builder-alarm` に質問を投げて詰まった実績がある。会話は `#sakekasu-builder-agent` で
+  アラームが流れてくる `#sakekasu-builder-alarm` に質問を投げて詰まった実績がある。会話は双方向用のプライベートチャンネルで
 - 東京リージョンのアプリがそのチャンネルのメンバーになっているか。リージョン違いのアプリを招待していないか
 - コンソールの Integrations で Bidirectional が Enabled か、表示されているロールが実在するか
 - 会話の最初のメッセージでアプリをメンションしているか。返答がすでにスレッドに付いていないか

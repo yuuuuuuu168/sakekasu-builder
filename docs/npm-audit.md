@@ -1,6 +1,6 @@
 # npm の脆弱性への対応
 
-`npm audit` の結果と、直さずに残しているものの理由。2026-10-04 時点。
+`npm audit` の結果と、残しているものの扱い。2026-10-04 時点。
 
 ## どこに入るか
 
@@ -45,15 +45,7 @@ lock の形式（lockfileVersion 3）は同じで、CI の `npm ci`（npm 10）�
 
 ## 残しているもの
 
-どれも開発・デプロイのときにしか動かず、外から入力が届かない。
-
-| 場所 | パッケージ | 残す理由 |
-| --- | --- | --- |
-| `infra/` | `braces`、`micromatch`、`fast-glob`、`@aws-cdk/cdk-assets-lib`、`@aws-cdk/toolkit-lib`、`cdk-local`、`@go-to-k/cdkd`（7 件） | すべて cdkd の依存。`braces` は修正版が無い。audit の提案は cdkd 0.169.0 への巻き戻しで、デプロイの挙動が変わるため取らない。overrides で動かすのも同じ理由で避ける。glob に渡るのはリポジトリ内の固定パターンと `cdk.out` のパスだけで、DoS を起こす入れ子のパターンが外から入る経路が無い |
-| `infra/`、`sommelier/agentcore/cdk` | `brace-expansion`（`aws-cdk-lib` 同梱。infra は 5.0.9、sommelier は 5.0.6） | `aws-cdk-lib` に bundled されているため overrides が効かない。最新の 2.272.0 でもまだ 5.0.9。合成時に CDK が自分の asset の除外パターンを展開するのに使うだけ。`aws-cdk-lib` が上がったら消える |
-
-sommelier の `aws-cdk-lib`（~2.261）は上げていない。上げても同梱の `brace-expansion` が直らず、
-デプロイされる中身だけが変わるため。
+本番のバンドルに入る依存に既知の脆弱性は無い。開発・デプロイ時だけの依存の残りは定期的に見直す。
 
 ## 取り直し方
 

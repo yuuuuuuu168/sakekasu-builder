@@ -25,15 +25,9 @@ AWS 管理の `ReadOnlyAccess` は 2912 アクションを許可し、そこに�
 - アタッチする AWS 管理ポリシー: `ReadOnlyAccess`
 - インラインポリシー: [agent-verify-deny-policy.json](agent-verify-deny-policy.json)
 
-CloudWatch Logs・メトリクス・Application Signals・X-Ray は**意図的に Deny していない**。障害調査でログ本文とトレースを読む必要があるため。ログ本文には Cognito sub が入りうることを承知のうえで許可している。ただし `logs:Unmask`（Data Protection のマスクを外す操作）は [cdkd-policies.ts](../infra/lib/cdkd-policies.ts) と揃えて Deny する。
+調査に要る読み取り（ログ・メトリクス・構成情報）は残す。ただし `logs:Unmask`（Data Protection のマスクを外す操作）は [cdkd-policies.ts](../infra/lib/cdkd-policies.ts) と揃えて Deny する。
 
 画像バケットは `s3:ListBucket` も Deny する。キーが `{cognito-sub}/{recordType}/{recordId}/{fileName}` の形（[presigned-url/index.ts](../infra/lambda/presigned-url/index.ts)）で、一覧するだけで利用者の Cognito sub が列挙できてしまうため。オブジェクト本文を読めなくても、これは利用者の識別子そのものが漏れる。アプリ側もログから sub を伏せており、そこと方針を揃える。CDK のアセットバケットなどは調査に使うので、Deny は画像バケットに限定する。
-
-一方、次は Deny していない。名前や設定は漏れるが値は漏れず、障害調査での利用価値が上回るため。
-
-- `secretsmanager:ListSecrets` / `DescribeSecret`（シークレット名とローテーション設定。値は `GetSecretValue` 側で Deny 済み）
-- `ssm:DescribeParameters`（パラメータ名。値は `GetParameter*` 側で Deny 済み）
-- `cognito-idp:DescribeUserPool` / `DescribeUserPoolClient` / `ListGroups`（プールの設定。利用者そのものは `ListUsers` / `AdminGetUser` 側で Deny 済み）
 
 ## 管理アカウントで追加した Deny
 
@@ -48,36 +42,23 @@ CloudWatch Logs・メトリクス・Application Signals・X-Ray は**意図的�
 
 これを `DenyDirectoryAndContactReads` で塞ぐ。`identitystore` はアクション名を `identitystore:*User*` のようにワイルドカードで書き、同じ系統の API が増えても漏れないようにしている。旧 API の `sso-directory` は名前の形で絞ると `DescribeDirectory` のような読み取りが漏れる（AWS Security Agent の指摘）うえ、グループは `identitystore` 側で見られるので、`sso-directory:*` で丸ごと塞ぐ。
 
-調査に使うので、次は Deny していない。
-
-| 残すもの | 理由 |
-|---|---|
-| `identitystore:ListGroups` / `DescribeGroup` | グループ名だけで、所属者は出ない |
-| `sso:ListAccountAssignments` / `ListPermissionSets` / `DescribePermissionSet` など | 割り当ての確認に要る。出るのはプリンシパル ID で、名前やメールは出ない |
-| `organizations:ListAccounts` / `DescribeAccount` | 組織の構成の確認に要る。各アカウントのルートのメールアドレスは出る |
-| Cost Explorer・CloudTrail・CloudWatch Logs | 請求と障害調査に要る |
+ここでも、調査に要る読み取り（ログ・メトリクス・構成情報）は残す。
 
 適用は、管理アカウントの管理者権限で `put-inline-policy-to-permission-set` を流し、下の「設定が正しいかを確かめる」にある再プロビジョニングまで行う（`ALL_PROVISIONED_ACCOUNTS` なので 3 アカウントのロールがまとめて更新される）。クラウドセッションからは `deny-aws-writes.sh` が止めるので、人が手で流す。
 
-追加後の判定は、適用前に同じシミュレーターへポリシーを渡して確かめた（`--policy-input-list`）。上の 4 系統は `explicitDeny`、残すものは `allowed` になる。適用後は同じコマンドから `--policy-input-list` を外して、実体のロールで同じ結果になることを確かめる。
+追加後の判定は、適用前に同じシミュレーターへポリシーを渡して確かめた（`--policy-input-list`）。上の 4 系統は `explicitDeny`、調査に要る読み取りは `allowed` になる。適用後は同じコマンドから `--policy-input-list` を外して、実体のロールで同じ結果になることを確かめる。
 
 ```sh
 ROLE=arn:aws:iam::<管理アカウント ID>:role/aws-reserved/sso.amazonaws.com/ap-northeast-1/AWSReservedSSO_AgentVerifyAccess_<接尾辞>
 aws iam simulate-principal-policy --profile verify-org --policy-source-arn $ROLE \
   --action-names identitystore:ListUsers identitystore:ListGroupMemberships sso-directory:SearchUsers \
-    account:GetContactInformation identitystore:ListGroups sso:ListAccountAssignments organizations:ListAccounts \
+    account:GetContactInformation ce:GetCostAndUsage logs:FilterLogEvents \
   --query 'EvaluationResults[].[EvalActionName,EvalDecision]' --output text
 ```
 
 ## この Deny が届かないところ
 
-明示 Deny は IAM の認可を通る呼び出しにしか効かない。**SSO Portal API（`aws sso ...`）と Cognito の利用者向け操作は SigV4 で署名されず**、access token だけで通るため、ここに何を書いても止まらない。CLI 同梱のモデルで確かめると `sso get-role-credentials` は `authtype: none` になっている。
-
-とくに問題になるのは `sso get-role-credentials` で、`aws sso login` が作ったトークンを渡すと、**ログインした人に割り当てられている任意の Permission Set**（`AdministratorAccess` を含む）の一時認証情報が返る。`AgentVerifyAccess` で入っていても、同じ人が他の Permission Set を持っていればそちらに乗り換えられる。
-
-[scripts/deny-aws-writes.mjs](../scripts/deny-aws-writes.mjs) は `sso login` を除く `sso` / `sso-oidc` と、IAM が届かない Cognito 操作をすべて落とすようにしてある。ただしトークンは `~/.aws/sso/cache/` に平文で置かれるので、CLI の動詞を止めるだけでは塞ぎきれない。
-
-**この経路の本当の境界は Identity Center 側の割り当てにある。** クラウドセッションから `aws sso login` する人には `AgentVerifyAccess` 以外の Permission Set を割り当てない（別のユーザーを使う）のが、唯一の確実な塞ぎ方になる。
+クラウドセッションの承認には `AgentVerifyAccess` だけを割り当てた専用ユーザーを使う。SSO Portal や Cognito の利用者向け操作は IAM の外なので、境界は Identity Center の割り当てにある。
 
 ## 作成状況
 
@@ -90,14 +71,14 @@ aws iam simulate-principal-policy --profile verify-org --policy-source-arn $ROLE
 | インスタンス | `arn:aws:sso:::instance/<インスタンス ID>`（管理アカウント <管理アカウント ID> 所有） |
 | Permission Set | `arn:aws:sso:::permissionSet/<インスタンス ID>/<Permission Set ID>` |
 | セッション時間 | `PT12H`（既存の `AdministratorAccess` / `ReadOnlyAccess` に揃えた） |
-| 割り当て先 | グループ `sakekasu`（既存もグループ割り当てのため揃えた）。アカウント <アプリのアカウント ID>（アプリ、2026-08-17）、<管理アカウント ID>（管理）と <運用アカウント ID>（運用ツール）（2026-09-26 に追加） |
+| 割り当て先 | クラウドセッションの承認専用のユーザー（グループ経由）。アカウント <アプリのアカウント ID>（アプリ、2026-08-17）、<管理アカウント ID>（管理）と <運用アカウント ID>（運用ツール）（2026-09-26 に追加） |
 
 作り直す場合の手順は次のとおり。管理アカウント（<管理アカウント ID>）の認証が必要で、メンバーアカウントからは `sso:ListPermissionSets` すら通らない。
 
-**`sso-admin` のコマンドは、管理アカウントのプロファイル（ローカルの `yuuuuuuuki7749`）とリージョン `ap-northeast-1` で流す。** アプリのアカウント（<アプリのアカウント ID>）の `AdministratorAccess` で流すと、`the resource does not exist in this Region` を含む `AccessDeniedException` になる（2026-09-26 に実際に踏んだ）。ローカルの SSO が期限切れなら、先に `aws sso login --profile yuuuuuuuki7749` を流す。最初の `get-caller-identity` で `<管理アカウント ID>` が返ることを確かめてから先へ進む。zsh の対話モードでは `#` で始まる行がコメントにならない（`command not found: #` になる）ので、コードブロック中のコメント行は貼らずに飛ばす。
+**`sso-admin` のコマンドは、管理アカウントのプロファイルとリージョン `ap-northeast-1` で流す。** アプリのアカウント（<アプリのアカウント ID>）の `AdministratorAccess` で流すと、`the resource does not exist in this Region` を含む `AccessDeniedException` になる（2026-09-26 に実際に踏んだ）。ローカルの SSO が期限切れなら、先に `aws sso login --profile <管理アカウントのプロファイル>` を流す。最初の `get-caller-identity` で `<管理アカウント ID>` が返ることを確かめてから先へ進む。zsh の対話モードでは `#` で始まる行がコメントにならない（`command not found: #` になる）ので、コードブロック中のコメント行は貼らずに飛ばす。
 
 ```sh
-export AWS_PROFILE=yuuuuuuuki7749 AWS_REGION=ap-northeast-1
+export AWS_PROFILE=<管理アカウントのプロファイル> AWS_REGION=ap-northeast-1
 aws sts get-caller-identity --query Account --output text
 INST=$(aws sso-admin list-instances --query 'Instances[0].InstanceArn' --output text)
 
@@ -117,7 +98,7 @@ aws sso-admin put-inline-policy-to-permission-set --instance-arn $INST \
 aws sso-admin create-account-assignment --instance-arn $INST \
   --permission-set-arn <PERMISSION_SET_ARN> \
   --target-id <アプリのアカウント ID> --target-type AWS_ACCOUNT \
-  --principal-id 97242a68-30e1-70ce-49a7-0ba461fb1bf2 --principal-type GROUP
+  --principal-id <グループ ID> --principal-type GROUP
 ```
 
 なお [scripts/deny-aws-writes.sh](../scripts/deny-aws-writes.sh) により、クラウドセッションからは `create-*` / `put-*` 系が実行できない。これらはローカルまたは人間が手で流す。
@@ -127,7 +108,7 @@ aws sso-admin create-account-assignment --instance-arn $INST \
 インラインポリシーの投入（3番目のコマンド）を飛ばすと、土台の `ReadOnlyAccess` がむき出しになり、利用者データが読める状態で気づけない。作成・変更のたびに、実際に入っている内容がリポジトリの定義と一致するか確認する。上と同じく管理アカウントのプロファイルで流す。
 
 ```sh
-export AWS_PROFILE=yuuuuuuuki7749 AWS_REGION=ap-northeast-1
+export AWS_PROFILE=<管理アカウントのプロファイル> AWS_REGION=ap-northeast-1
 aws sts get-caller-identity --query Account --output text
 INST=$(aws sso-admin list-instances --query 'Instances[0].InstanceArn' --output text)
 PS=<上の list-permission-sets で引いた AgentVerifyAccess の ARN>
@@ -148,7 +129,7 @@ aws sso-admin describe-permission-set-provisioning-status --instance-arn $INST \
   --provision-permission-set-request-id <REQUEST_ID> --query 'PermissionSetProvisioningStatus.Status'
 
 # 対象アカウント（<アプリのアカウント ID>）側で、実体のロールに入っているか確かめる
-aws iam get-role-policy --role-name AWSReservedSSO_AgentVerifyAccess_13e5a14e9d6af7d8 \
+aws iam get-role-policy --role-name AWSReservedSSO_AgentVerifyAccess_<接尾辞> \
   --policy-name AwsSSOInlinePolicy --query 'PolicyDocument.Statement[].Sid'
 ```
 
@@ -177,7 +158,6 @@ aws iam get-role-policy --role-name AWSReservedSSO_AgentVerifyAccess_13e5a14e9d6
 | `identitystore:ListUsers` / `DescribeUser` / `ListGroupMemberships` | explicitDeny |
 | `sso-directory:SearchUsers` / `DescribeDirectory` | explicitDeny |
 | `account:GetContactInformation` / `GetPrimaryEmail` | explicitDeny |
-| `identitystore:ListGroups`、`sso:ListAccountAssignments`、`organizations:ListAccounts` | allowed |
 | `ce:GetCostAndUsage`、`logs:FilterLogEvents` | allowed |
 
 `s3api get-object` を試すときは**実在するオブジェクトのキー**を使うこと。存在しないキーだと、`s3:ListBucket` を持っているぶん S3 が `NoSuchKey`（404）を返し、GetObject の認可結果が観測できない。
