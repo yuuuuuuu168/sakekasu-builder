@@ -1,5 +1,7 @@
 # AgentCore Phase 1 MVP 設計ドキュメント
 
+> 実装前に書いた設計の記録。ここに挙げた相談の種類はすべて実装済みで、いまの構成は [README](../README.md) の「AgentCore ソムリエエージェント」にある。
+
 ## 背景
 
 READMEの機能 #21〜#23 で構想した「パーソナル酒ソムリエ・エージェント」のうち、Phase 1（対話型機能）を実装する。MVP として最小の 1 機能（**在庫相談**）だけ先にリリースし、動作確認後に残りの機能（ペアリング・銘柄レコメンド・酒知識 Q&A）を追加していく。
@@ -154,7 +156,3 @@ AgentCore Runtime 用 IAM Role に以下を付与：
 - [Authenticate with Inbound Auth and Outbound Auth](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html)
 - [Supported AWS Regions](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-regions.html)
 - [AgentCore code samples (GitHub)](https://github.com/awslabs/amazon-bedrock-agentcore-samples)
-
-## 次のステップ
-
-このドキュメントがマージされたら、実装ロードマップの PR #1（AgentCore CLI scaffold）から着手する。

@@ -69,15 +69,9 @@ aws iam simulate-principal-policy --profile verify-org --policy-source-arn $ROLE
   --query 'EvaluationResults[].[EvalActionName,EvalDecision]' --output text
 ```
 
-## この Deny が届かないところ
+## Identity Center 側の割り当て
 
-明示 Deny は IAM の認可を通る呼び出しにしか効かない。**SSO Portal API（`aws sso ...`）と Cognito の利用者向け操作は SigV4 で署名されず**、access token だけで通るため、ここに何を書いても止まらない。CLI 同梱のモデルで確かめると `sso get-role-credentials` は `authtype: none` になっている。
-
-とくに問題になるのは `sso get-role-credentials` で、`aws sso login` が作ったトークンを渡すと、**ログインした人に割り当てられている任意の Permission Set**（`AdministratorAccess` を含む）の一時認証情報が返る。`AgentVerifyAccess` で入っていても、同じ人が他の Permission Set を持っていればそちらに乗り換えられる。
-
-[scripts/deny-aws-writes.mjs](../scripts/deny-aws-writes.mjs) は `sso login` を除く `sso` / `sso-oidc` と、IAM が届かない Cognito 操作をすべて落とすようにしてある。ただしトークンは `~/.aws/sso/cache/` に平文で置かれるので、CLI の動詞を止めるだけでは塞ぎきれない。
-
-**この経路の本当の境界は Identity Center 側の割り当てにある。** クラウドセッションから `aws sso login` する人には `AgentVerifyAccess` 以外の Permission Set を割り当てない（別のユーザーを使う）のが、唯一の確実な塞ぎ方になる。
+明示 Deny は IAM の認可を通る呼び出しにしか効かない。SSO Portal API（`aws sso ...`）と Cognito の利用者向け操作は IAM の認可を通らないので、そちらの境界は Identity Center 側の割り当てにある。クラウドセッションから `aws sso login` する人には、`AgentVerifyAccess` 以外の Permission Set を割り当てない（別のユーザーを使う）。
 
 ## 作成状況
 
@@ -94,10 +88,10 @@ aws iam simulate-principal-policy --profile verify-org --policy-source-arn $ROLE
 
 作り直す場合の手順は次のとおり。管理アカウント（<管理アカウント ID>）の認証が必要で、メンバーアカウントからは `sso:ListPermissionSets` すら通らない。
 
-**`sso-admin` のコマンドは、管理アカウントのプロファイル（ローカルの `yuuuuuuuki7749`）とリージョン `ap-northeast-1` で流す。** アプリのアカウント（<アプリのアカウント ID>）の `AdministratorAccess` で流すと、`the resource does not exist in this Region` を含む `AccessDeniedException` になる（2026-09-26 に実際に踏んだ）。ローカルの SSO が期限切れなら、先に `aws sso login --profile yuuuuuuuki7749` を流す。最初の `get-caller-identity` で `<管理アカウント ID>` が返ることを確かめてから先へ進む。zsh の対話モードでは `#` で始まる行がコメントにならない（`command not found: #` になる）ので、コードブロック中のコメント行は貼らずに飛ばす。
+**`sso-admin` のコマンドは、管理アカウントのプロファイル（以下 `<管理アカウントのプロファイル>`）とリージョン `ap-northeast-1` で流す。** アプリのアカウント（<アプリのアカウント ID>）の `AdministratorAccess` で流すと、`the resource does not exist in this Region` を含む `AccessDeniedException` になる（2026-09-26 に実際に踏んだ）。ローカルの SSO が期限切れなら、先に `aws sso login --profile <管理アカウントのプロファイル>` を流す。最初の `get-caller-identity` で `<管理アカウント ID>` が返ることを確かめてから先へ進む。zsh の対話モードでは `#` で始まる行がコメントにならない（`command not found: #` になる）ので、コードブロック中のコメント行は貼らずに飛ばす。
 
 ```sh
-export AWS_PROFILE=yuuuuuuuki7749 AWS_REGION=ap-northeast-1
+export AWS_PROFILE=<管理アカウントのプロファイル> AWS_REGION=ap-northeast-1
 aws sts get-caller-identity --query Account --output text
 INST=$(aws sso-admin list-instances --query 'Instances[0].InstanceArn' --output text)
 
@@ -117,7 +111,7 @@ aws sso-admin put-inline-policy-to-permission-set --instance-arn $INST \
 aws sso-admin create-account-assignment --instance-arn $INST \
   --permission-set-arn <PERMISSION_SET_ARN> \
   --target-id <アプリのアカウント ID> --target-type AWS_ACCOUNT \
-  --principal-id 97242a68-30e1-70ce-49a7-0ba461fb1bf2 --principal-type GROUP
+  --principal-id <グループ sakekasu の ID> --principal-type GROUP
 ```
 
 なお [scripts/deny-aws-writes.sh](../scripts/deny-aws-writes.sh) により、クラウドセッションからは `create-*` / `put-*` 系が実行できない。これらはローカルまたは人間が手で流す。
@@ -127,7 +121,7 @@ aws sso-admin create-account-assignment --instance-arn $INST \
 インラインポリシーの投入（3番目のコマンド）を飛ばすと、土台の `ReadOnlyAccess` がむき出しになり、利用者データが読める状態で気づけない。作成・変更のたびに、実際に入っている内容がリポジトリの定義と一致するか確認する。上と同じく管理アカウントのプロファイルで流す。
 
 ```sh
-export AWS_PROFILE=yuuuuuuuki7749 AWS_REGION=ap-northeast-1
+export AWS_PROFILE=<管理アカウントのプロファイル> AWS_REGION=ap-northeast-1
 aws sts get-caller-identity --query Account --output text
 INST=$(aws sso-admin list-instances --query 'Instances[0].InstanceArn' --output text)
 PS=<上の list-permission-sets で引いた AgentVerifyAccess の ARN>
@@ -148,7 +142,7 @@ aws sso-admin describe-permission-set-provisioning-status --instance-arn $INST \
   --provision-permission-set-request-id <REQUEST_ID> --query 'PermissionSetProvisioningStatus.Status'
 
 # 対象アカウント（<アプリのアカウント ID>）側で、実体のロールに入っているか確かめる
-aws iam get-role-policy --role-name AWSReservedSSO_AgentVerifyAccess_13e5a14e9d6af7d8 \
+aws iam get-role-policy --role-name AWSReservedSSO_AgentVerifyAccess_<接尾辞> \
   --policy-name AwsSSOInlinePolicy --query 'PolicyDocument.Statement[].Sid'
 ```
 

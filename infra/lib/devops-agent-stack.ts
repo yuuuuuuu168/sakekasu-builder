@@ -27,9 +27,8 @@ export interface DevOpsAgentStackProps extends cdk.StackProps {
  * まとめて調査に回すため、共通基盤（sakekasu-integrated_environment）の共通トピックへ移した
  * （docs/devops-agent.md）。builder のアラームも共通トピックへ送る（monitoring-stack.ts）。
  *
- * ロールはアカウント全体を読むもので、本来は共通基盤が持つのが筋だが、ここに残している。
- * 共通基盤のロールの境界は許可リストで iam:* を拒否していて、AIDevOpsAgentAccessPolicy と
- * iam:CreateServiceLinkedRole を持つこのロールをそのままでは作れないため。
+ * ロールは共通基盤ではなくこのスタックに置く。共通基盤のロールの境界の中では、
+ * このロールが要る権限（AIDevOpsAgentAccessPolicy）を持たせられないため。
  *
  * Agent Space の ARN が決まって初めて意味を持つため、コンテキストに
  * `agentSpaceArn` が入っているときだけ合成される（README の手順を参照）。
