@@ -457,7 +457,7 @@ Agent Space は運用ツール専用アカウント（`ops-tooling`）に置き�
 
 エージェントは秒課金なので、投げるものを絞っている。アラームは `ALARM` に変わったときだけ（復旧では投げない）、AWS Health は障害（`issue`）だけ、転送 Lambda 自身の失敗アラームは捨てる。判定は共通基盤の `infra/lambda/devops-agent-webhook` にある。
 
-調査結果を読んだ先で追加の指示を出したくなるぶんは、双方向用のプライベートチャンネルで受ける。メンションで調査を始めたり、経過や根拠を聞いたりできて、返答は元メッセージのスレッドに積まれる。双方向はプライベートチャンネルでしか有効にできず、有効化には `AIDevOpsChannelAccessPolicy` を付けた IAM ロールが要る。CloudFormation 側にまだ双方向のフィールドが無いため、この設定はコンソールでの手作業になる。
+調査結果を読んだ先で追加の指示を出したくなるぶんは、双方向用のプライベートチャンネルで受ける。メンションで調査を始めたり、経過や根拠を聞いたりできて、返答は元メッセージのスレッドに積まれる。双方向はプライベートチャンネルでしか有効にできず、有効化には `AIDevOpsChannelAccessPolicy` を付けた IAM ロールが要る。CloudFormation 側に双方向のフィールドが無いため、この設定はコンソールでの手作業になる。
 
 エージェントに渡してある権限は読み取り専用のクロスアカウントロールだけなので、Slack から何を頼んでもアプリ側のリソースは変わらない。
 
@@ -471,7 +471,7 @@ Agent Space は運用ツール専用アカウント（`ops-tooling`）に置き�
 
 計装が入っているのは OCR（`ocr-analyzer`、2026-08-10）と画像アップロードの入口（`presigned-url`、2026-08-16）の2つ。一度は起動ラッパーとレイヤーの組み合わせを取り違えて関数を止め、切り戻してから1つずつ入れ直した（[240874a](https://github.com/yuuuuuuu168/sakekasu-builder/commit/240874a9ccd60355673d07b036be30aaa5e9ff52) → [89b6ccd](https://github.com/yuuuuuuu168/sakekasu-builder/commit/89b6ccd0c9bd5f35de71dcc414d3041ebbcb56a1)）。アカウント側の設定（サービス検出・Transaction Search）はソムリエの GenAI Observability を入れたときから有効で、アカウントに1つの設定なので CDK では管理していない。
 
-監視系の関数（health-check / slack-notifier）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。この2つは従来どおり Lambda 標準メトリクス由来のエラー率と実行時間までしか見えない。計装が無かった頃でもエラー率は追えたので、それで既存のバグを1件見つけている（[51be30d](https://github.com/yuuuuuuu168/sakekasu-builder/commit/51be30d1a106bc1251501bbb7a831b555f0ca3f8)）。
+外形監視の関数（health-check）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。この関数は従来どおり Lambda 標準メトリクス由来のエラー率と実行時間までしか見えない。計装が無かった頃でもエラー率は追えたので、それで既存のバグを1件見つけている（[51be30d](https://github.com/yuuuuuuu168/sakekasu-builder/commit/51be30d1a106bc1251501bbb7a831b555f0ca3f8)）。
 
 SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 90% と「90% が15秒未満」。しきい値は日次の実測（p50/p90/p99）から決めた。割ったらアラームが鳴り、そのしきい値は SLO の目標と同じ定数から取っている。別々に書くと、片方だけ動かしたときに「SLO は未達なのにアラームは鳴らない」が黙って生まれる。
 
@@ -487,7 +487,7 @@ SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 9
 - AWS CDK（AppSync + DynamoDB）
 - Amazon Cognito（4 アプリ共通のユーザープールとマネージドログイン。[docs/shared-login.md](docs/shared-login.md)）
 - AWS S3（画像ストレージ）
-- Amplify（フロントエンドホスティング）
+- S3 + CloudFront（フロントエンドの配信。[docs/sake-subdomain.md](docs/sake-subdomain.md)）
 - Amazon Bedrock AgentCore Runtime + AgentCore Memory + Strands Agents（Python）※ソムリエ
 - Claude API（Claude Haiku 5.5。API キーなしの Workload Identity Federation）※OCR・テイスティングノート・ソムリエ。失敗したら Amazon Bedrock（Claude Haiku 4.5）でやり直す（[docs/claude-api.md](docs/claude-api.md)）
 - react-day-picker（カレンダー）
@@ -533,7 +533,6 @@ aidlc/           # AI-DLC のルールと成果物
 |------------|------|
 | [docs/claude-api.md](docs/claude-api.md) | Claude API への切り替え（ID 連携・Bedrock へのフォールバック・環境変数・IAM の差分・有効にする手順） |
 | [docs/shared-login.md](docs/shared-login.md) | 共通ログインへの切り替え（変わったこと・旧プールを外す手順・カナリア・旧 sub から新 sub へのデータの付け替えの記録） |
-| [docs/agentcore-phase1-design.md](docs/agentcore-phase1-design.md) | ソムリエ Phase 1 の設計（認証の二段構え・ツール設計・決定事項） |
 | [docs/devops-agent.md](docs/devops-agent.md) | DevOps Agent のセットアップ手順・Slack の双方向通信・優先度の割り当て・カスタムスキル・費用 |
 | [docs/application-signals.md](docs/application-signals.md) | Application Signals の計装対象・デプロイ後の確認手順・SLO の決め方・費用 |
 | [docs/claude-code-web.md](docs/claude-code-web.md) | Claude Code on the web での開発環境（外出先から PR まで） |
@@ -570,7 +569,7 @@ AWS_PROFILE=sakekasu-builder npx cdk diff --context env=dev
 - main に push（= PR マージ）されると GitHub Actions が対象を分けてデプロイする
   - `infra/**` → `.github/workflows/deploy.yml` が cdkd でデプロイ
   - `sommelier/**` → `.github/workflows/deploy-sommelier.yml` が AgentCore スタックを `aws-cdk deploy --all`
-- PR を開くと `cdk diff` の結果が自動でコメントされる（`.github/workflows/cdk-diff.yml`。対象は infra のみ。フォークと Dependabot の PR では走らない）
+- PR を開くと `cdkd diff` の結果が自動でコメントされる（`.github/workflows/cdk-diff.yml`。対象は infra のみ。フォークと Dependabot の PR では走らない）
 - 認証はどちらも OIDC（`sakekasu-github-oidc` スタックの deploy ロール）。リポジトリにアクセスキーは置かない
 
 ワークフローを2つに分けているのは、`paths` がワークフロー単位でしか効かないため。1つにまとめると、片方だけの変更でもう片方のデプロイまで走る。

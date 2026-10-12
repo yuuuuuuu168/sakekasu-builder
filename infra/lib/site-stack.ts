@@ -47,8 +47,8 @@ export function siteBucketName(envName: string, account: string): string {
  * フロントの配信（docs/sake-subdomain.md）。S3 に置いて CloudFront から OAC で読む。
  *
  * 以前は Amplify Hosting がコンソールの設定だけで配っていて、ビルド設定・
- * リライト・セキュリティヘッダ・ドメインがすべて IaC の外にあった
- * （docs/amplify-exit.md）。サブドメイン（sake.）へ移るのに合わせて CDK に載せる。
+ * リライト・セキュリティヘッダ・ドメインがすべて IaC の外にあった。
+ * サブドメイン（sake.）へ移るのに合わせて CDK に載せた。
  *
  * CloudFront の証明書は us-east-1 にしか置けないので、このスタックごと us-east-1 に置く。
  *
@@ -62,7 +62,7 @@ export function siteBucketName(envName: string, account: string): string {
  *
  * 配信物は GitHub Actions（deploy-site.yml）から `aws s3 sync` で置く。CDK の
  * BucketDeployment は使わない。Lambda 製のカスタムリソースが増え、CloudFormation へ
- * 戻す退路（cdkd export）を塞ぐため（docs/amplify-exit.md の「移行するとしたら」）。
+ * 戻す退路（cdkd export）を塞ぐため。
  *
  * キャッシュの無効化（CreateInvalidation）は打たない。index.html は
  * `Cache-Control: no-cache` で置き、CACHING_OPTIMIZED の最小 TTL（1 秒）しか
@@ -104,8 +104,8 @@ export class SiteStack extends cdk.Stack {
     const graphqlOrigin = new URL(props.graphqlUrl).origin;
 
     /**
-     * セキュリティヘッダ。Amplify のコンソールにあった 7 種（docs/amplify-exit.md の
-     * 「セキュリティヘッダ」）を引き継いだうえで、CSP を締めた。
+     * セキュリティヘッダ。Amplify のコンソールに設定していた 7 種を引き継いだうえで、
+     * CSP を締めた。
      *
      * - script-src から 'unsafe-inline' と 'unsafe-eval' を外した。Vite の出力に
      *   インラインのスクリプトも eval / new Function も無い（ビルドして確かめた）

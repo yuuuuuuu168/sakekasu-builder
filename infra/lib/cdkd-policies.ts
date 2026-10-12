@@ -507,8 +507,8 @@ function siteDeliveryStatements(siteZone: string): iam.PolicyStatement[] {
       ],
       resources: ['*'],
     }),
-    // ResponseHeadersPolicy は cdkd の対応表に無く Cloud Control API で作られる
-    // （docs/amplify-exit.md）。その先で cloudfront の API が呼ばれるので、ここで許可する
+    // ResponseHeadersPolicy は cdkd の対応表に無く Cloud Control API で作られる。
+    // その先で cloudfront の API が呼ばれるので、ここで許可する
     new iam.PolicyStatement({
       sid: 'ManageSiteDistribution',
       actions: [
