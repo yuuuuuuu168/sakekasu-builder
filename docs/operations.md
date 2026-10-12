@@ -3,7 +3,7 @@
 README から移した、手で打つ運用手順をまとめる。通常のデプロイは main へのマージで GitHub Actions が行うので、
 ここに載っているのはワークフローが使えないとき、Actions の対象外のスタック、デプロイ後の確認に限る。
 
-リソース名やアカウント ID はここに書かず、定義元のファイルを示す。`<...>` は手元で置き換える。
+シークレット名・パラメータ名・アカウント ID はここに書かず、定義元のファイルを示す。`<...>` は手元で置き換える。
 
 ## ソムリエ
 
@@ -91,9 +91,7 @@ AWS_PROFILE=sakekasu-builder aws bedrock-agentcore list-memory-records \
 
 抽出は非同期だが、2026-08-09 に確かめたかぎりでは会話の1〜2分後にはレコードが入っていた。空のまましばらく変わらないなら、どちら側が止まっているかで切り分ける。イベント自体が入っていないなら書き込み側（`CreateEvent`）の問題で、Runtime のログに「好みの記録に失敗しました」が出ているはず。
 
-イベントはあるのにレコードが増えないなら抽出側の問題。ここで実行ロールを疑いたくなるが、**疑わなくてよい**。L3 コンストラクトが作る Memory の実行ロールには信頼ポリシーだけで権限ポリシーが1つも付いておらず、それでも抽出は動いている（2026-08-09 に実測）。プロンプトもモデルも差し替えていない素の組み込みストラテジは AWS 側の推論で動くため、`memoryExecutionRoleArn` に Bedrock の権限は要らない（[Customize a built-in strategy or create your own strategy](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory-custom-strategy.html) が権限を要求しているのは、組み込みを上書きした場合と自前ストラテジの場合）。
-
-ストラテジを上書きするよう変えたときは話が別で、そのときは実行ロール（`AgentCore-sommelier-dev` スタックが作る `...MemoryPreferenceExecutionRole...`）に `AmazonBedrockAgentCoreMemoryBedrockModelInferenceExecutionRolePolicy` が要る。
+イベントはあるのにレコードが増えないなら抽出側の問題。ただし Memory の実行ロールは疑わなくてよい。素の組み込みストラテジは AWS 側の推論で動くので、実行ロールに Bedrock の権限は要らない（[Customize a built-in strategy or create your own strategy](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory-custom-strategy.html)）。ストラテジを上書きするよう変えたときだけ、実行ロールに `AmazonBedrockAgentCoreMemoryBedrockModelInferenceExecutionRolePolicy` が要る。
 
 ## 毎日の利用料金 Slack 通知（管理アカウント）
 
@@ -128,13 +126,10 @@ AWS_PROFILE=<管理アカウントのプロファイル> aws lambda invoke \
 
 ## DevOps Agent のクロスアカウントロール
 
-`agentSpaceArn` があるときだけスタックが合成される。Actions では secret `AGENT_SPACE_ARN` から入る。手元で差分を見るときなどは次のように渡す。
-
-```bash
-cd infra
-AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev \
-  -c agentSpaceArn=<Agent Space の ARN>
-```
+手で打つものは無い。他のアプリのスタックと同じく、main へのマージで deploy ワークフローが cdkd で出す
+（`agentSpaceArn` は secret `AGENT_SPACE_ARN` から入る）。**手元から `cdk deploy` を打たない。** cdkd に移した
+スタックなので、依存するスタックごとゼロから作り直そうとして既存リソースと名前がぶつかる
+（[aws-infra-rules.md](aws-infra-rules.md) の「デプロイ」）。計画を先に見たいときは PR の `cdk-diff` を読む。
 
 セットアップの全体は [devops-agent.md](devops-agent.md) にある。
 
@@ -143,13 +138,11 @@ AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-dev-devops-agent -c env=dev
 `sakekasu-github-oidc` は Actions に自分のロールを触らせないため、手でデプロイする。
 
 ```bash
-cd infra
+git pull
+cd infra && npm ci
+AWS_PROFILE=sakekasu-builder npx cdk diff sakekasu-github-oidc -c github-oidc=true
+# 差分が PR に書いたものだけなのを確かめてから。ロールの削除や replace が出たら止まる
 AWS_PROFILE=sakekasu-builder npx cdk deploy sakekasu-github-oidc -c github-oidc=true
 ```
 
 これで OIDC プロバイダーと deploy / diff ロール、それに cdkd 用のデプロイロールが作られ、以後 Actions が動くようになる。
-
-## 後片付け
-
-監視の送り先を共通基盤へ移す前に builder が読んでいた Slack Webhook URL の SSM パラメータは、もう読まれていない。
-残っていれば消してよい。
