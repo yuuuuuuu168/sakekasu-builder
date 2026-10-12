@@ -449,6 +449,27 @@ describe('GithubOidcStack', () => {
     expect(allows(statements, 'application-signals:TagResource')).toBe(true);
   });
 
+  // SLO の作成・更新ハンドラは除外ウィンドウも読み書きする（CloudFormation の型の
+  // handlers.update.permissions）。2026-10-11 にタグを足すだけの更新がここで AccessDenied になった
+  it('cdkd のデプロイロールは SLO の更新ハンドラが要る権限を全部持つ', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+
+    for (const action of [
+      'application-signals:UpdateServiceLevelObjective',
+      'cloudwatch:GetMetricData',
+      'application-signals:TagResource',
+      'application-signals:UntagResource',
+      'application-signals:GetServiceLevelObjective',
+      'application-signals:ListTagsForResource',
+      'application-signals:ListServiceLevelObjectiveExclusionWindows',
+      'application-signals:BatchUpdateExclusionWindows',
+      'rum:GetAppMonitor',
+      'rum:BatchGetRumMetricDefinitions',
+    ]) {
+      expect(allows(statements, action), `${action} が許可されていない`).toBe(true);
+    }
+  });
+
   // サービス検出はアカウントに1つの設定で、スタックから外して守っている。
   // 一度これを消しかけてソムリエの可観測性を道連れにしている。
   // application-signals:* にすると IAM の側から素通りで触れてしまう
@@ -471,6 +492,8 @@ describe('GithubOidcStack', () => {
 
     expect(allows(statements, 'application-signals:GetServiceLevelObjective')).toBe(true);
     expect(allows(statements, 'application-signals:ListServiceLevelObjectives')).toBe(true);
+    // 読み取りハンドラ（handlers.read.permissions）も除外ウィンドウを読む
+    expect(allows(statements, 'application-signals:ListServiceLevelObjectiveExclusionWindows')).toBe(true);
   });
 
   // diff ロールは読み取り専用。SLO も例外ではない
@@ -481,6 +504,7 @@ describe('GithubOidcStack', () => {
       'application-signals:CreateServiceLevelObjective',
       'application-signals:UpdateServiceLevelObjective',
       'application-signals:DeleteServiceLevelObjective',
+      'application-signals:BatchUpdateExclusionWindows',
       'application-signals:StartDiscovery',
     ]) {
       expect(allows(statements, action), `${action} が許可されている`).toBe(false);
