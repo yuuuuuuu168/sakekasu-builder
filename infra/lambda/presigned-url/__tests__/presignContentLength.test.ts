@@ -1,5 +1,5 @@
 // 署名済み URL が大きさをどう運ぶかを、SDK の実物で確かめる
-// （Issue sakekasu-builder-archive#173）。
+// （sakekasu-builder#30・#31）。
 //
 // generateUploadUrl.test.ts は getSignedUrl をモックしているため、
 // 「PutObjectCommand に ContentLength を渡した」ことしか見ていない。

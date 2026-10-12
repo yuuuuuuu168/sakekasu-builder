@@ -71,7 +71,7 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 
 ## 先に片付けること
 
-[#129](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/129)（`logRetention` → `logGroup`）は**完了済み**。2026-08-18 に dev の3スタックへ反映し、`Custom::LogRetention` は6個とも消えた（経緯は [log-group-import.md](log-group-import.md)）。
+[36b5020](https://github.com/yuuuuuuu168/sakekasu-builder/commit/36b5020aa2306d679b0a889b8cbfa21983a05090)（`logRetention` → `logGroup`）は**完了済み**。2026-08-18 に dev の3スタックへ反映し、`Custom::LogRetention` は6個とも消えた（経緯は [log-group-import.md](log-group-import.md)）。
 
 これで CloudFormation へ戻すときの障害がひとつ減った。CFn は Lambda 実装のカスタムリソースを IMPORT できないため、`Custom::LogRetention` が残っていると `cdkd export --include-non-importable` による2フェーズ移行（フェーズ2で CFn が再 CREATE し、`onCreate` が呼び直される）が要る。いまはその必要が無い。
 
@@ -217,7 +217,7 @@ Cloud Control にフォールバックする3種類（UserPoolClient 2、Functio
 
 **ただし `cdkd diff` が通ることは取り込めることを意味しない。** 手順7 の前検査で、UserPoolClient 2件・MetricFilter 2件・GraphQLApi 1件が識別子の食い違いで取り込めなかった。diff は合成結果と state／AWS を比べるだけで、Cloud Control の識別子を解決しない。この型の問題は `cdkd import` を打って初めて出る。
 
-8/16 に 0.283.25 で取った値（auth 12 / api 49 / monitoring 46 / health-global 3）とは件数が違うが、原因は cdkd ではなく CDK 側のコードの変化。auth が 12 → 9 と減ったのは [#129](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/129) の `logRetention` → `logGroup`（8/18 反映）で `Custom::LogRetention` と provider 一式が消え、明示の LogGroup が1つ増えた差。api と monitoring は同じ分を引いたうえで機能追加で増えている。
+8/16 に 0.283.25 で取った値（auth 12 / api 49 / monitoring 46 / health-global 3）とは件数が違うが、原因は cdkd ではなく CDK 側のコードの変化。auth が 12 → 9 と減ったのは [36b5020](https://github.com/yuuuuuuu168/sakekasu-builder/commit/36b5020aa2306d679b0a889b8cbfa21983a05090) の `logRetention` → `logGroup`（8/18 反映）で `Custom::LogRetention` と provider 一式が消え、明示の LogGroup が1つ増えた差。api と monitoring は同じ分を引いたうえで機能追加で増えている。
 
 ### 6. CloudFormation へ戻せることを先に確認する
 
@@ -486,7 +486,7 @@ AWS_REGION=us-east-1 npx cdkd drift sakekasu-dev-health-global
 
 ### 取りこぼした4リソース（手順9 のマージ前に取り込む）
 
-**窓を開けている間に `infra/**` の PR が main に入った。** [#231](https://github.com/yuuuuuuu168/sakekasu-builder-archive/pull/231)（presigned-url の SLO）が 03:03 にマージされ、`deploy` が 03:03〜03:07 に走っている。このときはまだ CloudFormation のスタックが生きていたので成功し、monitoring に4リソースが増えた。
+**窓を開けている間に `infra/**` の PR が main に入った。** [456517f](https://github.com/yuuuuuuu168/sakekasu-builder/commit/456517fde2e7278459213a9f190e0c468ce8e270)（presigned-url の SLO）が 03:03 にマージされ、`deploy` が 03:03〜03:07 に走っている。このときはまだ CloudFormation のスタックが生きていたので成功し、monitoring に4リソースが増えた。
 
 取り込み（手順7）はそのあと、**#231 を含まないブランチで合成した `cdk.out`** を使って走った。cdkd import は合成結果に載っている論理 ID しか取り込まないので、CloudFormation 側の52個のうち48個だけが state に入り、残り4つは Retain で実物だけが残った。
 
@@ -751,7 +751,7 @@ pathToFileURL(argv[1])          : .../com%7Eapple%7ECloudDocs/probe.mjs
 
 ### 取り込み済みリソースへの初回更新は改名になる（2026-10-04）
 
-全スタックに `Project` / `Env` タグを足す PR（[#245](https://github.com/yuuuuuuu168/sakekasu-builder-archive/pull/245)）をマージしたところ、デプロイが `sakekasu-dev-auth` で落ちた。2つのことが重なっていた。
+全スタックに `Project` / `Env` タグを足す PR（[15d0838](https://github.com/yuuuuuuu168/sakekasu-builder/commit/15d0838c111a827cecc5f899d9c95cf97912127a)）をマージしたところ、デプロイが `sakekasu-dev-auth` で落ちた。2つのことが重なっていた。
 
 **1. 取り込み済みリソースを cdkd が改名し、置き換え扱いにする。**
 
@@ -773,7 +773,7 @@ Failed to update log group SignupNotifierLogGroupF4C03A83: Invalid resourceArn
 
 #### どう収めたか
 
-[#247](https://github.com/yuuuuuuu168/sakekasu-builder-archive/pull/247) でタグを revert した。revert 前に `cdkd diff` を取ると `0 to create, 3 to update, 0 to delete` で、置き換えも削除も起きないことが先に分かった。cdkd の state はすでに新しいロールを自分のものとして持っていて、取り残された Lambda と権限ポリシーの参照先をそちらに揃えるだけだった。
+[6cd964a](https://github.com/yuuuuuuu168/sakekasu-builder/commit/6cd964a82e1972989ba8aca3f94fc21ff56ca366) でタグを revert した。revert 前に `cdkd diff` を取ると `0 to create, 3 to update, 0 to delete` で、置き換えも削除も起きないことが先に分かった。cdkd の state はすでに新しいロールを自分のものとして持っていて、取り残された Lambda と権限ポリシーの参照先をそちらに揃えるだけだった。
 
 **`iam:ListInstanceProfilesForRole` は足さなかった。** あれはロールの削除に要る権限で、足せば置き換えのたびに13個のロールが削除されうる状態になる。無かったことが結果的に安全装置として働いた。
 
@@ -806,11 +806,11 @@ sakekasu-dev-devops-agent-WebhookForwarderFunctionServi-002870db
 
 #### なぜ気づけなかったか
 
-ロールの作成日時は 10/4 02:35:21 で、[#248](https://github.com/yuuuuuuu168/sakekasu-builder-archive/pull/248) のデプロイが
+ロールの作成日時は 10/4 02:35:21 で、[067be72](https://github.com/yuuuuuuu168/sakekasu-builder/commit/067be72c2aa2aad699bd254637381bcdc162530d) のデプロイが
 `iam:CreateRole` で落ちた時刻と一致する。ロールは作られ、マネージドポリシーを付ける手前で
 デプロイが止まった。**cdkd の state には「作成済み」とだけ記録された。**
 
-翌日 [#249](https://github.com/yuuuuuuu168/sakekasu-builder-archive/pull/249) のデプロイでは、このロールは `Unchanged: 1` として素通りしている。
+翌日 [e53ecd2](https://github.com/yuuuuuuu168/sakekasu-builder/commit/e53ecd20100751ca379ee0ee820f7ca18caaebdc) のデプロイでは、このロールは `Unchanged: 1` として素通りしている。
 state と合成テンプレートが一致していれば、cdkd は実物を見に行かない。
 `cdkd diff` も差分を出さない。
 
@@ -985,7 +985,7 @@ account <アプリのアカウント ID> (or access is denied). Refusing to use 
 
 あわせて、セキュリティレビュー（PR #151）で挙がった2件をここで入れる。
 
-**合成と差分を分ける。** いまの `cdk-diff.yml` は認証情報を入れたあとに `cdk diff` を走らせている。`--ignore-scripts` は npm のインストール時スクリプトを止めるが、CDK アプリのコードは合成時に実行されるため、PR に AWS SDK の呼び出しを仕込めば認証情報付きで動く。認証情報を入れる前に `npx cdk synth --all -q` を済ませ、そのあとは合成済みのアセンブリだけを読ませる（[#131](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/131) の1番）。
+**合成と差分を分ける。** いまの `cdk-diff.yml` は認証情報を入れたあとに `cdk diff` を走らせている。`--ignore-scripts` は npm のインストール時スクリプトを止めるが、CDK アプリのコードは合成時に実行されるため、PR に AWS SDK の呼び出しを仕込めば認証情報付きで動く。認証情報を入れる前に `npx cdk synth --all -q` を済ませ、そのあとは合成済みのアセンブリだけを読ませる（[#29](https://github.com/yuuuuuuu168/sakekasu-builder/pull/29) の1番）。
 
 **これは部分的な対処。** 消えるのは「合成時にアプリのコードが走る」経路だけ。`infra/package-lock.json` は PR が書き換えられるので、`@go-to-k/cdkd` を自前のターゲットに差し替えれば、認証後に動く `cdkd` 自体が PR のコードになる。`--ignore-scripts` が止めるのはインストール時スクリプトで、意図して実行する本体には効かない。差し替え前の `cdk diff` も `aws-cdk` について同じ形だった。
 

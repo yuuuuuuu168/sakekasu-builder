@@ -226,7 +226,7 @@ describe('generateUploadUrl', () => {
   });
 });
 
-// Issue sakekasu-builder-archive#173: 申告された大きさを署名に含め、
+// sakekasu-builder#30・#31: 申告された大きさを署名に含め、
 // 署名済み URL でそれ以外の大きさを置けなくする
 describe('generateUploadUrl の大きさ', () => {
   const MAX = 5 * 1024 * 1024;

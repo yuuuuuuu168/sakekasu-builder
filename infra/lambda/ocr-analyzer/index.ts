@@ -476,7 +476,7 @@ export function assertImagesFitBedrockLimit(
 }
 
 /**
- * S3 の応答ヘッダの大きさで、本体を読む前に上限を見る（Issue sakekasu-builder-archive#172）。
+ * S3 の応答ヘッダの大きさで、本体を読む前に上限を見る（sakekasu-builder#30）。
  *
  * 本体を最後まで読んで base64 にしてから `assertImagesFitBedrockLimit()` で
  * 落とすと、捨てると分かっているデータの転送と変換に時間とメモリを使う。

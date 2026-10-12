@@ -150,7 +150,7 @@ cdkd 側の対応状況は、おおむね問題ない。[supported-resources.md]
 6. DNS を CloudFront へ向ける。ここが不可逆に近い唯一の地点。戻すのも DNS を戻すだけだが、TTL の分だけ時間がかかる
 7. しばらく様子を見てから Amplify アプリを削除する
 
-**フロントの配信物を CDK の `BucketDeployment` で置かない。** あれは `Custom::CDKBucketDeployment` という Lambda 製のカスタムリソースを作る。[#129](https://github.com/yuuuuuuu168/sakekasu-builder-archive/issues/129) で `Custom::LogRetention` を6個消したのは、CloudFormation がカスタムリソースを IMPORT できず cdkd から戻せなくなるためだった。同じ性質のものをフロント側から持ち込むと、せっかく確保した退路が塞がる。ビルド成果物は Actions から CLI でバケットへ同期する形にする。
+**フロントの配信物を CDK の `BucketDeployment` で置かない。** あれは `Custom::CDKBucketDeployment` という Lambda 製のカスタムリソースを作る。[36b5020](https://github.com/yuuuuuuu168/sakekasu-builder/commit/36b5020aa2306d679b0a889b8cbfa21983a05090) で `Custom::LogRetention` を6個消したのは、CloudFormation がカスタムリソースを IMPORT できず cdkd から戻せなくなるためだった。同じ性質のものをフロント側から持ち込むと、せっかく確保した退路が塞がる。ビルド成果物は Actions から CLI でバケットへ同期する形にする。
 
 外形監視は変更が要らない。`infra/bin/app.ts` の `siteUrl` は `https://sakekasu-builder.com` で、監視しているのはドメインであって Amplify の URL ではない。DNS の向き先が変わるだけなので、`monitoring-stack.ts` の設定はそのまま通る。
 （その後、サイトの外形監視はこのリポジトリから外し、共通基盤（sakekasu-integrated_environment）の `healthChecks` の `builder` だけが見るようにした。`siteUrl` はもう無い）

@@ -193,7 +193,7 @@ function assertNewUploadFileName(fileName: string): void {
 }
 
 /**
- * アップロードする大きさを検証する（Issue sakekasu-builder-archive#173）。
+ * アップロードする大きさを検証する（sakekasu-builder#30・#31）。
  *
  * 検証した値は `ContentLength` として署名に含める。SDK はこれを
  * `content-length` の署名対象ヘッダにするので、クライアントは申告した大きさで
@@ -230,7 +230,7 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
 
   // 必須の判定はここで行う。大きさの無い URL は S3 の上限（5TB）まで置けてしまう。
   // スキーマは Int のまま（理由は schema.graphql の fileSize の説明）
-  // （Issue sakekasu-builder-archive#173）
+  // （sakekasu-builder#30・#31）
   if (fileSize === undefined || fileSize === null) {
     throw new Error('Missing required argument: fileSize');
   }

@@ -51,7 +51,7 @@ export const MAX_IMAGES_PER_RECORD = 5;
  * アップロード 1 回で置ける大きさの上限（5MB）。
  *
  * 署名済み URL に `content-length` を署名して、この大きさ以下でしか PUT できなく
- * する（Issue sakekasu-builder-archive#173）。署名しないと、URL を受け取った側は
+ * する（sakekasu-builder#30・#31）。署名しないと、URL を受け取った側は
  * S3 の上限（5TB）まで置ける。
  *
  * フロントが上げうる最大に合わせている。圧縮の目標は 3.75MB だが、Canvas で
