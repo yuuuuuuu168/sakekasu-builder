@@ -155,9 +155,8 @@ function buildApplicationStacks(app: cdk.App): void {
   // AWS Health の通知はここに置かない。アカウント全体の話なので、共通基盤
   // （sakekasu-integrated_environment の sakekasu-integrated-monitoring /
   // sakekasu-integrated-health-global）だけが持つ。両方に置くと同じ通知が 2 通届く。
-  // 以前ここにあった us-east-1 の sakekasu-dev-health-global は、アプリから外しても
-  // cdkd deploy --all では消えないため、手で cdkd state destroy する
-  // （docs/cdkd-migration.md の「health-global を外した」）
+  // 以前ここにあった us-east-1 の sakekasu-dev-health-global は、cdkd deploy --all では
+  // 消えないため手で消した（docs/cdkd-migration.md の「health-global を外した」）
 
   // DevOps Agent 連携（Issue #67）。Agent Space はプライマリアカウントの
   // コンソールで作るため、その ARN がコンテキストに入るまでは合成しない。

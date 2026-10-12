@@ -384,7 +384,7 @@ Slack 通知 Lambda（`sakekasu-builder-dev-slack-notifier`）は、送り先を
 
 **共通基盤（[sakekasu-integrated_environment](https://github.com/yuuuuuuu168/sakekasu-integrated_environment) の `docs/monitoring.md`）へ移した。** AWS Health はアカウント全体の話で、4 アプリのどれか1つが持つものではない。共通基盤にも同じルール（ap-northeast-1 の `sakekasu-integrated-aws-health` と、us-east-1 から転送する `sakekasu-integrated-health-global`）が入ったので、こちらにも残すと同じ通知が 2 通届く。
 
-外したのは、監視スタックの `dev-sakekasu-aws-health` ルールと、us-east-1 の `sakekasu-dev-health-global` スタック（転送ルール `dev-sakekasu-aws-health-global` とロール `dev-sakekasu-health-forwarder`）。us-east-1 のスタックはアプリから外しても `cdkd deploy --all` では消えないので、手で消す（[docs/cdkd-migration.md](docs/cdkd-migration.md) の「health-global を外した」）。
+外したのは、監視スタックの `dev-sakekasu-aws-health` ルールと、us-east-1 の `sakekasu-dev-health-global` スタック（転送ルール `dev-sakekasu-aws-health-global` とロール `dev-sakekasu-health-forwarder`）。us-east-1 のスタックは `cdkd deploy --all` では消えないので、手で消した（[docs/cdkd-migration.md](docs/cdkd-migration.md) の「health-global を外した」）。
 
 
 ### 新規ユーザー登録の通知（Issue #66）
