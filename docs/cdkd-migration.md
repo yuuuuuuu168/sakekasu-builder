@@ -995,7 +995,7 @@ builder から外したのは2つ。
 | 何を | どこ | どう消えるか |
 | --- | --- | --- |
 | ルール `dev-sakekasu-aws-health` | `sakekasu-dev-monitoring`（ap-northeast-1） | main へのマージで deploy が消す |
-| スタック `sakekasu-dev-health-global`（ルール `dev-sakekasu-aws-health-global`、ロール `dev-sakekasu-health-forwarder` とそのインラインポリシー） | us-east-1 | deploy では消えない（下） |
+| スタック `sakekasu-dev-health-global`（ルール `dev-sakekasu-aws-health-global`、ロール `dev-sakekasu-health-forwarder` とそのインラインポリシー） | us-east-1 | deploy では消えないので手で消した（下） |
 
 監視スタックのトピックポリシーからは `events.amazonaws.com` の文が消え、`cloudwatch.amazonaws.com` の明示の許可だけが残る。トピックポリシー自体は残るので置き換わりは起きない（明示の許可を残している理由は `infra/lib/monitoring-stack.ts` のコメント）。
 
@@ -1013,13 +1013,9 @@ builder から外したのは2つ。
 
 スタックの中身だけを空にして残す案も、空のスタックの state が残り続けて結局どこかで手で消すことになるので採らなかった。
 
-### 残った state と実物の片付け方
+### 片付けた
 
-スタックはアプリから外した。us-east-1 に残る state と実物は、CI ではなく手元から `cdkd state destroy` で片付ける扱いにした。合成を要らない版の destroy で、state に記録されたリソースを消してから state を消す。
-
-消すのは、外す変更のマージ後の deploy が通ってから。main のアプリに `sakekasu-dev-health-global` が入っている間に消すと、次の deploy が作り直す。手元から打つので `CDKD_ROLE_ARN` は渡さない（手順3 の末尾を参照）。`import` のリージョンの取り違え（上の「cdkd の版と、先行リポジトリで判明している不具合」）と同じ形で踏まないよう、`AWS_REGION` も us-east-1 に合わせる。
-
-インラインポリシーの手当て（「`cdkd export` はインラインポリシーの手当てが要る」）はここでは要らない。ロールを消すときに cdkd がロールのインラインポリシーを `ListRolePolicies` で引いて実名で消してから `DeleteRole` を打つ。
+us-east-1 に残っていた state と実物は、手で消した（CI のロールでは消せないため。消し方は `cdkd state destroy` が合成を要らない版で、state に記録されたリソースを消してから state を消す）。2026-10-12 に確かめたところ、ルール `dev-sakekasu-aws-health-global`、ロール `dev-sakekasu-health-forwarder`、このスタックの `state.json` はどれも無い。state バケットには 10/3 までのデプロイ履歴だけが残っている。
 
 ## 運用コマンドの対応
 
