@@ -55,11 +55,12 @@
 
 | 機能 | 補足 |
 |------|------|
-| 監視とアラート通知 | 22アラーム（AI・サービス正常性・外形監視・SLO）を、共通基盤のトピック経由で Slack と DevOps Agent へ。AWS Health の通知は共通基盤へ移した |
+| 監視とアラート通知 | 22アラーム（AI・サービス正常性・外形監視・SLO）を、共通基盤のトピック経由で Slack と DevOps Agent へ |
 | 毎日の AWS 利用料金 Slack 通知 | 組織合計・上位サービス内訳・クレジット込み。管理アカウントへデプロイ（[52c4ee7](https://github.com/yuuuuuuu168/sakekasu-builder/commit/52c4ee7aa89f69eee5dfca2ee02279a1f8df87d4)） |
 | DevOps Agent による自動インシデント調査 | アラーム → 調査 → 専用 Slack チャンネル。プライベートチャンネルではメンションで調査の開始や照会もできる。コンソール側の設定あり（[6360410](https://github.com/yuuuuuuu168/sakekasu-builder/commit/63604109ac4cba7a3413623b056d606c55d16c84)） |
 | Application Signals による APM | OCR と画像アップロードの2関数を計装。OCR には SLO を2本置き、割ったらアラーム（[#11](https://github.com/yuuuuuuu168/sakekasu-builder/issues/11)） |
-| CDK デプロイの自動化 | main へのマージで GitHub Actions がデプロイ（OIDC 認証、[3f8e0ef](https://github.com/yuuuuuuu168/sakekasu-builder/commit/3f8e0efe765e660089e05b04623164acbb487895)）。infra は cdkd、ソムリエは CDK で、対象を分ける |
+| デプロイの自動化 | main へのマージで GitHub Actions がデプロイ（OIDC 認証、[3f8e0ef](https://github.com/yuuuuuuu168/sakekasu-builder/commit/3f8e0efe765e660089e05b04623164acbb487895)）。infra は [cdkd](https://github.com/go-to-k/cdkd)、ソムリエは CDK、画面は S3 への同期で、対象ごとにワークフローを分ける |
+| 配信 | S3 + CloudFront（OAC）で `sake.sakekasu-builder.com` から配信する。画面は `deploy-site.yml` が同期する |
 | 一覧画面の画像表示高速化 | サムネイル生成・Presigned URL キャッシュ・遅延読み込み |
 | PR ごとのテスト・lint・型検査 | GitHub Actions がフロント・infra・ソムリエの3系統を並べて走らせる |
 
@@ -314,7 +315,7 @@ Runtime まで届いていたかどうかは、CloudWatch Logs でも確認で�
 ```bash
 # ローカル実行（COGNITO_* は LOCAL_DEV=1 と同時に設定不可）
 cd sommelier/app/sommelier
-AWS_PROFILE=sakekasu-builder PURCHASE_TABLE_NAME=dev-sakekasu-purchase-records \
+AWS_PROFILE=<アプリ用のプロファイル> PURCHASE_TABLE_NAME=dev-sakekasu-purchase-records \
   LOCAL_DEV=1 LOCAL_DEV_OWNER_SUB=<Cognitoのsub> uv run main.py
 # → POST http://localhost:8080/invocations  {"prompt": "...", "history": []}
 
@@ -380,18 +381,8 @@ Slack 通知 Lambda（`sakekasu-builder-dev-slack-notifier`）は、送り先を
 
 **認証拒否の監視が今回の障害への直接の答え**。実際に障害当時のメトリクスを確認したところ、`UnauthorizedInboundTokenException` が3回記録されていた。これを監視していれば即座に気づけた。
 
-### AWS 側の障害・メンテナンス（AWS Health）
-
-**共通基盤（[sakekasu-integrated_environment](https://github.com/yuuuuuuu168/sakekasu-integrated_environment) の `docs/monitoring.md`）へ移した。** AWS Health はアカウント全体の話で、4 アプリのどれか1つが持つものではない。共通基盤にも同じルール（ap-northeast-1 の `sakekasu-integrated-aws-health` と、us-east-1 から転送する `sakekasu-integrated-health-global`）が入ったので、こちらにも残すと同じ通知が 2 通届く。
-
-外したのは、監視スタックの `dev-sakekasu-aws-health` ルールと、us-east-1 の `sakekasu-dev-health-global` スタック（転送ルール `dev-sakekasu-aws-health-global` とロール `dev-sakekasu-health-forwarder`）。us-east-1 のスタックは `cdkd deploy --all` では消えないので、手で消した（[docs/cdkd-migration.md](docs/cdkd-migration.md) の「health-global を外した」）。
-
-
-### 新規ユーザー登録の通知（Issue #66）
-
-旧ユーザープール（アプリ専用。セルフサインアップあり）の Post Confirmation トリガーから Slack へ流していた。
-共通ログインにはセルフサインアップが無いので役目を終え、旧プールと一緒に外した（[docs/shared-login.md](docs/shared-login.md)）。
-実装（`infra/lambda/signup-notifier/`）は git の履歴にある。
+AWS Health の通知は共通基盤（[sakekasu-integrated_environment](https://github.com/yuuuuuuu168/sakekasu-integrated_environment) の `docs/monitoring.md`）が持つ。
+アカウント全体の話で、4 アプリのどれか1つが持つものではないため。
 
 ### 外形監視の考え方
 
@@ -423,7 +414,7 @@ EventBridge（毎日 00:05 UTC）→ billing-notifier Lambda → Cost Explorer A
 
 ### 他のスタックとの違い
 
-アカウント別の内訳（`LINKED_ACCOUNT`）を Cost Explorer で見られるのは **Organization の管理アカウントだけ**のため、このスタック（`sakekasu-billing-notifier`）は他と違い**管理アカウントへデプロイする**。管理アカウントの ID はリポジトリに書かず、`-c billingAccount`（または環境変数 `BILLING_ACCOUNT_ID`）で渡す。環境（dev/staging/prod）にも紐づかない単一のスタックで、通常の `cdk deploy --all` に混ざらないよう `-c billing=true` を付けたときだけ合成される。
+アカウント別の内訳（`LINKED_ACCOUNT`）を Cost Explorer で見られるのは **Organization の管理アカウントだけ**のため、このスタック（`sakekasu-billing-notifier`）は他と違い**管理アカウントへデプロイする**。管理アカウントの ID はリポジトリに書かず、`-c billingAccount`（または環境変数 `BILLING_ACCOUNT_ID`）で渡す。環境（dev/staging/prod）にも紐づかない単一のスタックで、通常の `cdkd deploy --all` に混ざらないよう `-c billing=true` を付けたときだけ合成される。
 
 対象アカウントの一覧（表示ラベル含む）は `infra/bin/app.ts` の `targetAccounts` で変更できる。
 
@@ -463,19 +454,34 @@ Agent Space は運用ツール専用アカウント（`ops-tooling`）に置き�
 
 `agentSpaceArn` があるときだけスタックが合成される。ARN は運用ツール用アカウントの ID を含むので `cdk.json` には書かず、Actions では secret `AGENT_SPACE_ARN`、手元では `-c agentSpaceArn` か環境変数 `AGENT_SPACE_ARN` で渡す（[docs/devops-agent.md](docs/devops-agent.md)）。
 
+デプロイはほかの infra のスタックと同じく、main へのマージで `deploy.yml` が cdkd で行う（secret の `AGENT_SPACE_ARN` を渡す）。
+
 セットアップ手順、優先度の割り当て、カスタムスキルに入れる運用ナレッジ、費用の詳細は [docs/devops-agent.md](docs/devops-agent.md) にまとめてある。
 
 ## Application Signals による APM（Issue #86）
 
 既存の監視は「異常が起きたこと」までは知らせてくれるが、そこから先の切り分けはログの突き合わせに頼っていた。リクエスト単位のトレースと、レイテンシー・エラー率・リクエスト数を自動で集めてそこを埋める。
 
-計装が入っているのは OCR（`ocr-analyzer`、2026-08-10）と画像アップロードの入口（`presigned-url`、2026-08-16）の2つ。一度は起動ラッパーとレイヤーの組み合わせを取り違えて関数を止め、切り戻してから1つずつ入れ直した（[240874a](https://github.com/yuuuuuuu168/sakekasu-builder/commit/240874a9ccd60355673d07b036be30aaa5e9ff52) → [89b6ccd](https://github.com/yuuuuuuu168/sakekasu-builder/commit/89b6ccd0c9bd5f35de71dcc414d3041ebbcb56a1)）。アカウント側の設定（サービス検出・Transaction Search）はソムリエの GenAI Observability を入れたときから有効で、アカウントに1つの設定なので CDK では管理していない。
+計装が入っているのは OCR（`ocr-analyzer`）と画像アップロードの入口（`presigned-url`）の2つ。アカウント側の設定（サービス検出・Transaction Search）はソムリエの GenAI Observability を入れたときから有効で、アカウントに1つの設定なので CDK では管理していない。
 
 外形監視の関数（health-check）は計装しない。監視の監視は既存のアラームで足りていて、増やすとノイズと費用だけが増えるため。この関数は従来どおり Lambda 標準メトリクス由来のエラー率と実行時間までしか見えない。計装が無かった頃でもエラー率は追えたので、それで既存のバグを1件見つけている（[51be30d](https://github.com/yuuuuuuu168/sakekasu-builder/commit/51be30d1a106bc1251501bbb7a831b555f0ca3f8)）。
 
 SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 90% と「90% が15秒未満」。しきい値は日次の実測（p50/p90/p99）から決めた。割ったらアラームが鳴り、そのしきい値は SLO の目標と同じ定数から取っている。別々に書くと、片方だけ動かしたときに「SLO は未達なのにアラームは鳴らない」が黙って生まれる。
 
 計装の対象を絞った理由、デプロイ後の確認手順、しきい値の根拠、費用は [docs/application-signals.md](docs/application-signals.md) にまとめてある。
+
+## 構成
+
+| スタック | アカウント / リージョン | デプロイ | 中身 |
+|---|---|---|---|
+| `sakekasu-dev-api` | アプリ / ap-northeast-1 | cdkd（deploy.yml） | AppSync、DynamoDB 2 本、画像の S3、Lambda 3 本 |
+| `sakekasu-dev-monitoring` | アプリ / ap-northeast-1 | cdkd（deploy.yml） | アラーム、SLO、外形監視（送り先は共通基盤の SNS） |
+| `sakekasu-dev-devops-agent` | アプリ / ap-northeast-1 | cdkd（deploy.yml） | DevOps Agent が読みに来るクロスアカウントロール |
+| `sakekasu-dev-site-dns` | アプリ / ap-northeast-1 | cdkd（deploy.yml） | `sake.sakekasu-builder.com` のゾーン |
+| `sakekasu-dev-site` | アプリ / us-east-1 | cdkd（deploy.yml） | 画面の S3、CloudFront、Route 53 レコード |
+| `AgentCore-sommelier-dev` | アプリ / ap-northeast-1 | CDK（deploy-sommelier.yml） | ソムリエの AgentCore Runtime と Memory |
+| `sakekasu-github-oidc` | アプリ / ap-northeast-1 | CloudFormation（手動） | OIDC プロバイダーと Actions 用のロール |
+| `sakekasu-billing-notifier` | 管理 / ap-northeast-1 | CloudFormation（手動） | 毎日の利用料金の通知 |
 
 ## 技術スタック
 
@@ -484,12 +490,13 @@ SLO は OCR に2本置いてある。どちらも30日 rolling で、成功率 9
 - Tailwind CSS v4
 - shadcn/ui（@base-ui/react ベース）
 - Framer Motion
-- AWS CDK（AppSync + DynamoDB）
+- AWS CDK + [cdkd](https://github.com/go-to-k/cdkd)（AppSync + DynamoDB）
 - Amazon Cognito（4 アプリ共通のユーザープールとマネージドログイン。[docs/shared-login.md](docs/shared-login.md)）
 - AWS S3（画像ストレージ）
-- S3 + CloudFront（フロントエンドの配信。[docs/sake-subdomain.md](docs/sake-subdomain.md)）
+- S3 + CloudFront + Route 53（フロントエンドの配信。[docs/sake-subdomain.md](docs/sake-subdomain.md)）。`aws-amplify` はライブラリとして認証と GraphQL のクライアントに使う
 - Amazon Bedrock AgentCore Runtime + AgentCore Memory + Strands Agents（Python）※ソムリエ
 - Claude API（Claude Haiku 5.5。API キーなしの Workload Identity Federation）※OCR・テイスティングノート・ソムリエ。失敗したら Amazon Bedrock（Claude Haiku 4.5）でやり直す（[docs/claude-api.md](docs/claude-api.md)）
+- Tavily ※テイスティングノートとソムリエの Web 検索
 - react-day-picker（カレンダー）
 - Vitest + Testing Library + fast-check（フロントと infra の CDK）、Jest（ソムリエの CDK）、pytest（ソムリエ本体）
 
@@ -510,21 +517,24 @@ src/
     sommelier/   # ソムリエ相談チャット（Runtime 呼び出し）
   components/    # 共通コンポーネント（shadcn/ui, ThemeProvider 等）
 infra/
-  lib/           # CDK スタック（api / monitoring / billing-notifier /
-                 #                devops-agent / github-oidc）
+  lib/           # CDK スタック（api / monitoring / site / site-dns /
+                 #   billing-notifier / devops-agent / github-oidc）と
+                 #   ガードレール・Permissions Boundary
   graphql/       # AppSync GraphQL スキーマ
   lambda/        # Lambda 関数（presigned-url, ocr-analyzer, tasting-note,
-                 #              health-check, slack-notifier,
-                 #              billing-notifier, devops-agent-webhook）
+                 #              health-check, billing-notifier,
+                 #              slack-notifier（料金通知の送り出し）, shared）
   scripts/       # amplify_outputs.json 生成、サムネイルのバックフィル
 sommelier/       # AgentCore プロジェクト（ソムリエエージェント）
   app/sommelier/ # Strands Agent 本体（Python）
   agentcore/     # AgentCore 設定と CDK
 docs/            # 設計ドキュメント
+theme/           # 共通テーマ（sakekasu-template から同期）
 scripts/         # クラウドセッション用の補助（AWS SSO ログイン、フック）
 .claude/         # Claude Code の設定と AI-DLC（使い方は CLAUDE.md）
 aidlc/           # AI-DLC のルールと成果物
-.github/         # GitHub Actions（test / deploy / deploy-sommelier / cdk-diff）
+.github/         # GitHub Actions（test / cdk-diff / deploy / deploy-sommelier /
+                 #   deploy-site / claude-review / claude-hooks）
 ```
 
 ## ドキュメント
@@ -538,6 +548,7 @@ aidlc/           # AI-DLC のルールと成果物
 | [docs/claude-code-web.md](docs/claude-code-web.md) | Claude Code on the web での開発環境（外出先から PR まで） |
 | [docs/cdkd-migration.md](docs/cdkd-migration.md) | cdkd（CDK Direct）への移行の手順と記録 |
 | [docs/log-group-import.md](docs/log-group-import.md) | 既存ロググループのスタック取り込み（`logRetention` からの移行） |
+| [docs/sake-subdomain.md](docs/sake-subdomain.md) | `sake.sakekasu-builder.com` への移行（S3 + CloudFront での配信とサブドメインの委任）の手順と記録 |
 | [docs/agent-verify-permission-set.md](docs/agent-verify-permission-set.md) | クラウドセッションから AWS を見るための読み取り専用 Permission Set |
 | [docs/operations.md](docs/operations.md) | 手で打つ運用手順（ソムリエの手動デプロイと確認・利用料金通知のデプロイ・OIDC の初回セットアップ） |
 | [docs/npm-audit.md](docs/npm-audit.md) | npm audit への対応の記録（本番に入る依存の見分け方・依存の更新） |
@@ -553,7 +564,7 @@ npm run dev
 # インフラ（CDK）※デプロイは Actions 経由。ここでは差分の確認まで
 cd infra
 npm install
-AWS_PROFILE=sakekasu-builder npx cdk diff --context env=dev
+AWS_PROFILE=<アプリ用のプロファイル> npx cdkd diff --all -c env=dev
 ```
 
 デプロイ後に AppSync のエンドポイント等が変わったときは、`infra/scripts/generate-outputs.ts` を実行して `amplify_outputs.json` を作り直す。認証の値（共通ログイン）は `infra/cdk.json` の `sharedAuth` から書く。
@@ -564,15 +575,17 @@ AWS_PROFILE=sakekasu-builder npx cdk diff --context env=dev
 
 ## デプロイ（CDK）
 
-**バックエンド（CDK）のデプロイは main へのマージ経由のみ。ローカルからの手動 `cdk deploy` は原則禁止**（Issue #94）。
+**デプロイは main へのマージ経由のみ。ローカルからの手動 `cdk deploy` / `cdkd deploy` は原則禁止**（Issue #94）。
+infra のスタックは [cdkd](https://github.com/go-to-k/cdkd) の管理下にあり、`cdk deploy` を打つと CloudFormation のスタックが別に作られてリソースが二重になる。
 
 - main に push（= PR マージ）されると GitHub Actions が対象を分けてデプロイする
-  - `infra/**` → `.github/workflows/deploy.yml` が cdkd でデプロイ
+  - `infra/**` → `.github/workflows/deploy.yml` が `cdkd deploy --all`（状態は S3 の `cdkd-state-<アカウント ID>`）
   - `sommelier/**` → `.github/workflows/deploy-sommelier.yml` が AgentCore スタックを `aws-cdk deploy --all`
+  - 画面 → `.github/workflows/deploy-site.yml` がビルドして S3 へ同期
 - PR を開くと `cdkd diff` の結果が自動でコメントされる（`.github/workflows/cdk-diff.yml`。対象は infra のみ。フォークと Dependabot の PR では走らない）
-- 認証はどちらも OIDC（`sakekasu-github-oidc` スタックの deploy ロール）。リポジトリにアクセスキーは置かない
+- 認証は OIDC（`sakekasu-github-oidc` スタックのロール）。リポジトリにアクセスキーは置かない
 
-ワークフローを2つに分けているのは、`paths` がワークフロー単位でしか効かないため。1つにまとめると、片方だけの変更でもう片方のデプロイまで走る。
+ワークフローを分けているのは、`paths` がワークフロー単位でしか効かないため。1つにまとめると、片方だけの変更でもう片方のデプロイまで走る。
 
 ### アカウント ID の渡し方
 
@@ -581,7 +594,7 @@ AWS_PROFILE=sakekasu-builder npx cdk diff --context env=dev
 | 使う場所 | 渡し方 |
 | --- | --- |
 | Actions（deploy / cdk-diff / deploy-site / deploy-sommelier） | リポジトリの secret `AWS_ACCOUNT_ID`（Settings → Secrets and variables → Actions） |
-| CDK（`infra/`、`sommelier/agentcore/cdk/`） | `CDK_DEFAULT_ACCOUNT`。手元の `cdk deploy` / `cdk diff` では CDK CLI が認証情報から入れる |
+| CDK（`infra/`、`sommelier/agentcore/cdk/`） | `CDK_DEFAULT_ACCOUNT`。手元の `cdkd diff` などでは認証情報から入る |
 | 証明書（`infra/cdk.json`） | `siteCertificateId` に ID だけを置き、ARN はアカウントと組み合わせて作る |
 | 画面のソムリエ | ビルド時の `VITE_SOMMELIER_RUNTIME_ARN`（`deploy-site.yml` が secret から組み立てる） |
 | AWS 確認用の verify プロファイル | クラウド環境の Environment variables の `SSO_ACCOUNT_ID`（`scripts/aws-verify.conf`） |
@@ -623,3 +636,10 @@ npm ci && npm test
 ## デザイン
 
 「和モダン」コンセプト。ダークモード対応、カスタムカラーパレット（`indigo-wa` / `gold-wa` / `dark-bg` / `dark-gold`。`src/index.css` で定義）。
+
+## Claude Code（クラウド環境）
+
+claude.ai/code のクラウドセッションで開発する。セッションは GitHub へ push と PR 作成まで行い、マージは人が行う。
+AWS へは読み取り専用の SSO（`verify` / `verify-org` / `verify-ops`。3 アカウントとも Permission Set `AgentVerifyAccess`）だけで入り、
+変更操作は `PreToolUse` フックでも止める。AI-DLC v2 のフックとスキルも入れてある（[.claude/CLAUDE.md](.claude/CLAUDE.md)）。
+フック・MCP・環境の作り方は [docs/claude-code-web.md](docs/claude-code-web.md)、運用ルールは [CLAUDE.md](CLAUDE.md) にある。
