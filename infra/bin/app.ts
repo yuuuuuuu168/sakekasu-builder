@@ -24,14 +24,18 @@ const app = new cdk.App();
 // 作り直しが起き、古いロールからポリシーがはがれて API が止まった）。ロールはガードレールでも
 // 名前の接頭辞で範囲を絞る。
 //
-// Application Signals の SLO には付ける。以前は外していた。cdkd は SLO を Cloud Control API で更新し、
-// その途中で application-signals:GetServiceLevelObjective を呼ぶが、cdkd 用ロールにその権限が無く断られ、
-// 2026-10-04 に sakekasu-dev-monitoring のデプロイが失敗してロールバックしたため。
-// 権限が無かった原因は、cdkd-policies.ts が接頭辞を `applicationsignals:` と書いていたこと。
-// 2026-10-11 に直して OIDC スタックを入れ直し、Cloud Control と SLO の操作が許されることを
-// simulate-principal-policy で確かめてから戻した
+// Application Signals の SLO にも付けない。cdkd は SLO を Cloud Control API で更新するが、
+// この 4 つの SLO は CloudFormation で作った頃のシステムタグ（aws:cloudformation:stack-name など）を
+// 今も持っている。Cloud Control はタグを更新するときに今のタグ一式を書き戻そうとし、`aws:` で始まる
+// キーは利用者が書けないので、`aws: prefixed tag key names are not allowed for external use` で
+// 4 つとも落ちる（2026-10-12。#52 でタグを足した直後のデプロイ）。システムタグは消せず、消すには
+// SLO を作り直すしかない（30 日の達成率の履歴が消える）ので、タグの方をあきらめる。
+//
+// 2026-10-04 に同じ場所で落ちたときは、権限（application-signals:GetServiceLevelObjective）が
+// 先に断られていた。接頭辞の綴りの誤りを #51 で、除外ウィンドウの権限の不足を #53 で直したので、
+// いまは権限ではなくこのタグの制約で止まる
 cdk.Tags.of(app).add('App', 'builder', {
-  excludeResourceTypes: ['AWS::IAM::Role'],
+  excludeResourceTypes: ['AWS::IAM::Role', 'AWS::ApplicationSignals::ServiceLevelObjective'],
 });
 
 // GitHub Actions からの CDK デプロイ用 OIDC 連携（Issue #94）。
