@@ -17,13 +17,13 @@ AgentCore のコンテナは Python（`sommelier/app/sommelier`、uv）で、npm
 
 ## 2026-10-04 の対応
 
-| 場所 | 前 | 後 | やったこと |
-| --- | --- | --- | --- |
-| ルート | 37 | 0 | `shadcn` を依存から外した（下記）。残りは `npm audit fix`。`vite` と `vitest` の下限を修正版に上げた |
-| `infra/` | 17 | 8 | `aws-cdk-lib` 2.243 → 2.272、`aws-cdk` 2.1111 → 2.1144、`vitest` 4.1.0 → 4.1.11、`tsx` 4.21 → 4.23（esbuild 0.27 → 0.28） |
-| `infra/lambda/presigned-url` | 3 | 0 | `npm audit fix`（`@aws-sdk/xml-builder` 経由の `fast-xml-parser`） |
-| `infra/lambda/health-check`、`sommelier-canary` | 2 | 0 | `npm audit fix`（`@smithy/middleware-compression` 経由の `fflate`） |
-| `sommelier/agentcore/cdk` | 38 | 1 | `jest` 29 → 30、`@types/jest` 29 → 30。残りは `npm audit fix` |
+| 場所 | やったこと |
+| --- | --- |
+| ルート | `shadcn` を依存から外した（下記）。残りは `npm audit fix`。`vite` と `vitest` の下限を修正版に上げた |
+| `infra/` | `aws-cdk-lib` 2.243 → 2.272、`aws-cdk` 2.1111 → 2.1144、`vitest` 4.1.0 → 4.1.11、`tsx` 4.21 → 4.23（esbuild 0.27 → 0.28） |
+| `infra/lambda/presigned-url` | `npm audit fix`（`@aws-sdk/xml-builder` 経由の `fast-xml-parser`） |
+| `infra/lambda/health-check`、`sommelier-canary` | `npm audit fix`（`@smithy/middleware-compression` 経由の `fflate`） |
+| `sommelier/agentcore/cdk` | `jest` 29 → 30、`@types/jest` 29 → 30。残りは `npm audit fix` |
 
 `aws-cdk-lib` を上げると合成結果のスキーマが 54 になり、2.1144 より古い CDK CLI では読めなくなる。
 そのため CLI も一緒に上げた。テンプレートは CDK のメタデータ（`Analytics`）以外は変わらず、

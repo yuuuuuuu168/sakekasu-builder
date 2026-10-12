@@ -559,6 +559,21 @@ describe('GithubOidcStack', () => {
     expect(allows(statements, 'cognito-idp:DescribeUserPool')).toBe(true);
   });
 
+  it('cdkd のデプロイロールは証明書を読むだけで、作成も削除もできない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+    expect(statements.length).toBeGreaterThan(0);
+
+    for (const action of [
+      'acm:RequestCertificate',
+      'acm:DeleteCertificate',
+      'acm:AddTagsToCertificate',
+      'acm:RemoveTagsFromCertificate',
+    ]) {
+      expect(allows(statements, action), `${action} が許可されている`).toBe(false);
+    }
+    expect(allows(statements, 'acm:DescribeCertificate')).toBe(true);
+  });
+
   it('cdkd のデプロイロールは利用者のデータを読めない', () => {
     const statements = statementsFor(template, /^CdkdDeployRole/);
     expect(statements.length).toBeGreaterThan(0);
