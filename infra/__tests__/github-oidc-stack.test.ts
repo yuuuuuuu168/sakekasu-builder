@@ -467,6 +467,24 @@ describe('GithubOidcStack', () => {
     }
   });
 
+  // CloudFormation のスタックを書き換える権限は移行のときだけ要った（cdkd-policies.ts）。
+  // 残しておくと、このロールを取れれば CloudFormation 管理の他のアプリのスタックまで消せる
+  it('cdkd のデプロイロールは CloudFormation のスタックを書き換えられない', () => {
+    const statements = statementsFor(template, /^CdkdDeployRole/);
+
+    for (const action of [
+      'cloudformation:UpdateStack',
+      'cloudformation:DeleteStack',
+      'cloudformation:CreateChangeSet',
+      'cloudformation:ExecuteChangeSet',
+    ]) {
+      expect(allows(statements, action), `${action} が許可されている`).toBe(false);
+    }
+
+    // Cloud Control API は引き続き要る（同じ cloudformation 名前空間にある）
+    expect(allows(statements, 'cloudformation:CreateResource')).toBe(true);
+  });
+
   // サービス検出はアカウントに1つの設定で、スタックから外して守っている。
   // 一度これを消しかけてソムリエの可観測性を道連れにしている。
   // application-signals:* にすると IAM の側から素通りで触れてしまう

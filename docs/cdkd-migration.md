@@ -988,7 +988,7 @@ CDK CLI 側のフォールバック（`cdk deploy`）には `--app cdk.out` を�
 
 これが効くのは順番を間違えたとき。手順7 より先に手順9 をマージしても、state が空のまま `cdkd deploy` が走って全リソースを新規作成しにいく事故にならない。スクリプトがその場で取り込むか、前検査で引っかかれば何も触らずに `engine=cfn` を返して CloudFormation 側に流す。「手順9 を先にマージしない」という約束を、約束だけに頼らない形にしてある。
 
-デプロイロールにはこの経路に必要な `cloudformation:UpdateStack` / `DeleteStack` / チェンジセット系が [cdkd-policies.ts](../infra/lib/cdkd-policies.ts) で入っている。
+移行のあいだ、デプロイロールにはこの経路に必要な `cloudformation:UpdateStack` / `DeleteStack` / チェンジセット系を [cdkd-policies.ts](../infra/lib/cdkd-policies.ts) で入れていた。移行が済んだので外してある（取り込み直すときは足して `sakekasu-github-oidc` を手で入れ直す）。
 
 ## health-global を外した
 
