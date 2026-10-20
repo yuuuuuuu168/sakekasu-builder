@@ -45,7 +45,7 @@ cdkd は CDK アプリを CloudFormation ではなく AWS SDK / Cloud Control AP
 | --- | --- | --- |
 | [sakekasu-kakeibo](https://github.com/yuuuuuuu168/sakekasu-kakeibo) | 0.291.16 | deploy ワークフローが毎回 `migrate-to-cdkd.sh` を呼ぶ。人が打つものは無い |
 | [sakekasu-learning](https://github.com/yuuuuuuu168/sakekasu-learning) | 0.291.16 | 手元で `cdkd-stacks.sh migrate` を打つ |
-| sakekasu-builder | 0.291.31（移行時。いまの版は `infra/package.json` で固定） | deploy ワークフローが毎回 `migrate-to-cdkd.sh` を呼ぶ |
+| sakekasu-builder | 0.291.31（移行時。いまの版は `infra/package.json` で固定） | 移行中は deploy ワークフローが毎回 `migrate-to-cdkd.sh` を呼んでいた。移行が済んだので外した（下の「`deploy.yml` から migrate-to-cdkd.sh を呼ぶ」） |
 
 **版を 0.291.16 に揃えなかった。** 他2本が踏んだ不具合のうち1件は 0.291.23 で直っている（[#3701](https://github.com/go-to-k/cdkd/issues/3701) `complete a bare CloudFormation id to the Cloud Control composite identifier`）。16 に固定すると、上流で直っているものに対して回避コードを新しく書くことになる。揃える先は「他2本がたまたま使っていた版」ではなく最新とし、他2本は後から追随して回避を1つ落とせばよい。
 
@@ -313,6 +313,8 @@ CREATE_FAILED: The policy HealthForwarderRoleDefaultPolicy087A304B already exist
 ### 7. 既存スタックの取り込み
 
 `infra/scripts/migrate-to-cdkd.sh` を打つ。手作業で `cdkd import` を並べない。
+
+> 移行が済んだので、スクリプトとそのテストはリポジトリから外した。中身は [c547259 の時点のもの](https://github.com/yuuuuuuu168/sakekasu-builder/blob/c547259/infra/scripts/migrate-to-cdkd.sh) を見る。
 
 ```bash
 cd infra
@@ -629,7 +631,7 @@ const baseline = useObserved ? resource.observedProperties : resource.properties
 
 ### monitoring の修復スクリプト
 
-[`infra/scripts/fix-monitoring-mojibake.mjs`](../infra/scripts/fix-monitoring-mojibake.mjs)。
+`infra/scripts/fix-monitoring-mojibake.mjs`。修復が済んだので、スクリプトとそのテストはリポジトリから外した。中身は [c547259 の時点のもの](https://github.com/yuuuuuuu168/sakekasu-builder/blob/c547259/infra/scripts/fix-monitoring-mojibake.mjs) を見る。
 
 ```bash
 cd infra
@@ -958,13 +960,15 @@ account <アプリのアカウント ID> (or access is denied). Refusing to use 
 
 渡し方は `CDKD_APP` 環境変数が楽。cdkd は `-a, --app` の値として「合成済みのクラウドアセンブリのディレクトリ」を受け取り、省略時は `CDKD_APP`、次に `cdk.json` の `app` を見る。ジョブの `env` に `CDKD_APP: cdk.out` を置けば、`migrate-to-cdkd.sh` の中から呼ばれる `cdkd import` まで含めて、どの呼び出しも合成し直さない。コマンドごとに `--app` を書き足すより漏れにくい。
 
-CDK CLI 側のフォールバック（`cdk deploy`）には `--app cdk.out` を明示する。`CDKD_APP` は cdkd しか見ない。
+CDK CLI 側のフォールバック（`cdk deploy`）には `--app cdk.out` を明示していた。`CDKD_APP` は cdkd しか見ない。フォールバックは移行の完了後に外した（下の節）。
 
 `infra/__tests__/workflows.test.ts` が、合成が認証情報より前にあること、`CDKD_APP: cdk.out` があること、認証後に合成し直す CDK CLI の呼び出しが無いこと、`tee` に流す run に `pipefail` があること、投稿ステップに `if: always()` があることを検査する。
 
 **state に平文が残っていないか見張る。** `deploy.yml` はデプロイの後ろで `npx cdkd scrub --all --dry-run --fail` を打ち、state に平文が残っていれば落ちる。このアプリの合成テンプレートに `{{resolve:secretsmanager:...}}` は無く、シークレットは ID を環境変数に置いて実行時に取りに行く作りなので、平文が残る余地はもともと無い。
 
 ### `deploy.yml` から migrate-to-cdkd.sh を呼ぶ
+
+> 移行が済んだので、このステップと CloudFormation へのフォールバックは `deploy.yml` から外した。いまは認証のあと `cdkd deploy --all --yes` を直に打ち、その後ろで scrub を走らせる。cdkd に移したスタックへ `cdk deploy` を打たない（[aws-infra-rules.md](aws-infra-rules.md)）ので、フォールバックは残しておくと事故の元になる。以下は移行中の記録。
 
 ワークフローは `cdkd deploy` を直書きせず、先に `migrate-to-cdkd.sh` を通してから `engine` の値で分岐する。sakekasu-kakeibo と同じ形。
 

@@ -100,3 +100,7 @@ aidlc/diagnostics/
 
 # cdkd の取り込みが書き出す論理ID/物理ID の対応表
 infra/mapping-*.json
+
+# Python のバイトコード。infra/scripts の補助スクリプトを動かすとできる
+__pycache__/
+*.py[cod]
