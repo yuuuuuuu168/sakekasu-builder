@@ -438,14 +438,18 @@ function expandInlineScripts(tokens, nesting = 0) {
       // -c はほかの短いオプションと並べられ（-ec）、手前に値を取るオプション
       // （-o、-O、--rcfile など）も置ける。オプションの並びを読み解こうとすると
       // 値を取るものを数え漏らすので、区切りまでの語から -c の形を探す。
-      // スクリプトの引数にたまたま同じ形があっても、余分に読み直すだけで済む
-      for (let j = i + 1; j < tokens.length && !SEPARATORS.includes(tokens[j]); j += 1) {
-        if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(tokens[j]) && j + 1 < tokens.length) {
-          out.push(...tokens.slice(i + 1, j + 1), '(', ...read(tokens[j + 1]), ')');
-          i = j + 1;
-          break;
-        }
+      // 最初に見つけたものだけで止めず、-c の形の語の次はすべて読み直す。
+      // オプションの値がたまたま -c の形をしていても、本物の -c を取りこぼさない。
+      // スクリプトの引数に同じ形があっても、余分に読み直すだけで済む
+      let end = i + 1;
+      while (end < tokens.length && !SEPARATORS.includes(tokens[end])) end += 1;
+      const scripts = [];
+      for (let j = i + 1; j + 1 < end; j += 1) {
+        if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(tokens[j])) scripts.push(tokens[j + 1]);
       }
+      out.push(...tokens.slice(i + 1, end));
+      for (const script of scripts) out.push('(', ...read(script), ')');
+      i = end - 1;
     }
   }
   return out;

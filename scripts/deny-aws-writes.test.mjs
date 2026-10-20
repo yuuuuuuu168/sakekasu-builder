@@ -141,6 +141,9 @@ test('シェルに文字列で渡したコマンドの中も見る', () => {
   denies('bash --init-file foo -c "aws s3 rm s3://bucket/key"');
   denies('bash -O extglob -c "aws s3 rm s3://bucket/key"');
   denies('zsh -f -c "aws s3 rm s3://bucket/key"');
+  denies('bash --rcfile -ce -c "aws s3 rm s3://bucket/key"');
+  denies('bash -O -c -c "aws s3 rm s3://bucket/key"');
+  denies('bash -c "echo ok" -c "aws s3 rm s3://bucket/key"');
   denies('/bin/bash -lc "echo x; aws s3 rm s3://bucket/key"');
   denies('timeout 30 bash -c "aws s3 rm s3://bucket/key"');
   denies('eval "aws s3 rm s3://bucket/key"');
