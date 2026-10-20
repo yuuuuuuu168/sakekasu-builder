@@ -35,19 +35,14 @@ const mockPreUploadImages = vi.fn(async () => [
 ]);
 vi.mock('@/features/image/hooks/useImageUpload', () => ({
   useImageUpload: () => ({
-    imageFile: mockImageFiles[0] ?? null,
     imageFiles: mockImageFiles,
-    setImageFile: vi.fn(),
     isCompressing: false,
     isUploading: false,
     error: null,
-    imageKey: null,
     imageKeys: [],
     handleImageSelect: vi.fn(),
     removeImage: vi.fn(),
-    uploadImage: vi.fn(),
     uploadImages: vi.fn(async () => []),
-    preUploadImage: vi.fn(),
     preUploadImages: mockPreUploadImages,
     clearImage: vi.fn(),
   }),

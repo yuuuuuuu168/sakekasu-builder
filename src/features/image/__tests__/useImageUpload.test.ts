@@ -104,7 +104,7 @@ describe('useImageUpload - uploadImages', () => {
   });
 
   it('OCR 事前アップロード済みの 1 枚目は再利用し、残りだけアップロードする（バグ再発防止）', async () => {
-    // preUploadImage 用
+    // preUploadImages 用
     mockUploadUrl('ocr-pre-0');
 
     const { result } = renderHook(() => useImageUpload());
@@ -114,7 +114,7 @@ describe('useImageUpload - uploadImages', () => {
       await result.current.handleImageSelect(makeFile('first.jpg'));
     });
     await act(async () => {
-      await result.current.preUploadImage('purchase');
+      await result.current.preUploadImages('purchase');
     });
 
     expect(result.current.imageKeys).toEqual(['ocr-pre-0']);
@@ -685,31 +685,6 @@ describe('useImageUpload - 品質低下の警告', () => {
     });
 
     // "undefined" が警告として表示されてはいけない
-    expect(result.current.warning).toBeNull();
-  });
-
-  it('setImageFile でも警告の並びを揃える', async () => {
-    mockCompress.mockImplementation(async (file: File) => ({
-      file,
-      originalSize: file.size,
-      compressedSize: file.size,
-      wasCompressed: false,
-      wasReadable: false,
-    }));
-
-    const { result } = renderHook(() => useImageUpload());
-
-    await act(async () => {
-      await result.current.handleImageSelect(makeFile('unreadable.jpg'));
-    });
-    expect(result.current.warning).not.toBeNull();
-
-    // 後方互換の入口。ここで揃えないと画像が無いのに警告だけ残る
-    await act(async () => {
-      result.current.setImageFile(null);
-    });
-
-    expect(result.current.imageFiles).toHaveLength(0);
     expect(result.current.warning).toBeNull();
   });
 

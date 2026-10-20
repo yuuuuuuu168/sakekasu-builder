@@ -1,38 +1,3 @@
-export const getPurchaseRecord = /* GraphQL */ `
-  query GetPurchaseRecord($id: ID!) {
-    getPurchaseRecord(id: $id) {
-      id
-      owner
-      sakeName
-      storeName
-      price
-      quantity
-      remainingQuantity
-      purchaseDate
-      category
-      memo
-      brewery
-      region
-      alcoholPercentage
-      volumeMl
-      specificName
-      ricePolishingRatio
-      sakeMeterValue
-      acidity
-      aminoAcidity
-      riceVariety
-      yeast
-      labelDescription
-      imageKey
-      imageKeys
-      drinkingStatus
-      openedAt
-      createdAt
-      updatedAt
-    }
-  }
-`;
-
 export const listPurchaseRecords = /* GraphQL */ `
   query ListPurchaseRecords($limit: Int, $nextToken: String) {
     listPurchaseRecords(limit: $limit, nextToken: $nextToken) {
@@ -67,40 +32,6 @@ export const listPurchaseRecords = /* GraphQL */ `
         updatedAt
       }
       nextToken
-    }
-  }
-`;
-
-export const getDrinkingRecord = /* GraphQL */ `
-  query GetDrinkingRecord($id: ID!) {
-    getDrinkingRecord(id: $id) {
-      id
-      owner
-      sakeName
-      placeName
-      price
-      drinkingDate
-      category
-      drinkingMethod
-      rating
-      memo
-      brewery
-      region
-      alcoholPercentage
-      volumeMl
-      specificName
-      ricePolishingRatio
-      sakeMeterValue
-      acidity
-      aminoAcidity
-      riceVariety
-      yeast
-      labelDescription
-      imageKey
-      imageKeys
-      purchaseRecordId
-      createdAt
-      updatedAt
     }
   }
 `;

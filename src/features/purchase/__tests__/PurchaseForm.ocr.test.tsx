@@ -22,20 +22,15 @@ vi.mock('@/features/purchase/hooks/usePurchaseStorage', () => ({
 }));
 
 // useImageUpload をモック（画像あり + 事前アップロード対応）
-const mockPreUploadImage = vi.fn(async () => 'users/test-sub/purchase/test-id/test.jpg');
 const mockPreUploadImages = vi.fn(async () => ['users/test-sub/purchase/test-id/test.jpg']);
 vi.mock('@/features/image/hooks/useImageUpload', () => ({
   useImageUpload: () => ({
-    imageFile: new File(['test'], 'test.jpg', { type: 'image/jpeg' }),
-    setImageFile: vi.fn(),
+    imageFiles: [new File(['test'], 'test.jpg', { type: 'image/jpeg' })],
     isCompressing: false,
     isUploading: false,
     error: null,
-    imageKey: 'users/test-sub/purchase/test-id/test.jpg',
     imageKeys: ['users/test-sub/purchase/test-id/test.jpg'],
     handleImageSelect: vi.fn(),
-    uploadImage: vi.fn(async () => 'users/test-sub/purchase/test-id/test.jpg'),
-    preUploadImage: mockPreUploadImage,
     preUploadImages: mockPreUploadImages,
     clearImage: vi.fn(),
   }),

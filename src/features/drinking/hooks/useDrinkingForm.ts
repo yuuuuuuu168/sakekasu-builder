@@ -41,7 +41,6 @@ export interface UseDrinkingFormReturn {
    * 在庫ステータス更新の間にボタンが復活して二重送信できてしまう
    */
   isSubmitting: boolean;
-  isFormValid: boolean;
   handleChange: (field: keyof DrinkingFormData, value: string | number) => void;
   handleBlur: (field: keyof DrinkingFormData) => void;
   handleSubmit: () => Promise<void>;
@@ -107,8 +106,6 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
   const specs = useSakeSpecs(
     initialSpecs ?? (stockDraft?.specs ? specsToFormData(stockDraft.specs) : undefined),
   );
-
-  const isFormValid = Object.keys(errors).length === 0;
 
   const handleChange = useCallback(
     (field: keyof DrinkingFormData, value: string | number) => {
@@ -272,7 +269,6 @@ export function useDrinkingForm(options?: UseDrinkingFormOptions): UseDrinkingFo
     errors,
     isSaving,
     isSubmitting,
-    isFormValid,
     handleChange,
     handleBlur,
     handleSubmit,

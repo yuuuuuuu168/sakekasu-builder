@@ -177,17 +177,9 @@ export function DrinkingForm({
         {/* 画像添付（編集時は登録済みの写真の続きに追加する） */}
         <FormField label={isEditMode ? '画像を追加（任意）' : '画像（任意）'}>
           <ImageUploadArea
-            imageFile={imageUpload.imageFile}
             imageFiles={imageUpload.imageFiles}
             existingImageUrls={existingImageUrls}
-            onImageChange={(file) => {
-              if (file) {
-                imageUpload.handleImageSelect(file);
-              } else {
-                imageUpload.clearImage();
-                resetOcr();
-              }
-            }}
+            onImageChange={imageUpload.handleImageSelect}
             onImageRemove={imageUpload.removeImage}
             isCompressing={imageUpload.isCompressing}
             isUploading={imageUpload.isUploading}

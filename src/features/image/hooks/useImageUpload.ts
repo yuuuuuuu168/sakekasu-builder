@@ -38,12 +38,8 @@ const THUMBNAIL_WARNING =
   '一覧用の縮小画像を作れませんでした。一覧では原寸の画像が読み込まれます';
 
 export interface UseImageUploadReturn {
-  /** 選択された画像ファイル（後方互換: 最初の1枚） */
-  imageFile: File | null;
   /** 選択された画像ファイル一覧 */
   imageFiles: File[];
-  /** 画像ファイル設定（後方互換） */
-  setImageFile: (file: File | null) => void;
   /** 圧縮中フラグ */
   isCompressing: boolean;
   /** アップロード中フラグ */
@@ -52,20 +48,14 @@ export interface UseImageUploadReturn {
   error: string | null;
   /** 保存は成立したが品質が落ちている場合の警告（読み込み不可・サムネイル未生成） */
   warning: string | null;
-  /** S3 上の画像キー（事前アップロード後に設定、後方互換: 最初の1枚） */
-  imageKey: string | null;
   /** S3 上の画像キー一覧 */
   imageKeys: string[];
   /** 画像ファイル選択ハンドラ（バリデーション + 圧縮）: 追加モード */
   handleImageSelect: (file: File) => Promise<void>;
   /** 特定の画像を削除 */
   removeImage: (index: number) => void;
-  /** 画像アップロード実行（全ファイル） */
-  uploadImage: (recordType: string, recordId: string) => Promise<string | null>;
   /** 複数画像アップロード実行 */
   uploadImages: (recordType: string, recordId: string) => Promise<string[]>;
-  /** OCR 用の事前アップロード（最初の1枚のみ）。後方互換用 */
-  preUploadImage: (recordType: string) => Promise<string | null>;
   /** OCR 用の事前アップロード（選択中の全画像）。アップロード済みのキーは再利用する */
   preUploadImages: (recordType: string) => Promise<string[]>;
   /** 画像クリア */
@@ -120,10 +110,6 @@ export function useImageUpload(
    */
   const [fileWarnings, setFileWarnings] = useState<(string | null)[]>([]);
 
-  // 後方互換用
-  const imageFile = imageFiles[0] ?? null;
-  const imageKey = imageKeys[0] ?? null;
-
   /**
    * 表示する警告。
    *
@@ -137,19 +123,6 @@ export function useImageUpload(
     if (active.length === 0) return null;
     return active.includes(UNREADABLE_WARNING) ? UNREADABLE_WARNING : active[0];
   }, [fileWarnings]);
-
-  const setImageFile = useCallback((file: File | null) => {
-    selectedCountRef.current = file ? 1 : 0;
-    if (file) {
-      setImageFiles([file]);
-      // 警告は imageFiles と同じ並びで持つ決まり。ここで揃えないと
-      // 前の画像の警告が新しい画像のものとして表示される
-      setFileWarnings([null]);
-    } else {
-      setImageFiles([]);
-      setFileWarnings([]);
-    }
-  }, []);
 
   const handleImageSelect = useCallback(async (file: File) => {
     // 最大枚数チェック。編集時は既存の枚数を差し引いた残り枠で見る。
@@ -407,15 +380,6 @@ export function useImageUpload(
     [imageFiles, imageKeys],
   );
 
-  // 後方互換: 最初の1枚のキーを返す
-  const uploadImage = useCallback(
-    async (recordType: string, recordId: string): Promise<string | null> => {
-      const keys = await uploadImages(recordType, recordId);
-      return keys[0] ?? null;
-    },
-    [uploadImages],
-  );
-
   const preUploadImages = useCallback(
     async (recordType: string): Promise<string[]> => {
       if (imageFiles.length === 0) return [];
@@ -462,15 +426,6 @@ export function useImageUpload(
     [imageFiles, imageKeys],
   );
 
-  // 後方互換: 最初の1枚のキーを返す
-  const preUploadImage = useCallback(
-    async (recordType: string): Promise<string | null> => {
-      const keys = await preUploadImages(recordType);
-      return keys[0] ?? null;
-    },
-    [preUploadImages],
-  );
-
   const clearImage = useCallback(() => {
     selectedCountRef.current = 0;
     setImageFiles([]);
@@ -480,20 +435,15 @@ export function useImageUpload(
   }, []);
 
   return {
-    imageFile,
     imageFiles,
-    setImageFile,
     isCompressing,
     isUploading,
     error,
     warning,
-    imageKey,
     imageKeys,
     handleImageSelect,
     removeImage,
-    uploadImage,
     uploadImages,
-    preUploadImage,
     preUploadImages,
     clearImage,
   };

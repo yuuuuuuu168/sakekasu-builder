@@ -19,8 +19,9 @@ afterEach(() => {
 
 function renderUploadArea(overrides: Partial<ImageUploadAreaProps> = {}) {
   const defaultProps: ImageUploadAreaProps = {
-    imageFile: null,
+    imageFiles: [],
     onImageChange: vi.fn(),
+    onImageRemove: vi.fn(),
     isCompressing: false,
     error: null,
     ...overrides,
@@ -63,9 +64,9 @@ describe('ImageUploadArea', () => {
   });
 
   // 要件 1.6: プレビュー表示
-  it('imageFile が設定されている場合にプレビューを表示する', () => {
+  it('imageFiles がある場合にプレビューを表示する', () => {
     const file = new File(['img'], 'sake.jpg', { type: 'image/jpeg' });
-    renderUploadArea({ imageFile: file });
+    renderUploadArea({ imageFiles: [file] });
 
     expect(screen.getByTestId('image-preview-0')).toBeInTheDocument();
     expect(screen.getByAltText('選択された画像 1')).toBeInTheDocument();
@@ -75,7 +76,7 @@ describe('ImageUploadArea', () => {
   // オブジェクト URL は state を経由せず img へ直接渡し、破棄時に解放する
   it('プレビュー画像にオブジェクト URL が渡り、破棄時に解放される', () => {
     const file = new File(['img'], 'sake.jpg', { type: 'image/jpeg' });
-    const { unmount } = renderUploadArea({ imageFile: file });
+    const { unmount } = renderUploadArea({ imageFiles: [file] });
 
     expect(screen.getByAltText('選択された画像 1')).toHaveAttribute(
       'src',
@@ -89,20 +90,20 @@ describe('ImageUploadArea', () => {
   // 要件 1.7: プレビュー表示時に削除ボタンが表示される
   it('プレビュー表示時に削除ボタンが表示される', () => {
     const file = new File(['img'], 'sake.jpg', { type: 'image/jpeg' });
-    renderUploadArea({ imageFile: file });
+    renderUploadArea({ imageFiles: [file] });
 
     expect(screen.getByTestId('image-delete-button-0')).toBeInTheDocument();
     expect(screen.getByLabelText('画像 1 を削除')).toBeInTheDocument();
   });
 
-  // 要件 1.8: 削除ボタンクリックで onImageChange(null) が呼ばれる
-  it('削除ボタンクリックで onImageChange(null) が呼ばれる', () => {
-    const onImageChange = vi.fn();
+  // 要件 1.8: 削除ボタンクリックで、その画像の位置を onImageRemove に渡す
+  it('削除ボタンクリックで onImageRemove が呼ばれる', () => {
+    const onImageRemove = vi.fn();
     const file = new File(['img'], 'sake.jpg', { type: 'image/jpeg' });
-    renderUploadArea({ imageFile: file, onImageChange });
+    renderUploadArea({ imageFiles: [file], onImageRemove });
 
     fireEvent.click(screen.getByTestId('image-delete-button-0'));
-    expect(onImageChange).toHaveBeenCalledWith(null);
+    expect(onImageRemove).toHaveBeenCalledWith(0);
   });
 
   // 要件 2.5: 圧縮中メッセージの表示

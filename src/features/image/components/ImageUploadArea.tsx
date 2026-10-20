@@ -1,21 +1,13 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-/** 圧縮情報（圧縮完了通知用） */
-export interface CompressionInfo {
-  originalSize: number;
-  compressedSize: number;
-}
-
 export interface ImageUploadAreaProps {
-  /** 選択された画像ファイル（後方互換: 単一） */
-  imageFile: File | null;
   /** 選択された画像ファイル一覧 */
-  imageFiles?: File[];
-  /** 画像ファイル変更時のコールバック（後方互換: 単一追加） */
-  onImageChange: (file: File | null) => void;
+  imageFiles: File[];
+  /** 画像を選んだときのコールバック（1枚ずつ追加する） */
+  onImageChange: (file: File) => void;
   /** 特定の画像を削除 */
-  onImageRemove?: (index: number) => void;
+  onImageRemove: (index: number) => void;
   /** 圧縮中フラグ */
   isCompressing: boolean;
   /** アップロード中フラグ */
@@ -24,8 +16,6 @@ export interface ImageUploadAreaProps {
   error: string | null;
   /** 警告メッセージ（保存はできたが縮小・サムネイルが作れなかった場合） */
   warning?: string | null;
-  /** 圧縮完了情報 */
-  compressionInfo?: CompressionInfo | null;
   /** 無効化フラグ */
   disabled?: boolean;
   /** OCR 解析中フラグ */
@@ -47,20 +37,14 @@ export interface ImageUploadAreaProps {
   existingImageUrls?: string[];
 }
 
-function formatMB(bytes: number): string {
-  return (bytes / (1024 * 1024)).toFixed(2);
-}
-
 export function ImageUploadArea({
-  imageFile,
-  imageFiles: imageFilesProp,
+  imageFiles,
   onImageChange,
   onImageRemove,
   isCompressing,
   isUploading = false,
   error,
   warning = null,
-  compressionInfo = null,
   disabled = false,
   isOcrAnalyzing = false,
   onOcrTrigger,
@@ -72,8 +56,6 @@ export function ImageUploadArea({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  // 複数画像対応: imageFiles prop があればそちらを使う、なければ imageFile から配列化
-  const imageFiles = imageFilesProp ?? (imageFile ? [imageFile] : []);
   const hasImages = imageFiles.length > 0;
   // 上限は記録あたりの枚数。編集時は既に添付されている分も数に入れる
   const attachedCount = imageFiles.length + existingImageUrls.length;
@@ -129,12 +111,8 @@ export function ImageUploadArea({
   );
 
   const handleDelete = useCallback((index: number) => {
-    if (onImageRemove) {
-      onImageRemove(index);
-    } else {
-      onImageChange(null);
-    }
-  }, [onImageRemove, onImageChange]);
+    onImageRemove(index);
+  }, [onImageRemove]);
 
   const handleClick = useCallback(() => {
     if (!disabled && !isCompressing && !isUploading) {
@@ -233,18 +211,6 @@ export function ImageUploadArea({
       <AnimatePresence>
         {isUploading && (
           <StatusMessage key="uploading" icon={<SpinnerIcon />} text="画像をアップロード中..." variant="info" />
-        )}
-      </AnimatePresence>
-
-      {/* 圧縮完了通知 */}
-      <AnimatePresence>
-        {compressionInfo && !isCompressing && (
-          <StatusMessage
-            key="compressed"
-            icon={<CheckIcon />}
-            text={`画像を圧縮しました（元: ${formatMB(compressionInfo.originalSize)}MB → ${formatMB(compressionInfo.compressedSize)}MB）`}
-            variant="success"
-          />
         )}
       </AnimatePresence>
 
