@@ -1,32 +1,25 @@
-import { useEffect, useRef } from 'react';
-import { format, parse } from 'date-fns';
-import { Loader2 } from 'lucide-react';
+import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 
 import { FormField } from '@/components/form/FormField';
-import { DatePickerField } from '@/components/form/DatePickerField';
+import { IsoDateField } from '@/components/form/IsoDateField';
 import { CategorySelect } from '@/components/form/CategorySelect';
+import { PriceInput } from '@/components/form/PriceInput';
+import { MemoField } from '@/components/form/MemoField';
+import { SubmitButton } from '@/components/form/SubmitButton';
 
 import { usePurchaseForm } from '@/features/purchase/hooks/usePurchaseForm';
 import { usePastRatingHint } from '@/features/purchase/hooks/usePastRatingHint';
 import { PastRatingHint } from '@/features/purchase/components/PastRatingHint';
 import type { PurchaseFormData } from '@/features/purchase/types';
 import type { BottleStock } from '@/features/records/lib/bottleCount';
-import { ImageUploadArea } from '@/features/image/components/ImageUploadArea';
-import { useOcrTrigger } from '@/features/image/hooks/useOcrTrigger';
-import { useImageUrls } from '@/features/image/hooks/useImageUrls';
+import { RecordImageField } from '@/features/image/components/RecordImageField';
+import { useRecordOcr } from '@/features/image/hooks/useRecordOcr';
 import { SakeSpecFields } from '@/features/specs/components/SakeSpecFields';
 import type { SakeSpecFormData } from '@/features/specs/types';
-
-const MotionButton = motion.create(Button);
-
-/** 毎レンダリングで新しい配列を渡すと URL の再取得が走るため、空配列は使い回す */
-const EMPTY_KEYS: string[] = [];
 
 interface PurchaseFormProps {
   onSubmitSuccess?: () => void;
@@ -75,31 +68,18 @@ export function PurchaseForm({
     existingBottles,
   });
 
-  // 編集時は「今ある写真の続きに足す」と分かるよう、登録済みの画像も並べる
-  const { imageUrls: existingImageUrls } = useImageUrls(existingImageKeys ?? EMPTY_KEYS);
-
-  // ユーザーが手動でカテゴリを選択したか（自動OCRで選択を上書きしないための追跡）
-  const categoryTouchedRef = useRef(false);
-
-  const { handleOcrTrigger, isAnalyzing, ocrMessage, resetOcr, hasAnalyzed } = useOcrTrigger(
+  const ocr = useRecordOcr({
     imageUpload,
-    'purchase',
-    (info, { isAuto }) => {
-      // 自動実行では入力済みの銘柄名・選択済みのカテゴリを上書きしない（手動の再読み取りは上書きする）
-      if (!isAuto || formData.sakeName.trim() === '') {
-        handleChange('sakeName', info.sakeName);
-      }
-      if (info.category && (!isAuto || !categoryTouchedRef.current)) {
-        handleChange('category', info.category);
-      }
-      // 産地・度数を含む詳細スペックはそれぞれの入力欄へ入れる（Issue #87・#88）。
-      // 自動実行では入力済みの項目を残す
-      specs.applyOcrResult(info.specs, info.lowConfidenceSpecFields, { overwrite: !isAuto });
-    },
-  );
+    recordType: 'purchase',
+    sakeName: formData.sakeName,
+    setSakeName: (value) => handleChange('sakeName', value),
+    setCategory: (value) => handleChange('category', value),
+    specs,
+  });
+  const { resetAfterSubmit } = ocr;
 
   const isSubmitting =
-    isSubmittingForm || isSaving || imageUpload.isUploading || isAnalyzing || isGeneratingNote;
+    isSubmittingForm || isSaving || imageUpload.isUploading || ocr.isAnalyzing || isGeneratingNote;
 
   // リピート判定リマインド: 銘柄名にマッチする過去の飲酒評価を表示
   const { summaries: pastRatings } = usePastRatingHint(formData.sakeName);
@@ -108,9 +88,7 @@ export function PurchaseForm({
     if (!submitResult) return;
     if (submitResult.success) {
       toast.success(isEditMode ? '更新が完了しました' : '登録が完了しました');
-      // フォームリセットに合わせてOCRの解析済み管理も初期化する（同じ画像の再登録で自動OCRが動くように）
-      categoryTouchedRef.current = false;
-      resetOcr();
+      resetAfterSubmit();
       onSubmitSuccess?.();
     } else {
       toast.error(
@@ -120,17 +98,7 @@ export function PurchaseForm({
             : '登録に失敗しました。もう一度お試しください'),
       );
     }
-  }, [submitResult, onSubmitSuccess, isEditMode, resetOcr]);
-
-  const selectedDate = formData.purchaseDate
-    ? parse(formData.purchaseDate, 'yyyy-MM-dd', new Date())
-    : undefined;
-
-  const handleDateSelect = (date: Date | undefined) => {
-    if (date) {
-      handleChange('purchaseDate', format(date, 'yyyy-MM-dd'));
-    }
-  };
+  }, [submitResult, onSubmitSuccess, isEditMode, resetAfterSubmit]);
 
   const onFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -145,23 +113,13 @@ export function PurchaseForm({
     >
     <form onSubmit={onFormSubmit} className="space-y-5" data-testid="purchase-form">
       {/* 画像添付（編集時は登録済みの写真の続きに追加する） */}
-      <FormField label={isEditMode ? '画像を追加（任意）' : '画像（任意）'}>
-        <ImageUploadArea
-          imageFiles={imageUpload.imageFiles}
-          existingImageUrls={existingImageUrls}
-          onImageChange={imageUpload.handleImageSelect}
-          onImageRemove={imageUpload.removeImage}
-          isCompressing={imageUpload.isCompressing}
-          isUploading={imageUpload.isUploading}
-          error={imageUpload.error}
-          warning={imageUpload.warning}
-          disabled={isSubmitting}
-          isOcrAnalyzing={isAnalyzing}
-          onOcrTrigger={handleOcrTrigger}
-          ocrMessage={ocrMessage}
-          hasOcrRun={hasAnalyzed}
-        />
-      </FormField>
+      <RecordImageField
+        imageUpload={imageUpload}
+        ocr={ocr}
+        isEditMode={isEditMode}
+        existingImageKeys={existingImageKeys}
+        disabled={isSubmitting}
+      />
 
       {/* 銘柄名 */}
       <FormField label="銘柄名" error={errors.sakeName} required>
@@ -190,22 +148,12 @@ export function PurchaseForm({
 
       {/* 購入価格 */}
       <FormField label="購入価格" error={errors.price} required>
-        <div className="relative">
-          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-            ¥
-          </span>
-          <Input
-            data-testid="input-price"
-            type="number"
-            min="0"
-            placeholder="0"
-            className="pl-7"
-            value={formData.price}
-            onChange={(e) => handleChange('price', e.target.value)}
-            onBlur={() => handleBlur('price')}
-            aria-invalid={!!errors.price}
-          />
-        </div>
+        <PriceInput
+          value={formData.price}
+          onChange={(value) => handleChange('price', value)}
+          onBlur={() => handleBlur('price')}
+          invalid={!!errors.price}
+        />
       </FormField>
 
       {/* 本数 */}
@@ -231,9 +179,9 @@ export function PurchaseForm({
 
       {/* 購入日 */}
       <FormField label="購入日" error={errors.purchaseDate} required>
-        <DatePickerField
-          value={selectedDate}
-          onSelect={handleDateSelect}
+        <IsoDateField
+          value={formData.purchaseDate}
+          onChange={(value) => handleChange('purchaseDate', value)}
           onBlur={() => handleBlur('purchaseDate')}
           testId="input-purchaseDate"
         />
@@ -244,25 +192,14 @@ export function PurchaseForm({
         <CategorySelect
           value={formData.category}
           onChange={(val) => {
-            if (val !== null) {
-              categoryTouchedRef.current = true;
-              handleChange('category', val);
-            }
+            if (val !== null) ocr.selectCategory(val);
           }}
           onBlur={() => handleBlur('category')}
         />
       </FormField>
 
       {/* メモ */}
-      <FormField label="メモ">
-        <Textarea
-          data-testid="input-memo"
-          placeholder="味の感想やメモなど（任意）"
-          value={formData.memo}
-          onChange={(e) => handleChange('memo', e.target.value)}
-          rows={3}
-        />
-      </FormField>
+      <MemoField value={formData.memo} onChange={(value) => handleChange('memo', value)} />
 
       {/* 詳細スペック（任意）。既定は折りたたみ、入力済みや読み取り結果があれば開く */}
       <SakeSpecFields
@@ -276,31 +213,17 @@ export function PurchaseForm({
       />
 
       {/* 登録ボタン */}
-      <MotionButton
-        type="submit"
-        data-testid="submit-button"
-        disabled={isSubmitting}
-        className="w-full h-10 text-base font-semibold"
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
-      >
-        {isSubmitting ? (
-          <>
-            <Loader2 className="size-4 animate-spin" />
-            {imageUpload.isUploading
-              ? '画像アップロード中...'
-              : isGeneratingNote
-                ? 'テイスティングノート生成中...'
-                : isEditMode
-                  ? '更新中...'
-                  : '登録中...'}
-          </>
-        ) : isEditMode ? (
-          '🍶 更新する'
-        ) : (
-          '🍶 登録する'
-        )}
-      </MotionButton>
+      <SubmitButton
+        isSubmitting={isSubmitting}
+        isEditMode={isEditMode}
+        busyLabel={
+          imageUpload.isUploading
+            ? '画像アップロード中...'
+            : isGeneratingNote
+              ? 'テイスティングノート生成中...'
+              : null
+        }
+      />
     </form>
     </motion.div>
   );
