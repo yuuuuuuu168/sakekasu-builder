@@ -104,6 +104,47 @@ test('資格情報を返す操作は接頭辞が読み取りでも止める', ()
   allows('aws sts get-caller-identity'); // 素性を見るだけ
 });
 
+test('資格情報やトークンを返す操作は止める', () => {
+  denies('aws ec2 get-password-data --instance-id i-1');
+  denies('aws redshift get-cluster-credentials --db-user x --cluster-identifier y');
+  denies('aws redshift-serverless get-credentials --workgroup-name x');
+  denies('aws lightsail get-instance-access-details --instance-name x');
+  denies('aws secretsmanager get-secret-value --secret-id x');
+  denies('aws lakeformation get-temporary-glue-table-credentials --table-arn x');
+  allows('aws ec2 describe-instances');
+  allows('aws secretsmanager list-secrets');
+});
+
+test('グローバルオプションを途中までの綴りで書いても値を読み飛ばす', () => {
+  denies('aws --prof verify ec2 terminate-instances --instance-ids i-1');
+  denies('aws --prof Verify ec2 terminate-instances --instance-ids i-1');
+  denies('aws --endpoint https://ec2.ap-northeast-1.amazonaws.com ec2 terminate-instances');
+  denies('aws --reg ap-northeast-1 s3 rm s3://bucket/key');
+  denies('aws --profile=verify s3 rm s3://bucket/key');
+  allows('aws --prof verify logs tail /aws/lambda/x');
+  allows('aws --reg ap-northeast-1 --out json sts get-caller-identity');
+});
+
+test('知らないオプションの値らしき語のあとも見る', () => {
+  denies('aws --debug Verify ec2 terminate-instances --instance-ids i-1');
+  allows('aws --debug sts get-caller-identity');
+});
+
+test('シェルに文字列で渡したコマンドの中も見る', () => {
+  denies('bash -c "aws s3 rm s3://bucket/key"');
+  denies("sh -c 'aws s3 rm s3://bucket/key'");
+  denies('bash -ec "aws s3 rm s3://bucket/key"');
+  denies('bash -o pipefail -c "aws s3 rm s3://bucket/key"');
+  denies('/bin/bash -lc "echo x; aws s3 rm s3://bucket/key"');
+  denies('timeout 30 bash -c "aws s3 rm s3://bucket/key"');
+  denies('eval "aws s3 rm s3://bucket/key"');
+  denies('true && eval \'aws s3 rm\' s3://bucket/key');
+  denies('bash -c "bash -c \\"aws s3 rm s3://bucket/key\\""');
+  allows('bash -c "aws logs tail /aws/lambda/x"');
+  allows('eval "$(ssh-agent -s)"');
+  allows('grep -rn eval "it\'s" scripts/');
+});
+
 test('s3 の高レベルコマンドは ls だけを通す', () => {
   denies('aws s3 cp local.txt s3://bucket/');
   denies('aws s3 sync . s3://bucket/');

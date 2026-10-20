@@ -75,6 +75,38 @@ const DENY_EXACT = new Set([
   'ecr-public get-login-password', 'ecr-public get-authorization-token',
   'eks get-token',
   'codeartifact get-authorization-token',
+  // 一時資格情報・トークン・パスワードそのものを返す操作（botocore 1.43 のモデルで
+  // 出力側を見て拾った）。DB ユーザーを作るものもあり、書き込みも兼ねる
+  'ec2 get-password-data',
+  'redshift get-cluster-credentials', 'redshift get-cluster-credentials-with-iam',
+  'redshift-serverless get-credentials',
+  'lightsail get-instance-access-details', 'lightsail get-relational-database-master-user-password',
+  'secretsmanager get-secret-value', 'secretsmanager batch-get-secret-value',
+  'ssm get-access-token',
+  's3control get-data-access',
+  'lakeformation get-temporary-data-location-credentials',
+  'lakeformation get-temporary-glue-partition-credentials',
+  'lakeformation get-temporary-glue-table-credentials',
+  'datazone get-environment-credentials',
+  'connect get-federation-token',
+  'license-manager get-access-token',
+  'emr get-cluster-session-credentials', 'emr get-session-endpoint',
+  'emr-containers get-managed-endpoint-session-credentials',
+  'emr-serverless get-session-endpoint',
+  'glue get-session-endpoint', 'athena get-session-endpoint',
+  'gamelift get-compute-access', 'gamelift get-compute-auth-token', 'gamelift get-instance-access',
+  'codepipeline get-job-details', 'codepipeline get-third-party-job-details',
+  'finspace-data get-programmatic-access-credentials',
+  'finspace-data get-external-data-view-access-details',
+  'cloudwatchomni get-space-credentials-for-organization',
+  'bedrock-agentcore get-workload-access-token',
+  'bedrock-agentcore get-workload-access-token-for-jwt',
+  'bedrock-agentcore get-workload-access-token-for-user-id',
+  'bedrock-agentcore get-resource-oauth2-token',
+  'bedrock-agentcore get-resource-payment-token',
+  'pca-connector-scep get-challenge-password',
+  'kinesis-video-signaling get-ice-server-config',
+  'wickr get-oidc-info',
 ]);
 
 // シェルの区切り文字。引用符の外にあるときだけ区切りとして扱う
@@ -296,18 +328,38 @@ function toCliName(word) {
   return CLI_NAME.test(ascii) ? ascii : '';
 }
 
+// 値を取るグローバルオプションか。AWS CLI は argparse の省略形を受け付けるので、
+// 一意に決まる途中までの綴りも同じフラグとして扱う。--x=値 の形は 1 語で完結する
+function takesValue(flag) {
+  if (!flag.startsWith('--') || flag.includes('=') || flag.length < 3) return false;
+  for (const f of FLAGS_WITH_VALUE) if (f.startsWith(flag)) return true;
+  return false;
+}
+
 // tokens[i] が 'aws' のとき、そこから service と operation を読み取る
 function parseInvocation(tokens, i) {
   const words = [];
   let j = i + 1;
+  // 直前の語が、値を取らないと判断したオプションだったか
+  let afterFlag = false;
   while (j < tokens.length && words.length < 2) {
     const t = tokens[j];
     if (t === '--version' || t === 'help') return { service: t, operation: '', safe: true };
     if (t.startsWith('-')) {
-      if (FLAGS_WITH_VALUE.has(t) && j + 1 < tokens.length) j += 1;
+      if (takesValue(t) && j + 1 < tokens.length) j += 1;
+      afterFlag = !takesValue(t);
       j += 1;
       continue;
     }
+    // オプションの直後にある名前の形でない語は、知らないオプションの値かもしれない。
+    // 呼び出しではないと決めつけず、読み飛ばして後ろの語で判定する
+    if (words.length === 0 && afterFlag && !t.includes('$') && !toCliName(t)
+      && !SEPARATORS.includes(t)) {
+      afterFlag = false;
+      j += 1;
+      continue;
+    }
+    afterFlag = false;
     // シェルの区切りに当たったら、その aws 呼び出しはそこで終わり
     if (SEPARATORS.includes(t)) break;
     // 空の語は読み飛ばす。bash は空文字を引数として渡すが、サービス名の位置に
@@ -357,8 +409,44 @@ function isAwsCommand(token) {
   return ascii === 'aws' || ascii.endsWith('/aws');
 }
 
+// 文字列として渡したコマンドを実行するもの。sh -c の引数と eval の引数は
+// 1 語のままだと中の呼び出しが見えないので、読み直して区切りで挟んで足す
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
+
+const commandName = (token) => token.slice(token.lastIndexOf('/') + 1);
+
+function expandInlineScripts(tokens, nesting = 0) {
+  const read = (script) => expandInlineScripts(tokenize(script, nesting + 1), nesting + 1);
+  const out = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const name = commandName(tokens[i]);
+    out.push(tokens[i]);
+    // eval は組み込みなので、コマンドの位置にあるときだけ見る。grep eval … の
+    // ような引数まで読み直すと、引用を外して連結した文字列が読めずに誤って止まる
+    const atCommand = i === 0 || SEPARATORS.includes(tokens[i - 1])
+      || tokens[i - 1] === 'builtin' || tokens[i - 1] === 'command';
+    if (name === 'eval' && atCommand) {
+      let j = i + 1;
+      while (j < tokens.length && !SEPARATORS.includes(tokens[j])) j += 1;
+      out.push('(', ...read(tokens.slice(i + 1, j).join(' ')), ')');
+      i = j - 1;
+    } else if (SHELLS.has(name)) {
+      // -e -c や -ec のように -c はほかの短いオプションと並べられる。-o / +o は値を取る
+      for (let j = i + 1; j < tokens.length && /^[-+]/.test(tokens[j]); j += 1) {
+        if (tokens[j] === '-o' || tokens[j] === '+o') { j += 1; continue; }
+        if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(tokens[j]) && j + 1 < tokens.length) {
+          out.push(...tokens.slice(i + 1, j + 1), '(', ...read(tokens[j + 1]), ')');
+          i = j + 1;
+          break;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 function findDenied(command) {
-  const tokens = tokenize(command);
+  const tokens = expandInlineScripts(tokenize(command));
   for (let i = 0; i < tokens.length; i += 1) {
     if (!isAwsCommand(tokens[i])) continue;
     const { service, operation, safe } = parseInvocation(tokens, i);
