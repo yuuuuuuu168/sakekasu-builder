@@ -129,6 +129,8 @@ export interface ToolDefinition {
   input_schema: Record<string, unknown>;
 }
 
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 export interface ToolRequest {
   maxTokens: number;
   tool: ToolDefinition;
@@ -199,14 +201,23 @@ export function createLlmClient(options: LlmClientOptions): LlmClient {
   };
 }
 
-function createAnthropicClient(federation: Federation, timeoutMs: number): Anthropic {
+/**
+ * ID 連携で Claude API に入る client。モデルの比較（ocr-benchmark）も同じ入り方をするので export している。
+ * maxRetries は本番の呼び出しでは 0（失敗したら Bedrock でやり直す）。比較は Bedrock へ回さないので、
+ * 流量の上限や過負荷を SDK の再試行で待つ
+ */
+export function createAnthropicClient(
+  federation: Federation,
+  timeoutMs: number,
+  maxRetries = 0,
+): Anthropic {
   // GetWebIdentityToken は地域ごとの STS にしかない。発行者 URL は global なので、どの地域で呼んでも同じ
   const sts = new STSClient({ region: process.env.AWS_REGION });
   return new Anthropic({
     // ログの水準は既定（warn）のまま。debug にすると本文とヘッダが CloudWatch に出る
     timeout: timeoutMs,
-    // 再試行は SDK に任せず、失敗したら Bedrock でやり直す。30 秒の枠に収めるため
-    maxRetries: 0,
+    // 本番は再試行を SDK に任せず、失敗したら Bedrock でやり直す。30 秒の枠に収めるため
+    maxRetries,
     credentials: oidcFederationProvider({
       // 交換のたびに新しい JWT を取る（jti は使い回すと弾かれる）
       identityTokenProvider: async () => {
@@ -236,11 +247,12 @@ function createAnthropicClient(federation: Federation, timeoutMs: number): Anthr
  * - temperature を渡さない。今の世代は既定値以外を 400 で弾く
  * - tool の定義にキャッシュの印を付ける。定義は毎回同じで、連続した呼び出し
  *   （ノートの「知識 → 検索つき」の 2 回、続けて撮った OCR）で読み直しが安くなる
- * - effort を low にする。読み取りと短文の生成で、考え込む余地が少ない
+ * - effort を low にする。読み取りと短文の生成で、考え込む余地が少ない（比較のときだけ変える）
  */
 export function buildAnthropicRequest(
   model: string,
   request: ToolRequest,
+  effort: Effort = 'low',
 ): Anthropic.MessageCreateParamsNonStreaming {
   return {
     model,
@@ -249,7 +261,7 @@ export function buildAnthropicRequest(
     tool_choice: canForceToolChoice(model)
       ? { type: 'tool', name: request.tool.name }
       : { type: 'auto' },
-    output_config: { effort: 'low' },
+    output_config: { effort },
     messages: request.messages,
   };
 }

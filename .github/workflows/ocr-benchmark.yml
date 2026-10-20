@@ -1,0 +1,80 @@
+# OCR のモデル比較を起動する（docs/ocr-benchmark.md）。
+#
+# 手動でだけ動く。比較の本体は Lambda（sakekasu-builder-<env>-ocr-benchmark）で、
+# ここは入力を JSON にして非同期で起動するだけ。結果は Lambda のログに出る。
+#
+# 起動に使えるロールがほかに無いので、deploy と同じ cdkd のロールを借りる。
+# 依存の取得もコードの合成もしないので、認証情報の届く範囲で走るのは AWS CLI だけ。
+# deploy ロールの信頼ポリシーが main に限っているので、main から起動する
+name: ocr-benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: 比べるモデル（カンマ区切り）
+        default: claude-haiku-5-5,claude-sonnet-5-5,claude-opus-5-5,claude-fable-5-1
+        required: true
+      efforts:
+        description: effort（カンマ区切り。low / medium / high / xhigh / max）
+        default: low
+        required: true
+      limit:
+        description: 使う記録の数（新しい順）
+        default: '30'
+        required: true
+      offset:
+        description: 新しい順に飛ばす数（別の記録で回すとき）
+        default: '0'
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: ocr-benchmark
+  cancel-in-progress: false
+
+jobs:
+  invoke:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      # 入力は JSON に組む前に形を確かめる（Lambda の側でも確かめる）。
+      # 入力を run に直に埋め込まず、環境変数から読む
+      - name: 入力を JSON にする
+        env:
+          MODELS: ${{ inputs.models }}
+          EFFORTS: ${{ inputs.efforts }}
+          LIMIT: ${{ inputs.limit }}
+          OFFSET: ${{ inputs.offset }}
+        run: |
+          set -euo pipefail
+          [[ "$MODELS" =~ ^[a-z0-9,-]+$ ]] || { echo "::error::models の形が違う"; exit 1; }
+          [[ "$EFFORTS" =~ ^[a-z,]+$ ]] || { echo "::error::efforts の形が違う"; exit 1; }
+          [[ "$LIMIT" =~ ^[0-9]+$ && "$OFFSET" =~ ^[0-9]+$ ]] || { echo "::error::limit と offset は整数"; exit 1; }
+          jq -n \
+            --arg models "$MODELS" --arg efforts "$EFFORTS" \
+            --argjson limit "$LIMIT" --argjson offset "$OFFSET" \
+            '{models: ($models | split(",")), efforts: ($efforts | split(",")), limit: $limit, offset: $offset}' \
+            > "$RUNNER_TEMP/payload.json"
+          cat "$RUNNER_TEMP/payload.json"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sakekasu-github-actions-deploy
+          aws-region: ap-northeast-1
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sakekasu-cdkd-deploy
+          aws-region: ap-northeast-1
+          role-chaining: true
+      - name: 比較を起動する
+        run: |
+          aws lambda invoke \
+            --function-name sakekasu-builder-dev-ocr-benchmark \
+            --invocation-type Event \
+            --cli-binary-format raw-in-base64-out \
+            --payload "file://$RUNNER_TEMP/payload.json" \
+            "$RUNNER_TEMP/out.json"
+          echo "起動した。結果は CloudWatch Logs の /aws/lambda/sakekasu-builder-dev-ocr-benchmark に [bench] summary として出る"
