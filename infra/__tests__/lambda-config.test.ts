@@ -409,7 +409,7 @@ describe('Lambda のランタイム', () => {
     it('api-stack.ts の NodejsFunction を取りこぼさない', () => {
       const source = readFileSync(path.join(libDir, 'api-stack.ts'), 'utf8');
 
-      expect(countLive(source, /new NodejsFunction\(/)).toBe(3);
+      expect(countLive(source, /new NodejsFunction\(/)).toBe(4);
     });
   });
 
@@ -511,6 +511,8 @@ describe('Lambda のランタイム', () => {
   const EXPECTED_RESERVATIONS: Record<string, number> = {
     [`${SYNTH_ENV_NAME}-sakekasu-ocr-analyzer`]: 20,
     [`${SYNTH_ENV_NAME}-sakekasu-tasting-note`]: 5,
+    // OCR のモデル比較。同時に 2 つ走ってクレジットを二重に使わないため
+    [`sakekasu-builder-${SYNTH_ENV_NAME}-ocr-benchmark`]: 1,
   };
 
   // 振り分けが壊れると、以降の検査が「対象ゼロ」で素通りしてしまう。

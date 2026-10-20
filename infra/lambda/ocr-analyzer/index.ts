@@ -41,7 +41,7 @@ interface AppSyncEvent {
 }
 
 /** 1リクエストで解析する画像の上限（トークン量とコストを抑える） */
-const MAX_OCR_IMAGES = 3;
+export const MAX_OCR_IMAGES = 3;
 
 /**
  * Bedrock が受け取れる画像の上限。
@@ -75,7 +75,7 @@ interface OcrResult extends SpecFields {
 }
 
 /** ラベル情報を構造化して受け取る tool の名前 */
-const LABEL_TOOL_NAME = 'record_label_info';
+export const LABEL_TOOL_NAME = 'record_label_info';
 
 /**
  * tool の input_schema。プロパティの並び順が生成順になるため、
