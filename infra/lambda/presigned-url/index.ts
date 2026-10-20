@@ -14,6 +14,7 @@ import {
   TEMP_LOCATION,
   TEMP_OBJECT_TAGGING,
 } from '../../lib/image-constants';
+import { assertOwnedKey, isOwnedKey, requireOwnerSub, type AppSyncIdentity } from '../shared/owner';
 
 const s3Client = new S3Client({});
 
@@ -62,9 +63,7 @@ interface AppSyncEvent {
   };
   // AppSync は USER_POOL 認証を既定にしているが、直接呼び出しや別の認証方式の
   // 経路では identity が入らないことがある。型でも入らない前提にしておく
-  identity?: {
-    sub?: string;
-  } | null;
+  identity?: AppSyncIdentity | null;
   source?: {
     imageKey?: string | null;
     imageKeys?: string[] | null;
@@ -119,24 +118,6 @@ export async function handler(event: AppSyncEvent): Promise<UploadUrlResponse | 
     default:
       throw new Error(`Unknown field: ${fieldName}`);
   }
-}
-
-/**
- * リクエスト元の sub を取り出す。identity が無い呼び出しは弾く。
- *
- * キーの所有者チェックは `${ownerSub}/` の前方一致で行うため、sub が
- * 空文字のまま通ると `/` で始まる任意のキーが一致してしまう。
- * identity が落ちる経路（直接呼び出しなど）でも素の TypeError にせず、
- * 認可エラーとして扱う
- */
-function requireOwnerSub(event: AppSyncEvent): string {
-  const ownerSub = event.identity?.sub;
-
-  if (!ownerSub) {
-    throw new Error('Unauthorized: missing identity');
-  }
-
-  return ownerSub;
 }
 
 /**
@@ -265,9 +246,7 @@ async function generateUploadUrl(event: AppSyncEvent): Promise<UploadUrlResponse
 /** 1 件分のダウンロード用 Presigned URL を作る（所有者チェック込み） */
 async function signDownloadUrl(key: string, ownerSub: string): Promise<string> {
   // キーのプレフィックスがリクエストユーザーの sub と一致するか検証
-  if (!key.startsWith(`${ownerSub}/`)) {
-    throw new Error('Unauthorized: cannot access other user\'s images');
-  }
+  assertOwnedKey(ownerSub, key);
 
   const command = new GetObjectCommand({
     Bucket: BUCKET_NAME,
@@ -416,9 +395,7 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
 
   // 他人の画像を自分の記録へ引き込めないようにする
   for (const source of uniqueSources) {
-    if (!source.startsWith(`${ownerSub}/`)) {
-      throw new Error('Unauthorized: cannot copy other user\'s images');
-    }
+    assertOwnedKey(ownerSub, source, "Unauthorized: cannot copy other user's images");
   }
 
   // 複製先に既にあるファイル名を先に押さえる。押さえないと、同じ名前の画像を
@@ -521,7 +498,7 @@ async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; ima
    * ImageDeleteFailCount のアラームから調べにいくので、recordId は要る。
    */
   const withoutOwner = (key: string, sub: string): string =>
-    key.startsWith(`${sub}/`) ? key.slice(sub.length + 1) : '(redacted)';
+    isOwnedKey(sub, key) ? key.slice(sub.length + 1) : '(redacted)';
 
   // 自分のキーだけを消す。
   //
@@ -532,7 +509,7 @@ async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; ima
   // 弾いた場合も削除処理自体は続ける。ここで例外にすると、記録は消えている
   // のに削除が失敗したと返ることになり、利用者から見た状態が食い違う
   const keysToDelete = requestedKeys.filter((key) => {
-    if (key.startsWith(`${ownerSub}/`)) {
+    if (isOwnedKey(ownerSub, key)) {
       return true;
     }
     hasFailure = true;

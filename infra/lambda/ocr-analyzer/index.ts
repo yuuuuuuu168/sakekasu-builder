@@ -7,6 +7,7 @@ import {
   type SpecFields,
 } from './extractLabelInfo.js';
 import { createLlmClient, type ToolRequest } from '../shared/llm';
+import { assertOwnedKey, requireOwnerSub, type AppSyncIdentity } from '../shared/owner';
 import { DEFAULT_ANTHROPIC_MODEL_OCR } from '../../lib/llm-constants';
 
 const s3Client = new S3Client({});
@@ -35,9 +36,8 @@ interface AppSyncEvent {
     imageKey: string;
     additionalImageKeys?: string[] | null;
   };
-  identity: {
-    sub: string;
-  };
+  // identity が入らない経路もあるので、型でも入らない前提にする（presigned-url と同じ）
+  identity?: AppSyncIdentity | null;
 }
 
 /** 1リクエストで解析する画像の上限（トークン量とコストを抑える） */
@@ -298,9 +298,7 @@ const LABEL_TOOL = {
  * 不一致の場合はエラーをスローする。
  */
 export function validateImageKeyAccess(sub: string, imageKey: string): void {
-  if (!imageKey.startsWith(`${sub}/`)) {
-    throw new Error("Unauthorized: cannot access other user's images");
-  }
+  assertOwnedKey(sub, imageKey);
 }
 
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
@@ -557,7 +555,7 @@ export function buildLabelRequest(images: { base64: string; mediaType: string }[
 
 export async function handler(event: AppSyncEvent): Promise<OcrResult> {
   const { imageKey, additionalImageKeys } = event.arguments;
-  const { sub } = event.identity;
+  const sub = requireOwnerSub(event);
 
   // 表・裏ラベルなど複数画像を上限つきで解析対象にする
   const imageKeys = [imageKey, ...(additionalImageKeys ?? [])].slice(0, MAX_OCR_IMAGES);
