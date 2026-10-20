@@ -1,13 +1,4 @@
-export type SakeCategory = 'NIHONSHU' | 'BEER' | 'WINE' | 'WHISKY' | 'SHOCHU' | 'OTHER';
-
-export const SAKE_CATEGORIES: SakeCategory[] = [
-  'NIHONSHU',
-  'BEER',
-  'WINE',
-  'WHISKY',
-  'SHOCHU',
-  'OTHER',
-];
+import type { SakeCategory } from '@/types/sake';
 
 export interface PurchaseFormData {
   sakeName: string;
@@ -26,9 +17,4 @@ export interface ValidationErrors {
   quantity?: string;
   purchaseDate?: string;
   category?: string;
-}
-
-export interface SaveResult {
-  success: boolean;
-  error?: string;
 }

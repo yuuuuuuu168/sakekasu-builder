@@ -1,5 +1,6 @@
 import { createPurchaseRecord, updatePurchaseRecord } from '@/graphql/mutations';
-import type { PurchaseFormData, SaveResult } from '@/features/purchase/types';
+import type { PurchaseFormData } from '@/features/purchase/types';
+import type { SaveResult } from '@/types/sake';
 import type { SakeSpecFormData } from '@/features/specs/types';
 import { specsToCreateInput, specsToUpdateInput } from '@/features/specs/lib/sakeSpecs';
 import {

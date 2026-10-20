@@ -10,7 +10,7 @@ import type {
   RecordFilters,
 } from '../types';
 import { DEFAULT_FILTERS, PRICE_RANGE_OPTIONS, PRICE_RANGE_BOUNDS } from '../types';
-import { SAKE_CATEGORIES } from '../../purchase/types';
+import { SAKE_CATEGORIES } from '@/types/sake';
 import { filterRecords, fuzzyMatch, matchesSearchQuery } from '../hooks/useRecordFilter';
 
 // --- Helpers ---

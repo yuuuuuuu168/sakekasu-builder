@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOcrAnalysis, type OcrResult } from './useOcrAnalysis';
 import type { UseImageUploadReturn } from './useImageUpload';
-import type { SakeCategory } from '@/features/purchase/types';
+import type { RecordType, SakeCategory } from '@/types/sake';
 import {
   LOW_CONFIDENCE_THRESHOLD,
   SPEC_FIELD_NAMES,
@@ -73,7 +73,7 @@ function fileSignature(file: File): string {
 
 export function useOcrTrigger(
   imageUpload: UseImageUploadReturn,
-  recordType: 'purchase' | 'drinking',
+  recordType: RecordType,
   onOcrDetected: (info: OcrDetectedInfo, options: OcrDetectedOptions) => void,
 ) {
   const { analyzeImage, isAnalyzing, ocrResult, ocrError, resetOcr } = useOcrAnalysis();

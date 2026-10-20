@@ -6,6 +6,7 @@ import { compressImage, createThumbnail } from '../utils/imageCompressor';
 import { toThumbnailFileName } from '../lib/thumbnailKey';
 import { isTemporaryKey } from '../lib/tempImageKey';
 import { copyRecordImages } from '../lib/copyRecordImages';
+import type { RecordType } from '@/types/sake';
 
 const client = generateClient();
 
@@ -55,9 +56,9 @@ export interface UseImageUploadReturn {
   /** 特定の画像を削除 */
   removeImage: (index: number) => void;
   /** 複数画像アップロード実行 */
-  uploadImages: (recordType: string, recordId: string) => Promise<string[]>;
+  uploadImages: (recordType: RecordType, recordId: string) => Promise<string[]>;
   /** OCR 用の事前アップロード（選択中の全画像）。アップロード済みのキーは再利用する */
-  preUploadImages: (recordType: string) => Promise<string[]>;
+  preUploadImages: (recordType: RecordType) => Promise<string[]>;
   /** 画像クリア */
   clearImage: () => void;
 }
@@ -202,7 +203,7 @@ export function useImageUpload(
    */
   const putToS3 = async (
     file: File,
-    recordType: string,
+    recordType: RecordType,
     recordId: string,
     temporary = false,
     /** サムネイルとして置く場合の元画像のファイル名。キーはサーバー側が導出する */
@@ -263,7 +264,7 @@ export function useImageUpload(
    */
   const uploadThumbnail = async (
     file: File,
-    recordType: string,
+    recordType: RecordType,
     recordId: string,
     temporary = false,
   ): Promise<boolean> => {
@@ -289,7 +290,7 @@ export function useImageUpload(
    */
   const uploadSingleFile = async (
     file: File,
-    recordType: string,
+    recordType: RecordType,
     recordId: string,
     index: number,
     temporary = false,
@@ -315,7 +316,7 @@ export function useImageUpload(
   };
 
   const uploadImages = useCallback(
-    async (recordType: string, recordId: string): Promise<string[]> => {
+    async (recordType: RecordType, recordId: string): Promise<string[]> => {
       if (imageFiles.length === 0) return [];
 
       // 全ファイル分のキーが揃っているか（OCR の事前アップロード済みなど）
@@ -359,7 +360,7 @@ export function useImageUpload(
         if (temporaryKeys.length > 0) {
           const copied = await copyRecordImages(
             temporaryKeys,
-            recordType as 'purchase' | 'drinking',
+            recordType,
             recordId,
           );
           // 並び順は記録の見え方に効くので、元の位置へ差し戻す
@@ -381,7 +382,7 @@ export function useImageUpload(
   );
 
   const preUploadImages = useCallback(
-    async (recordType: string): Promise<string[]> => {
+    async (recordType: RecordType): Promise<string[]> => {
       if (imageFiles.length === 0) return [];
 
       // 全ファイル分のキーが揃っている場合はそれを返す

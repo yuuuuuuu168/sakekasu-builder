@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import type { SakeCategory } from '@/features/purchase/types';
+import type { SakeCategory } from '@/types/sake';
 import {
   specFieldsForCategory,
   type SakeSpecFormData,

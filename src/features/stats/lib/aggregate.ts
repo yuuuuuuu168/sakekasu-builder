@@ -1,6 +1,6 @@
 import type { UnifiedRecord } from '@/features/records/types';
 import { CATEGORY_FILTER_OPTIONS } from '@/features/records/types';
-import type { SakeCategory } from '@/features/purchase/types';
+import type { SakeCategory } from '@/types/sake';
 
 /** 月別飲酒量の集計結果（1ヶ月分） */
 export interface MonthlyDrinkingCount {

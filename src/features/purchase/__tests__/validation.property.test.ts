@@ -3,7 +3,7 @@ import { renderHook, act } from '@testing-library/react';
 import * as fc from 'fast-check';
 import { useFormValidation } from '@/features/purchase/hooks/useFormValidation';
 import type { PurchaseFormData } from '@/features/purchase/types';
-import { SAKE_CATEGORIES } from '@/features/purchase/types';
+import { SAKE_CATEGORIES } from '@/types/sake';
 
 // Feature: sake-purchase-registration, Property 1: 必須フィールド空欄バリデーション
 

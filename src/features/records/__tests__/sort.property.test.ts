@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
 import type { UnifiedRecord, SortOption } from '../types';
-import { SAKE_CATEGORIES } from '../../purchase/types';
+import { SAKE_CATEGORIES } from '@/types/sake';
 import { sortRecords } from '../hooks/useRecordSort';
 
 // --- Arbitrary generators ---

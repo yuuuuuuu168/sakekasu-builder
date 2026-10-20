@@ -1,4 +1,4 @@
-import type { SakeCategory } from '@/features/purchase/types';
+import type { SakeCategory } from '@/types/sake';
 import type { UnifiedRecord } from '../types';
 import { CATEGORY_FILTER_OPTIONS } from '../types';
 import { getBottleBreakdown } from './bottleCount';

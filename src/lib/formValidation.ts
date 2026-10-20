@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { SAKE_CATEGORIES } from '@/features/purchase/types';
-import type { SakeCategory } from '@/features/purchase/types';
+import { SAKE_CATEGORIES } from '@/types/sake';
+import type { SakeCategory } from '@/types/sake';
 import { getTodayString } from '@/lib/dateUtils';
 
 /**

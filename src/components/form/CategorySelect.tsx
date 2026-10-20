@@ -5,8 +5,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { SAKE_CATEGORIES } from '@/features/purchase/types';
-import type { SakeCategory } from '@/features/purchase/types';
+import { SAKE_CATEGORIES } from '@/types/sake';
+import type { SakeCategory } from '@/types/sake';
 
 const CATEGORY_DISPLAY_NAMES: Record<SakeCategory, string> = {
   NIHONSHU: '日本酒',

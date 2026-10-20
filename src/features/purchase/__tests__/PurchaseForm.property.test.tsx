@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import * as fc from 'fast-check';
-import { SAKE_CATEGORIES } from '@/features/purchase/types';
+import { SAKE_CATEGORIES } from '@/types/sake';
 import type { PurchaseFormData } from '@/features/purchase/types';
 import { getInitialFormData } from '@/features/purchase/hooks/usePurchaseForm';
 

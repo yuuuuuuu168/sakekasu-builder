@@ -1,12 +1,13 @@
 import { Dialog } from '@base-ui/react/dialog';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import type { RecordType } from '@/types/sake';
 
 export interface ConfirmDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sakeName: string;
-  recordType: 'purchase' | 'drinking';
+  recordType: RecordType;
   isDeleting: boolean;
   onConfirm: () => void;
 }

@@ -28,7 +28,7 @@ import { SakeSpecFields } from '@/features/specs/components/SakeSpecFields';
 import type { SakeSpecFormData } from '@/features/specs/types';
 import { getDrinkingMethodsByCategory, categoryRequiresDrinkingMethod } from '../types';
 import type { DrinkingFormData, StockDrinkDraft } from '../types';
-import type { SakeCategory } from '@/features/purchase/types';
+import type { SakeCategory } from '@/types/sake';
 
 const MotionButton = motion.create(Button);
 

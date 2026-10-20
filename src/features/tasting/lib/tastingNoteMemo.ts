@@ -1,4 +1,4 @@
-import type { SakeCategory } from '@/features/purchase/types';
+import type { SakeCategory } from '@/types/sake';
 
 /**
  * テイスティングノートを備考（メモ）へ追記するための整形ロジック。

@@ -1,4 +1,4 @@
-import type { SakeCategory } from '../purchase/types';
+import type { SakeCategory } from '@/types/sake';
 import type { SakeSpecs } from '../specs/types';
 
 // 飲み方の型定義

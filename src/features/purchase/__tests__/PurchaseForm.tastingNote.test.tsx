@@ -7,7 +7,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import type { PurchaseFormData, SakeCategory } from '@/features/purchase/types';
+import type { PurchaseFormData } from '@/features/purchase/types';
+import type { SakeCategory } from '@/types/sake';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },

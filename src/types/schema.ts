@@ -6,7 +6,7 @@
  * generateClient<Schema>() が型安全に動作するようにする。
  */
 
-import type { SakeCategory } from '@/features/purchase/types';
+import type { SakeCategory } from '@/types/sake';
 import type { SakeSpecs } from '@/features/specs/types';
 
 // 飲みきりステータス

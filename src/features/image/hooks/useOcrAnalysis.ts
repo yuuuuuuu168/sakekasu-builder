@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { analyzeSakeLabel } from '@/graphql/mutations';
-import type { SakeCategory } from '@/features/purchase/types';
+import type { SakeCategory } from '@/types/sake';
 import type { SakeSpecs, SpecFieldName } from '@/features/specs/types';
 
 const client = generateClient();
