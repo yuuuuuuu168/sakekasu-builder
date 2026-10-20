@@ -5,6 +5,7 @@ import {
   type ResultByTime,
 } from '@aws-sdk/client-cost-explorer';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { createWebhookUrlGetter, escapeMrkdwn, postToSlack as postToWebhook } from '../shared/slack';
 
 // Cost Explorer はグローバルサービスで、エンドポイントは us-east-1 にある
 const costExplorerClient = new CostExplorerClient({ region: 'us-east-1' });
@@ -15,8 +16,12 @@ const WEBHOOK_PARAMETER_NAME = process.env.WEBHOOK_PARAMETER_NAME!;
 /** 個別に表示するアカウント（JSON: [{ id, label }]）。先頭から順に表示する */
 const TARGET_ACCOUNTS_JSON = process.env.TARGET_ACCOUNTS ?? '[]';
 
-/** Webhook URL は取得のたびに SSM を呼ばず、実行環境が生きている間は使い回す */
-let cachedWebhookUrl: string | null = null;
+const getWebhookUrl = createWebhookUrlGetter(async () => {
+  const result = await ssmClient.send(
+    new GetParameterCommand({ Name: WEBHOOK_PARAMETER_NAME, WithDecryption: true }),
+  );
+  return result.Parameter?.Value;
+}, WEBHOOK_PARAMETER_NAME);
 
 export interface TargetAccount {
   id: string;
@@ -177,14 +182,6 @@ function costLines(monthly: AccountCost, daily: AccountCost): string {
     `クレジット適用: ${formatUsd(monthly.credit)}`,
     `請求される額: *${formatUsd(monthly.net)}*`,
   ].join('\n');
-}
-
-/**
- * サービス名は AWS 由来の文字列のため、mrkdwn が解釈する文字だけ無害化する。
- * （例: "AWS Cost & Usage Report" のような & を含む名前がある）
- */
-function escapeMrkdwn(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /**
@@ -356,33 +353,8 @@ async function fetchServiceCosts(period: { start: string; end: string }) {
   return aggregateServicesByAccount(results);
 }
 
-async function getWebhookUrl(): Promise<string> {
-  if (cachedWebhookUrl) return cachedWebhookUrl;
-
-  const result = await ssmClient.send(
-    new GetParameterCommand({ Name: WEBHOOK_PARAMETER_NAME, WithDecryption: true }),
-  );
-  const value = result.Parameter?.Value;
-  if (!value) {
-    throw new Error(`Webhook URL が未設定です: ${WEBHOOK_PARAMETER_NAME}`);
-  }
-  cachedWebhookUrl = value;
-  return value;
-}
-
 async function postToSlack(blocks: unknown[], fallbackText: string): Promise<void> {
-  const webhookUrl = await getWebhookUrl();
-
-  const response = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: fallbackText, blocks }),
-  });
-
-  if (!response.ok) {
-    // 本文には Webhook URL を含めない（ログに出さない）
-    throw new Error(`Slack への送信に失敗しました (HTTP ${response.status})`);
-  }
+  await postToWebhook(await getWebhookUrl(), blocks, fallbackText);
 }
 
 /**
