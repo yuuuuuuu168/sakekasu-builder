@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import type { PurchaseFormData, SaveResult } from '@/features/purchase/types';
 import { useFormValidation } from '@/features/purchase/hooks/useFormValidation';
 import { usePurchaseStorage } from '@/features/purchase/hooks/usePurchaseStorage';
@@ -36,6 +36,12 @@ export interface UsePurchaseFormReturn {
   formData: PurchaseFormData;
   errors: UseFormValidationReturn['errors'];
   isSaving: UsePurchaseStorageReturn['isSaving'];
+  /**
+   * 送信開始から終わりまでを覆うフラグ。isSaving は保存 mutation の間しか
+   * true にならないため、その手前のテイスティングノート生成や画像アップロードの
+   * 間にボタンが押せてしまう
+   */
+  isSubmitting: boolean;
   /** テイスティングノートの生成中フラグ（登録ボタンの表示に使う） */
   isGeneratingNote: boolean;
   submitResult: SaveResult | null;
@@ -99,98 +105,111 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
     [validateField, formData],
   );
 
+  // 送信中フラグ。state だけだと連打の 2 回目が再レンダー前に走るので ref も併用する
+  const submittingRef = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleSubmit = useCallback(async () => {
-    setSubmitResult(null);
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setIsSubmitting(true);
 
-    // 詳細スペックの検証も通してから保存する。
-    // isValid は必ず呼んでエラー表示を更新したいので、|| の短絡に頼らず両方評価する
-    const isBaseValid = isValid(formData);
-    const isSpecValid = specs.validateSpecs();
-    if (!isBaseValid || !isSpecValid) {
-      return;
-    }
+    try {
+      setSubmitResult(null);
 
-    // ウイスキー・日本酒なら、保存する前に備考へテイスティングノートを足す。
-    // 画像を選んだ時点ではなく登録ボタンを押した時点で動かすのは、銘柄名が
-    // OCR の後に手で直されることがあるため。
-    //
-    // 生成に失敗しても memo は元のまま返るので、登録そのものは止まらない
-    const memo = await fillMemo(formData.memo, formData.sakeName, formData.category);
-    const dataToSave: PurchaseFormData = { ...formData, memo };
-    // 画面にも反映する。編集モードでは保存後もフォームが残るため、
-    // 足した行が見えないと「書かれたのかどうか」が分からない
-    if (memo !== formData.memo) {
-      setFormData((prev) => ({ ...prev, memo }));
-    }
+      // 詳細スペックの検証も通してから保存する。
+      // isValid は必ず呼んでエラー表示を更新したいので、|| の短絡に頼らず両方評価する
+      const isBaseValid = isValid(formData);
+      const isSpecValid = specs.validateSpecs();
+      if (!isBaseValid || !isSpecValid) {
+        return;
+      }
 
-    // 本数を書き換えたときだけ残本数も直す。飲んだ本数は変わらないので、
-    // 3本のうち1本飲んだ記録を5本に直したら残りは4本になる
-    const nextQuantity = parseInt(dataToSave.quantity, 10);
-    const remainingUpdate =
-      existingBottles && nextQuantity !== toBottleCount(existingBottles.quantity)
-        ? { remainingQuantity: remainingAfterQuantityChange(existingBottles, nextQuantity) }
-        : undefined;
+      // ウイスキー・日本酒なら、保存する前に備考へテイスティングノートを足す。
+      // 画像を選んだ時点ではなく登録ボタンを押した時点で動かすのは、銘柄名が
+      // OCR の後に手で直されることがあるため。
+      //
+      // 生成に失敗しても memo は元のまま返るので、登録そのものは止まらない
+      const memo = await fillMemo(formData.memo, formData.sakeName, formData.category);
+      const dataToSave: PurchaseFormData = { ...formData, memo };
+      // 画面にも反映する。編集モードでは保存後もフォームが残るため、
+      // 足した行が見えないと「書かれたのかどうか」が分からない
+      if (memo !== formData.memo) {
+        setFormData((prev) => ({ ...prev, memo }));
+      }
 
-    // 編集モード: 画像を足していれば既存の後ろに追記する。フォームはリセットしない
-    if (isEditMode) {
-      if (imageUpload.imageFiles.length === 0) {
-        // 画像に触っていない更新では画像の項目自体を送らない（既存キーを維持する）
+      // 本数を書き換えたときだけ残本数も直す。飲んだ本数は変わらないので、
+      // 3本のうち1本飲んだ記録を5本に直したら残りは4本になる
+      const nextQuantity = parseInt(dataToSave.quantity, 10);
+      const remainingUpdate =
+        existingBottles && nextQuantity !== toBottleCount(existingBottles.quantity)
+          ? { remainingQuantity: remainingAfterQuantityChange(existingBottles, nextQuantity) }
+          : undefined;
+
+      // 編集モード: 画像を足していれば既存の後ろに追記する。フォームはリセットしない
+      if (isEditMode) {
+        if (imageUpload.imageFiles.length === 0) {
+          // 画像に触っていない更新では画像の項目自体を送らない（既存キーを維持する）
+          const result = await updatePurchase(recordId, dataToSave, {
+            ...remainingUpdate,
+            specs: specs.specs,
+          });
+          setSubmitResult(result);
+          return;
+        }
+
+        const uploaded = await imageUpload.uploadImages('purchase', recordId);
+        if (uploaded.length === 0) {
+          // アップロード失敗 → エラーは useImageUpload 側で設定済み、入力内容を保持
+          return;
+        }
+
+        const base = existingImageKeys ?? [];
+        const merged = [...base, ...uploaded];
         const result = await updatePurchase(recordId, dataToSave, {
+          // 代表画像は既存を優先する。差し替えではなく追加なので、
+          // 一覧のサムネイルが勝手に入れ替わらないようにする
+          imageKey: existingImageKey ?? uploaded[0] ?? null,
+          imageKeys: merged,
           ...remainingUpdate,
           specs: specs.specs,
         });
+
+        if (result.success) {
+          // 追記済みのファイルを残すと、次の保存で二重に足される
+          imageUpload.clearImage();
+        }
         setSubmitResult(result);
         return;
       }
 
-      const uploaded = await imageUpload.uploadImages('purchase', recordId);
-      if (uploaded.length === 0) {
-        // アップロード失敗 → エラーは useImageUpload 側で設定済み、入力内容を保持
-        return;
+      // 画像がある場合はアップロードを先に実行
+      let imageKey: string | null = null;
+      let imageKeys: string[] = [];
+      if (imageUpload.imageFiles.length > 0) {
+        const newRecordId = crypto.randomUUID();
+        imageKeys = await imageUpload.uploadImages('purchase', newRecordId);
+        if (imageKeys.length === 0 && imageUpload.imageFiles.length > 0) {
+          // アップロード失敗 → エラーは useImageUpload 側で設定済み、入力内容を保持
+          return;
+        }
+        imageKey = imageKeys[0] ?? null;
       }
 
-      const base = existingImageKeys ?? [];
-      const merged = [...base, ...uploaded];
-      const result = await updatePurchase(recordId, dataToSave, {
-        // 代表画像は既存を優先する。差し替えではなく追加なので、
-        // 一覧のサムネイルが勝手に入れ替わらないようにする
-        imageKey: existingImageKey ?? uploaded[0] ?? null,
-        imageKeys: merged,
-        ...remainingUpdate,
-        specs: specs.specs,
-      });
+      const result = await savePurchase(dataToSave, { imageKey, imageKeys, specs: specs.specs });
 
       if (result.success) {
-        // 追記済みのファイルを残すと、次の保存で二重に足される
+        setFormData(getInitialFormData());
+        clearErrors();
+        specs.resetSpecs();
         imageUpload.clearImage();
+        setSubmitResult({ success: true });
+      } else {
+        setSubmitResult(result);
       }
-      setSubmitResult(result);
-      return;
-    }
-
-    // 画像がある場合はアップロードを先に実行
-    let imageKey: string | null = null;
-    let imageKeys: string[] = [];
-    if (imageUpload.imageFiles.length > 0) {
-      const newRecordId = crypto.randomUUID();
-      imageKeys = await imageUpload.uploadImages('purchase', newRecordId);
-      if (imageKeys.length === 0 && imageUpload.imageFiles.length > 0) {
-        // アップロード失敗 → エラーは useImageUpload 側で設定済み、入力内容を保持
-        return;
-      }
-      imageKey = imageKeys[0] ?? null;
-    }
-
-    const result = await savePurchase(dataToSave, { imageKey, imageKeys, specs: specs.specs });
-
-    if (result.success) {
-      setFormData(getInitialFormData());
-      clearErrors();
-      specs.resetSpecs();
-      imageUpload.clearImage();
-      setSubmitResult({ success: true });
-    } else {
-      setSubmitResult(result);
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
     }
   }, [
     formData,
@@ -212,6 +231,7 @@ export function usePurchaseForm(options?: UsePurchaseFormOptions): UsePurchaseFo
     formData,
     errors,
     isSaving,
+    isSubmitting,
     isGeneratingNote,
     submitResult,
     handleChange,

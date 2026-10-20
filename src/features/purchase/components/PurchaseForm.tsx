@@ -58,6 +58,7 @@ export function PurchaseForm({
     formData,
     errors,
     isSaving,
+    isSubmitting: isSubmittingForm,
     isGeneratingNote,
     submitResult,
     handleChange,
@@ -97,7 +98,8 @@ export function PurchaseForm({
     },
   );
 
-  const isSubmitting = isSaving || imageUpload.isUploading || isAnalyzing || isGeneratingNote;
+  const isSubmitting =
+    isSubmittingForm || isSaving || imageUpload.isUploading || isAnalyzing || isGeneratingNote;
 
   // リピート判定リマインド: 銘柄名にマッチする過去の飲酒評価を表示
   const { summaries: pastRatings } = usePastRatingHint(formData.sakeName);
