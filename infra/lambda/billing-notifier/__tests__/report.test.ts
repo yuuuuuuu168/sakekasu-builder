@@ -226,6 +226,17 @@ describe('buildBlocks', () => {
     expect(text).toContain('AWS Cost &amp; Usage Report');
   });
 
+  // 壊れた文字が残ると JSON が不正になり、Slack に拒否されてレポートが届かない。
+  // slack-notifier と同じ無害化を通すので、ここでも落ちる
+  it('サービス名の壊れた文字は落とされる', () => {
+    const broken = aggregateServicesByAccount(
+      resultWith([['222222222222', 'Amazon \ud83dQuickSight', '1.00']]),
+    );
+    const text = textsOf(buildBlocks(TARGETS, periods, monthly, new Map(), broken));
+    expect(text).toContain('Amazon QuickSight');
+    expect(text).not.toMatch(/\p{Cs}/u);
+  });
+
   it('データが無くても $0.00 と「利用なし」表示で落ちない', () => {
     const text = textsOf(buildBlocks(TARGETS, periods, new Map(), new Map(), new Map()));
     expect(text).toContain('222222222222');
