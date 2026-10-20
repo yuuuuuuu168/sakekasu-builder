@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import type { SakeCategory } from '@/features/purchase/types';
+import type { SakeCategory } from '@/types/sake';
 import {
   appendTastingNoteToMemo,
   hasTastingNote,

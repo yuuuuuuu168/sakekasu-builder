@@ -1,5 +1,6 @@
 import { generateClient } from 'aws-amplify/api';
 import { copyImages } from '@/graphql/mutations';
+import type { RecordType } from '@/types/sake';
 
 const client = generateClient();
 
@@ -19,7 +20,7 @@ interface CopyImagesResponse {
  */
 export async function copyRecordImages(
   sourceKeys: string[],
-  recordType: 'purchase' | 'drinking',
+  recordType: RecordType,
   recordId: string,
 ): Promise<string[]> {
   if (sourceKeys.length === 0) {

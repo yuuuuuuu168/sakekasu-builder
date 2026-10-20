@@ -1,9 +1,9 @@
-import type { SakeCategory } from '../purchase/types';
+import type { SakeCategory, RecordType } from '@/types/sake';
 import type { DrinkingStatus } from '@/types/schema';
 import type { SakeSpecs } from '@/features/specs/types';
 
-// 記録種別
-export type RecordType = 'purchase' | 'drinking';
+// 記録種別（定義は @/types/sake。記録一覧の型と並べて使うので、ここからも出す）
+export type { RecordType };
 
 // 統合記録型: PurchaseRecord と DrinkingRecord を統一的に扱う
 export interface UnifiedRecord {

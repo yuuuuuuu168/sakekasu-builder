@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { generateClient } from 'aws-amplify/api';
-import type { SaveResult } from '@/features/purchase/types';
+import type { SaveResult } from '@/types/sake';
 
 /**
  * 購入・飲酒の記録を作成・更新する mutation の呼び出し口。

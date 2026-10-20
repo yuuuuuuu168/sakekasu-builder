@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import * as fc from 'fast-check';
 import type { UnifiedRecord } from '../types';
 import { CATEGORY_FILTER_OPTIONS } from '../types';
-import { SAKE_CATEGORIES } from '../../purchase/types';
+import { SAKE_CATEGORIES } from '@/types/sake';
 import { RecordCard } from '../components/RecordCard';
 
 const noopDelete = vi.fn();

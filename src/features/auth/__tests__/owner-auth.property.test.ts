@@ -3,8 +3,8 @@
 
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import type { SakeCategory } from '@/features/purchase/types';
-import { SAKE_CATEGORIES } from '@/features/purchase/types';
+import type { SakeCategory } from '@/types/sake';
+import { SAKE_CATEGORIES } from '@/types/sake';
 
 // ============================================================
 // 型定義

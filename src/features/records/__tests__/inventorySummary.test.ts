@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { summarizeInventory } from '../lib/inventorySummary';
 import type { UnifiedRecord } from '../types';
-import type { SakeCategory } from '@/features/purchase/types';
+import type { SakeCategory } from '@/types/sake';
 import type { DrinkingStatus } from '@/types/schema';
 
 function purchase(

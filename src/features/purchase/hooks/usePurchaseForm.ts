@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
-import type { PurchaseFormData, SaveResult } from '@/features/purchase/types';
+import type { PurchaseFormData } from '@/features/purchase/types';
+import type { SaveResult } from '@/types/sake';
 import { useFormValidation } from '@/features/purchase/hooks/useFormValidation';
 import { usePurchaseStorage } from '@/features/purchase/hooks/usePurchaseStorage';
 import { useImageUpload } from '@/features/image/hooks/useImageUpload';

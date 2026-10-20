@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import type { DrinkingFormData, DrinkingValidationErrors, StockDrinkDraft } from '../types';
 import { categoryRequiresDrinkingMethod, STOCK_DRINK_PLACE_NAME } from '../types';
-import type { SakeCategory } from '../../purchase/types';
+import type { SakeCategory } from '@/types/sake';
 import { markPurchaseAsInProgress } from '@/features/purchase/lib/purchaseStatus';
 import { useDrinkingValidation } from './useDrinkingValidation';
 import { useDrinkingStorage } from './useDrinkingStorage';

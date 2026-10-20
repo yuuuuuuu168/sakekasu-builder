@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { selectTastingNoteTargets } from '../lib/backfillTargets';
 import type { UnifiedRecord } from '@/features/records/types';
-import type { SakeCategory } from '@/features/purchase/types';
+import type { SakeCategory } from '@/types/sake';
 
 function record(overrides: Partial<UnifiedRecord> = {}): UnifiedRecord {
   return {

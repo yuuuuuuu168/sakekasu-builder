@@ -1,6 +1,6 @@
 import { createDrinkingRecord, updateDrinkingRecord } from '@/graphql/mutations';
 import type { DrinkingFormData } from '../types';
-import type { SaveResult } from '../../purchase/types';
+import type { SaveResult } from '@/types/sake';
 import type { SakeSpecFormData } from '@/features/specs/types';
 import { specsToCreateInput, specsToUpdateInput } from '@/features/specs/lib/sakeSpecs';
 import {
