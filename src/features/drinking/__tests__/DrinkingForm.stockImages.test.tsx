@@ -27,14 +27,11 @@ vi.mock('@/features/purchase/lib/purchaseStatus', () => ({
 // 写真を選んでいない状態を作る（在庫の写真を引き継ぐ経路に入る）
 vi.mock('@/features/image/hooks/useImageUpload', () => ({
   useImageUpload: () => ({
-    imageFile: null,
     imageFiles: [],
-    setImageFile: vi.fn(),
     addImageFile: vi.fn(),
     removeImageFile: vi.fn(),
     clearImage: vi.fn(),
     uploadImages: vi.fn(async () => []),
-    preUploadImage: vi.fn(),
     preUploadImages: vi.fn(),
     isUploading: false,
     error: null,

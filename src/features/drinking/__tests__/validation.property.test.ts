@@ -4,7 +4,7 @@ import * as fc from 'fast-check';
 import { SAKE_CATEGORIES } from '@/features/purchase/types';
 import type { DrinkingFormData } from '../types';
 import { DRINKING_METHODS_MAP } from '../types';
-import { useDrinkingValidation, clampRating } from '../hooks/useDrinkingValidation';
+import { useDrinkingValidation } from '../hooks/useDrinkingValidation';
 
 // ============================================================
 // ヘルパー
@@ -263,44 +263,43 @@ describe('Property 4: 未来日付バリデーション', () => {
  * Property 5: Rating範囲制限
  * **Validates: Requirements 2.5**
  *
- * 1〜5の範囲外のランダムな整数値がクランプされることを検証
- * （0以下は1に、6以上は5に）。
+ * 1〜5の範囲外の評価はバリデーションで弾かれ、範囲内の整数は通ることを検証。
+ * 範囲外の値を丸めて保存することはしない（以前の clampRating は呼ばれていなかった）。
  */
 describe('Property 5: Rating範囲制限', () => {
-  /** 0以下のランダムな整数を生成するArbitrary */
-  const belowRangeArb = fc.integer({ min: -1000, max: 0 });
+  /** 1〜5の範囲外のランダムな整数を生成するArbitrary */
+  const outOfRangeArb = fc.oneof(
+    fc.integer({ min: -1000, max: 0 }),
+    fc.integer({ min: 6, max: 1000 }),
+  );
 
-  /** 6以上のランダムな整数を生成するArbitrary */
-  const aboveRangeArb = fc.integer({ min: 6, max: 1000 });
+  function ratingError(value: number): string | undefined {
+    const { result } = renderHook(() => useDrinkingValidation());
+    let errors: Record<string, string | undefined> = {};
+    act(() => {
+      errors = result.current.validateAll({ ...validBaseData(), rating: value });
+    });
+    return errors.rating;
+  }
 
-  it('0以下の値は1にクランプされる', () => {
+  it('範囲外の評価はエラーになる', () => {
     fc.assert(
-      fc.property(belowRangeArb, (value) => {
-        expect(clampRating(value)).toBe(1);
+      fc.property(outOfRangeArb, (value) => {
+        expect(ratingError(value)).toBe('評価を選択してください');
       }),
       { numRuns: 100 },
     );
   });
 
-  it('6以上の値は5にクランプされる', () => {
-    fc.assert(
-      fc.property(aboveRangeArb, (value) => {
-        expect(clampRating(value)).toBe(5);
-      }),
-      { numRuns: 100 },
-    );
-  });
-
-  it('1〜5の範囲内の値はそのまま返される', () => {
+  it('1〜5の整数はエラーにならない', () => {
     fc.assert(
       fc.property(fc.integer({ min: 1, max: 5 }), (value) => {
-        expect(clampRating(value)).toBe(value);
+        expect(ratingError(value)).toBeUndefined();
       }),
       { numRuns: 100 },
     );
   });
 });
-
 
 // ============================================================
 // Feature: sake-drinking-registration, Property 6: 有効入力のバリデーション通過

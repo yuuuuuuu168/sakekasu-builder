@@ -33,20 +33,15 @@ vi.mock('@/features/purchase/hooks/usePurchaseStorage', () => ({
 
 vi.mock('@/features/image/hooks/useImageUpload', () => ({
   useImageUpload: () => ({
-    imageFile: null,
     imageFiles: imageState.files,
-    setImageFile: vi.fn(),
     isCompressing: false,
     isUploading: false,
     error: null,
     warning: null,
-    imageKey: null,
     imageKeys: [],
     handleImageSelect: vi.fn(),
     removeImage: vi.fn(),
-    uploadImage: vi.fn(),
     uploadImages: mockUploadImages,
-    preUploadImage: vi.fn(),
     preUploadImages: vi.fn(),
     clearImage: mockClearImage,
   }),

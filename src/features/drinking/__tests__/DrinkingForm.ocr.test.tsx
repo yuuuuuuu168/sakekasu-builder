@@ -21,20 +21,15 @@ vi.mock('@/features/drinking/hooks/useDrinkingStorage', () => ({
   }),
 }));
 
-// useImageUpload をモック（画像あり + preUploadImage 対応）
-const mockPreUploadImage = vi.fn(async () => 'users/test-sub/drinking/test-id/test.jpg');
+// useImageUpload をモック（画像あり + preUploadImages 対応）
 const mockPreUploadImages = vi.fn(async () => ['users/test-sub/drinking/test-id/test.jpg']);
 vi.mock('@/features/image/hooks/useImageUpload', () => ({
   useImageUpload: () => ({
-    imageFile: new File(['test'], 'test.jpg', { type: 'image/jpeg' }),
-    setImageFile: vi.fn(),
+    imageFiles: [new File(['test'], 'test.jpg', { type: 'image/jpeg' })],
     isCompressing: false,
     isUploading: false,
     error: null,
-    imageKey: 'users/test-sub/drinking/test-id/test.jpg',
     handleImageSelect: vi.fn(),
-    uploadImage: vi.fn(async () => 'users/test-sub/drinking/test-id/test.jpg'),
-    preUploadImage: mockPreUploadImage,
     preUploadImages: mockPreUploadImages,
     imageKeys: ['users/test-sub/drinking/test-id/test.jpg'],
     clearImage: vi.fn(),

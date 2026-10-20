@@ -21,8 +21,9 @@ const mockFile = new File(['test'], 'test.jpg', { type: 'image/jpeg' });
 
 function renderUploadArea(overrides: Partial<ImageUploadAreaProps> = {}) {
   const defaultProps: ImageUploadAreaProps = {
-    imageFile: null,
+    imageFiles: [],
     onImageChange: vi.fn(),
+    onImageRemove: vi.fn(),
     isCompressing: false,
     error: null,
     ...overrides,
@@ -34,7 +35,7 @@ describe('ImageUploadArea OCR 機能', () => {
   // Requirements 1.1: 画像選択時に OCR ボタンが表示される
   it('画像選択時かつ onOcrTrigger が渡されている場合に OCR ボタンが表示される', () => {
     renderUploadArea({
-      imageFile: mockFile,
+      imageFiles: [mockFile],
       onOcrTrigger: vi.fn(),
     });
 
@@ -45,7 +46,7 @@ describe('ImageUploadArea OCR 機能', () => {
   // Requirements 1.2: OCR ボタンのラベルテキスト
   it('OCR ボタンに「銘柄名を読み取る」というラベルが表示される', () => {
     renderUploadArea({
-      imageFile: mockFile,
+      imageFiles: [mockFile],
       onOcrTrigger: vi.fn(),
     });
 
@@ -55,7 +56,7 @@ describe('ImageUploadArea OCR 機能', () => {
   // Requirements 1.6: 画像未選択時に OCR ボタンが非表示
   it('画像未選択時に OCR ボタンが表示されない', () => {
     renderUploadArea({
-      imageFile: null,
+      imageFiles: [],
       onOcrTrigger: vi.fn(),
     });
 
@@ -65,7 +66,7 @@ describe('ImageUploadArea OCR 機能', () => {
   // onOcrTrigger が渡されていない場合も OCR ボタンが非表示
   it('onOcrTrigger が未指定の場合に OCR ボタンが表示されない', () => {
     renderUploadArea({
-      imageFile: mockFile,
+      imageFiles: [mockFile],
     });
 
     expect(screen.queryByTestId('ocr-trigger-button')).not.toBeInTheDocument();
@@ -75,7 +76,7 @@ describe('ImageUploadArea OCR 機能', () => {
   it('OCR ボタンクリックで onOcrTrigger が呼ばれる', () => {
     const onOcrTrigger = vi.fn();
     renderUploadArea({
-      imageFile: mockFile,
+      imageFiles: [mockFile],
       onOcrTrigger,
     });
 
@@ -86,7 +87,7 @@ describe('ImageUploadArea OCR 機能', () => {
   // Requirements 1.4: 解析中はボタン無効化・ラベル変更
   it('isOcrAnalyzing=true 時にボタンが無効化され「読み取り中...」が表示される', () => {
     renderUploadArea({
-      imageFile: mockFile,
+      imageFiles: [mockFile],
       onOcrTrigger: vi.fn(),
       isOcrAnalyzing: true,
     });
@@ -99,7 +100,7 @@ describe('ImageUploadArea OCR 機能', () => {
   // Requirements 1.5: 解析中は削除ボタンが非表示（isInteractive が false になるため）
   it('isOcrAnalyzing=true 時に画像削除ボタンが非表示になる', () => {
     renderUploadArea({
-      imageFile: mockFile,
+      imageFiles: [mockFile],
       onOcrTrigger: vi.fn(),
       isOcrAnalyzing: true,
     });
@@ -110,7 +111,7 @@ describe('ImageUploadArea OCR 機能', () => {
   // 解析中でない場合は削除ボタンが表示される（対照テスト）
   it('isOcrAnalyzing=false 時に画像削除ボタンが表示される', () => {
     renderUploadArea({
-      imageFile: mockFile,
+      imageFiles: [mockFile],
       onOcrTrigger: vi.fn(),
       isOcrAnalyzing: false,
     });
@@ -121,7 +122,7 @@ describe('ImageUploadArea OCR 機能', () => {
   // Requirements 4.3: 成功メッセージの表示
   it('ocrMessage（success）が渡された場合に成功メッセージが表示される', () => {
     renderUploadArea({
-      imageFile: mockFile,
+      imageFiles: [mockFile],
       onOcrTrigger: vi.fn(),
       ocrMessage: { text: '銘柄名を読み取りました: 獺祭', variant: 'success' },
     });
@@ -133,7 +134,7 @@ describe('ImageUploadArea OCR 機能', () => {
   // Requirements 5.1: エラーメッセージの表示
   it('ocrMessage（error）が渡された場合にエラーメッセージが表示される', () => {
     renderUploadArea({
-      imageFile: mockFile,
+      imageFiles: [mockFile],
       onOcrTrigger: vi.fn(),
       ocrMessage: { text: '銘柄名を読み取れませんでした。手動で入力してください', variant: 'error' },
     });
@@ -145,7 +146,7 @@ describe('ImageUploadArea OCR 機能', () => {
   // ocrMessage が null の場合はメッセージが表示されない
   it('ocrMessage が null の場合は OCR メッセージが表示されない', () => {
     renderUploadArea({
-      imageFile: mockFile,
+      imageFiles: [mockFile],
       onOcrTrigger: vi.fn(),
       ocrMessage: null,
     });

@@ -13,16 +13,6 @@ export interface UseDrinkingValidationReturn {
   clearErrors: () => void;
 }
 
-/**
- * Rating値を1〜5の範囲にクランプする
- * 0以下は1に、6以上は5にクランプ
- */
-export function clampRating(value: number): number {
-  if (value <= 0) return 1;
-  if (value >= 6) return 5;
-  return value;
-}
-
 function validateSakeName(value: string | number): string | undefined {
   const str = String(value);
   if (!str || str.trim().length === 0) {

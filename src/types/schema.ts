@@ -67,13 +67,3 @@ export interface DrinkingRecordConnection {
   items: DrinkingRecordType[];
   nextToken: string | null;
 }
-
-// Amplify generateClient<Schema>() 互換の Schema 型
-export type Schema = {
-  PurchaseRecord: {
-    type: PurchaseRecordType;
-  };
-  DrinkingRecord: {
-    type: DrinkingRecordType;
-  };
-};
