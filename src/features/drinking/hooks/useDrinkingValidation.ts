@@ -1,82 +1,28 @@
-import { useState } from 'react';
 import type { DrinkingFormData, DrinkingValidationErrors } from '../types';
 import { DRINKING_METHODS_MAP } from '../types';
-import { SAKE_CATEGORIES } from '../../purchase/types';
-import type { SakeCategory } from '../../purchase/types';
-import { getTodayString } from '@/lib/dateUtils';
+import {
+  integerAtLeast,
+  noValidation,
+  notFutureDate,
+  required,
+  sakeCategory,
+  useFieldValidation,
+} from '@/lib/formValidation';
+import type { FieldValidator, UseFieldValidationReturn } from '@/lib/formValidation';
 
-export interface UseDrinkingValidationReturn {
-  errors: DrinkingValidationErrors;
-  validateField: (field: keyof DrinkingFormData, value: string | number) => string | undefined;
-  validateAll: (data: DrinkingFormData) => DrinkingValidationErrors;
-  isValid: (data: DrinkingFormData) => boolean;
-  clearErrors: () => void;
-}
+export type UseDrinkingValidationReturn = UseFieldValidationReturn<
+  DrinkingFormData,
+  DrinkingValidationErrors
+>;
 
-function validateSakeName(value: string | number): string | undefined {
-  const str = String(value);
-  if (!str || str.trim().length === 0) {
-    return '銘柄名は必須です';
-  }
-  return undefined;
-}
-
-function validatePlaceName(value: string | number): string | undefined {
-  const str = String(value);
-  if (!str || str.trim().length === 0) {
-    return '飲んだ場所は必須です';
-  }
-  return undefined;
-}
-
-function validatePrice(value: string | number): string | undefined {
-  const str = String(value);
-  // 価格は任意フィールド: 空文字はOK
-  if (str === '' || str.trim().length === 0) {
-    return undefined;
-  }
-  const num = Number(str);
-  if (!Number.isFinite(num) || num < 0 || !Number.isInteger(num)) {
-    return '価格は0以上の数値で入力してください';
-  }
-  return undefined;
-}
-
-function validateDrinkingDate(value: string | number): string | undefined {
-  const str = String(value);
-  if (!str || str.trim().length === 0) {
-    return '飲んだ日は必須です';
-  }
-  const today = getTodayString();
-  if (str > today) {
-    return '飲んだ日は本日以前の日付を入力してください';
-  }
-  return undefined;
-}
-
-function validateCategory(value: string | number): string | undefined {
-  const str = String(value);
-  if (!str || !SAKE_CATEGORIES.includes(str as SakeCategory)) {
-    return 'カテゴリは必須です';
-  }
-  return undefined;
-}
+/** 全カテゴリの飲み方。カテゴリとの組み合わせは画面側の選択肢で絞っている */
+const ALL_DRINKING_METHODS = Object.values(DRINKING_METHODS_MAP).flat();
 
 function validateDrinkingMethod(value: string | number): string | undefined {
   const str = String(value);
   // '-' は飲み方不要カテゴリの固定値として許可
-  if (str === '-') {
-    return undefined;
-  }
-  if (!str || str.trim().length === 0) {
-    return '飲み方は必須です';
-  }
-  // 全カテゴリの飲み方リストに含まれているか確認
-  const allMethods = Object.values(DRINKING_METHODS_MAP).flat();
-  if (!allMethods.includes(str)) {
-    return '飲み方は必須です';
-  }
-  return undefined;
+  if (str === '-') return undefined;
+  return ALL_DRINKING_METHODS.includes(str) ? undefined : '飲み方は必須です';
 }
 
 function validateRating(value: string | number): string | undefined {
@@ -87,61 +33,18 @@ function validateRating(value: string | number): string | undefined {
   return undefined;
 }
 
-const validators: Record<
-  keyof DrinkingFormData,
-  (value: string | number) => string | undefined
-> = {
-  sakeName: validateSakeName,
-  placeName: validatePlaceName,
-  price: validatePrice,
-  drinkingDate: validateDrinkingDate,
-  category: validateCategory,
+const validators: Record<keyof DrinkingFormData, FieldValidator> = {
+  sakeName: required('銘柄名は必須です'),
+  placeName: required('飲んだ場所は必須です'),
+  // 価格は任意。空は通す
+  price: integerAtLeast(0, '価格は0以上の数値で入力してください', { optional: true }),
+  drinkingDate: notFutureDate('飲んだ日は必須です', '飲んだ日は本日以前の日付を入力してください'),
+  category: sakeCategory(),
   drinkingMethod: validateDrinkingMethod,
   rating: validateRating,
-  memo: () => undefined,
+  memo: noValidation,
 };
 
 export function useDrinkingValidation(): UseDrinkingValidationReturn {
-  const [errors, setErrors] = useState<DrinkingValidationErrors>({});
-
-  const validateField = (
-    field: keyof DrinkingFormData,
-    value: string | number,
-  ): string | undefined => {
-    const error = validators[field](value);
-    setErrors((prev) => {
-      const next = { ...prev };
-      if (error) {
-        next[field as keyof DrinkingValidationErrors] = error;
-      } else {
-        delete next[field as keyof DrinkingValidationErrors];
-      }
-      return next;
-    });
-    return error;
-  };
-
-  const validateAll = (data: DrinkingFormData): DrinkingValidationErrors => {
-    const newErrors: DrinkingValidationErrors = {};
-    for (const field of Object.keys(validators) as (keyof DrinkingFormData)[]) {
-      if (field === 'memo') continue;
-      const error = validators[field](data[field]);
-      if (error) {
-        newErrors[field as keyof DrinkingValidationErrors] = error;
-      }
-    }
-    setErrors(newErrors);
-    return newErrors;
-  };
-
-  const isValid = (data: DrinkingFormData): boolean => {
-    const newErrors = validateAll(data);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const clearErrors = (): void => {
-    setErrors({});
-  };
-
-  return { errors, validateField, validateAll, isValid, clearErrors };
+  return useFieldValidation<DrinkingFormData, DrinkingValidationErrors>(validators);
 }
