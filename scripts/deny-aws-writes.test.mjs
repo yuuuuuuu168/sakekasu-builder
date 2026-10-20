@@ -108,6 +108,8 @@ test('資格情報やトークンを返す操作は止める', () => {
   denies('aws ec2 get-password-data --instance-id i-1');
   denies('aws redshift get-cluster-credentials --db-user x --cluster-identifier y');
   denies('aws redshift-serverless get-credentials --workgroup-name x');
+  denies('aws redshift get-identity-center-auth-token --cluster-identifier c');
+  denies('aws redshift-serverless get-identity-center-auth-token --workgroup-names x');
   denies('aws lightsail get-instance-access-details --instance-name x');
   denies('aws secretsmanager get-secret-value --secret-id x');
   denies('aws lakeformation get-temporary-glue-table-credentials --table-arn x');
@@ -135,6 +137,10 @@ test('シェルに文字列で渡したコマンドの中も見る', () => {
   denies("sh -c 'aws s3 rm s3://bucket/key'");
   denies('bash -ec "aws s3 rm s3://bucket/key"');
   denies('bash -o pipefail -c "aws s3 rm s3://bucket/key"');
+  denies('bash --rcfile foo -c "aws s3 rm s3://bucket/key"');
+  denies('bash --init-file foo -c "aws s3 rm s3://bucket/key"');
+  denies('bash -O extglob -c "aws s3 rm s3://bucket/key"');
+  denies('zsh -f -c "aws s3 rm s3://bucket/key"');
   denies('/bin/bash -lc "echo x; aws s3 rm s3://bucket/key"');
   denies('timeout 30 bash -c "aws s3 rm s3://bucket/key"');
   denies('eval "aws s3 rm s3://bucket/key"');
@@ -142,6 +148,8 @@ test('シェルに文字列で渡したコマンドの中も見る', () => {
   denies('bash -c "bash -c \\"aws s3 rm s3://bucket/key\\""');
   allows('bash -c "aws logs tail /aws/lambda/x"');
   allows('eval "$(ssh-agent -s)"');
+  allows('bash scripts/run.sh -c config.yml');
+  allows('bash --rcfile foo -c "npm test"');
   allows('grep -rn eval "it\'s" scripts/');
 });
 

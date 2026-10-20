@@ -79,7 +79,11 @@ const DENY_EXACT = new Set([
   // 出力側を見て拾った）。DB ユーザーを作るものもあり、書き込みも兼ねる
   'ec2 get-password-data',
   'redshift get-cluster-credentials', 'redshift get-cluster-credentials-with-iam',
-  'redshift-serverless get-credentials',
+  'redshift get-identity-center-auth-token',
+  'redshift-serverless get-credentials', 'redshift-serverless get-identity-center-auth-token',
+  'cognito-identity get-open-id-token-for-developer-identity',
+  'cognito-idp get-client-token',
+  'route53globalresolver get-access-token',
   'lightsail get-instance-access-details', 'lightsail get-relational-database-master-user-password',
   'secretsmanager get-secret-value', 'secretsmanager batch-get-secret-value',
   'ssm get-access-token',
@@ -431,9 +435,11 @@ function expandInlineScripts(tokens, nesting = 0) {
       out.push('(', ...read(tokens.slice(i + 1, j).join(' ')), ')');
       i = j - 1;
     } else if (SHELLS.has(name)) {
-      // -e -c や -ec のように -c はほかの短いオプションと並べられる。-o / +o は値を取る
-      for (let j = i + 1; j < tokens.length && /^[-+]/.test(tokens[j]); j += 1) {
-        if (tokens[j] === '-o' || tokens[j] === '+o') { j += 1; continue; }
+      // -c はほかの短いオプションと並べられ（-ec）、手前に値を取るオプション
+      // （-o、-O、--rcfile など）も置ける。オプションの並びを読み解こうとすると
+      // 値を取るものを数え漏らすので、区切りまでの語から -c の形を探す。
+      // スクリプトの引数にたまたま同じ形があっても、余分に読み直すだけで済む
+      for (let j = i + 1; j < tokens.length && !SEPARATORS.includes(tokens[j]); j += 1) {
         if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(tokens[j]) && j + 1 < tokens.length) {
           out.push(...tokens.slice(i + 1, j + 1), '(', ...read(tokens[j + 1]), ')');
           i = j + 1;
