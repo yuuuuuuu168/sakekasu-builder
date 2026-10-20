@@ -286,6 +286,9 @@ export class MonitoringStack extends cdk.Stack {
     });
 
     for (const fn of props.functions) {
+      // OCR のエラーは上の ocr-errors（15分で3件以上）が専用の説明つきで見ている。
+      // 同じ指標をこちらでも見ると、1回の障害で通知が 2 通届く
+      if (fn === props.ocrFunction) continue;
       this.addAlarm(`LambdaErrors${fn.node.id}`, {
         alarmName: `${namePrefix}-lambda-errors-${fn.node.id.toLowerCase()}`,
         description: `${fn.node.id} がエラーを返しています`,
