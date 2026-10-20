@@ -110,6 +110,20 @@ describe("MonitoringStack", () => {
     }
   });
 
+  // 同じ指標を 2 本のアラームで見ると、1 回の障害で通知が 2 通届く
+  it("OCR の Lambda エラーは ocr-errors の 1 本だけで見る", () => {
+    const alarms = Object.values(template.findResources("AWS::CloudWatch::Alarm")) as {
+      Properties: { MetricName?: string; Namespace?: string; Dimensions?: { Name: string; Value: unknown }[] };
+    }[];
+    const ocrErrorAlarms = alarms.filter(
+      ({ Properties: p }) =>
+        p.Namespace === "AWS/Lambda" &&
+        p.MetricName === "Errors" &&
+        JSON.stringify(p.Dimensions ?? []).includes("OcrAnalyzer"),
+    );
+    expect(ocrErrorAlarms).toHaveLength(1);
+  });
+
   it("サービス正常性（AppSync・DynamoDB）を監視する", () => {
     template.hasResourceProperties("AWS::CloudWatch::Alarm", {
       AlarmName: "sakekasu-builder-dev-appsync-5xx",
