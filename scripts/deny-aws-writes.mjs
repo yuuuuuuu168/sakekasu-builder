@@ -113,8 +113,11 @@ const DENY_EXACT = new Set([
   'wickr get-oidc-info',
 ]);
 
-// シェルの区切り文字。引用符の外にあるときだけ区切りとして扱う
-const SEPARATORS = ['&&', '||', ';', '|', '&', '>', '<', '(', ')', '`'];
+// シェルの区切り文字。引用符の外にあるときだけ区切りとして扱う。
+// 語として出すときは先頭に NUL を付け、引用された "|" のような同じ字面の語と
+// 取り違えないようにする。語の側は NUL を含み得ない（INVISIBLE_CHARS で落とす）
+const sep = (s) => `\0${s}`;
+const SEPARATORS = ['&&', '||', ';', '|', '&', '>', '<', '(', ')', '`'].map(sep);
 const SEPARATOR_CHARS = ';|&<>()`';
 
 // 読み切れなかったコマンドを表す。判定できないものは通さず拒否側に倒す
@@ -242,7 +245,7 @@ function tokenize(command, nesting = 0) {
     }
     if (j >= command.length) throw new UnparsableCommand('閉じていないコマンド置換');
     flush();
-    tokens.push('(', ...tokenize(body, nesting + 1), ')');
+    tokens.push(sep('('), ...tokenize(body, nesting + 1), sep(')'));
     return j;
   };
 
@@ -295,8 +298,8 @@ function tokenize(command, nesting = 0) {
     if (/\s/.test(c)) { flush(); continue; }
 
     const two = command.slice(i, i + 2);
-    if (two === '&&' || two === '||') { flush(); tokens.push(two); i += 1; continue; }
-    if (SEPARATOR_CHARS.includes(c)) { flush(); tokens.push(c); continue; }
+    if (two === '&&' || two === '||') { flush(); tokens.push(sep(two)); i += 1; continue; }
+    if (SEPARATOR_CHARS.includes(c)) { flush(); tokens.push(sep(c)); continue; }
 
     add(c);
   }
@@ -432,7 +435,7 @@ function expandInlineScripts(tokens, nesting = 0) {
     if (name === 'eval' && atCommand) {
       let j = i + 1;
       while (j < tokens.length && !SEPARATORS.includes(tokens[j])) j += 1;
-      out.push('(', ...read(tokens.slice(i + 1, j).join(' ')), ')');
+      out.push(sep('('), ...read(tokens.slice(i + 1, j).join(' ')), sep(')'));
       i = j - 1;
     } else if (SHELLS.has(name)) {
       // -c はほかの短いオプションと並べられ（-ec）、手前に値を取るオプション
@@ -448,7 +451,7 @@ function expandInlineScripts(tokens, nesting = 0) {
         if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(tokens[j])) scripts.push(tokens[j + 1]);
       }
       out.push(...tokens.slice(i + 1, end));
-      for (const script of scripts) out.push('(', ...read(script), ')');
+      for (const script of scripts) out.push(sep('('), ...read(script), sep(')'));
       i = end - 1;
     }
   }

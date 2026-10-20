@@ -144,6 +144,9 @@ test('シェルに文字列で渡したコマンドの中も見る', () => {
   denies('bash --rcfile -ce -c "aws s3 rm s3://bucket/key"');
   denies('bash -O -c -c "aws s3 rm s3://bucket/key"');
   denies('bash -c "echo ok" -c "aws s3 rm s3://bucket/key"');
+  denies('bash --rcfile "|" -c "aws s3 rm s3://bucket/key"');
+  denies("bash --rcfile ';' -c 'aws s3 rm s3://bucket/key'");
+  denies('bash -O "&&" -c "aws s3 rm s3://bucket/key"');
   denies('/bin/bash -lc "echo x; aws s3 rm s3://bucket/key"');
   denies('timeout 30 bash -c "aws s3 rm s3://bucket/key"');
   denies('eval "aws s3 rm s3://bucket/key"');
@@ -397,6 +400,8 @@ test('aws を含む無関係なコマンドは通す', () => {
 });
 
 test('引用符で囲った引数の中の区切り文字は区切りにしない', () => {
+  denies('aws --profile ";" s3 rm s3://bucket/key');
+  denies('eval ";" aws s3 rm s3://bucket/key');
   allows('aws logs filter-log-events --filter-pattern "a;b" --log-group-name x');
 });
 
