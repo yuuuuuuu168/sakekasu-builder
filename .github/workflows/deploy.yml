@@ -5,8 +5,8 @@
 # デプロイ先のスタックが別なので deploy-sommelier.yml が受け持つ。
 #
 # デプロイは cdkd（CloudFormation を経由せず AWS SDK / Cloud Control API を
-# 直に叩く）で行う（Issue #150）。取り込みが済んでいないスタックが残っている
-# 間は migrate-to-cdkd.sh が検知して CloudFormation 側へフォールバックする。
+# 直に叩く）で行う（Issue #150）。CloudFormation からの取り込みは済んでいる
+# （docs/cdkd-migration.md）。cdkd に移したスタックへ cdk deploy は打たない。
 name: deploy
 
 on:
@@ -116,17 +116,10 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sakekasu-github-actions-deploy
           aws-region: ap-northeast-1
-      # CloudFormation 管理のまま残っているスタックがあれば cdkd へ取り込む。
-      # 取り込み済みなら何もしない（冪等）。前検査で1つでも引っかかれば、
-      # どのスタックにも手を付けずに engine=cfn を返すので、その回は
-      # CloudFormation 側でデプロイされる（詳細は docs/cdkd-migration.md の手順7）
-      - name: cdkd への取り込み状態を確かめる
-        id: migrate
-        run: bash scripts/migrate-to-cdkd.sh
       # 待ちモードは既定のまま。デプロイ後にカナリアとアラームが動く構成なので
       # --no-wait は使わない
       - name: デプロイ（cdkd）
-        if: steps.migrate.outputs.engine == 'cdkd'
+        id: deploy
         run: |
           # cdkd はスタックが失敗しても終了コード 0 で抜けることがある（2026-10-04 にこのワークフローで、
           # sakekasu-dev-api が失敗して自動ロールバックまで走ったのにステップは緑だった）。
@@ -151,10 +144,8 @@ jobs:
       # 後ろでも見張りとしては弱くならない。平文を state に書くのは deploy
       # そのもので、前に見ているのは1回古い state でしかない。後ろなら
       # 書いたその回で気づける。always() にしてあるのは、deploy が途中で
-      # 落ちた回こそ state に何が残ったかを見たいため
+      # 落ちた回こそ state に何が残ったかを見たいため。deploy まで進まずに
+      # 落ちた回（合成や認証の失敗）は見る state が変わっていないので走らせない
       - name: state に平文のシークレットが無いか
-        if: always() && steps.migrate.outputs.engine == 'cdkd'
+        if: always() && steps.deploy.conclusion != 'skipped'
         run: npx cdkd scrub --all --dry-run --fail
-      - name: デプロイ（CloudFormation へのフォールバック）
-        if: steps.migrate.outputs.engine == 'cfn'
-        run: npx cdk deploy --all --require-approval never --app cdk.out
