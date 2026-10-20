@@ -48,6 +48,23 @@ function storedObject(contentLength: number | undefined) {
   };
 }
 
+// identity の無い呼び出しを素の TypeError にせず認可エラーにする。sub が
+// 空のまま進むと、前方一致の所有者チェックを `/` で始まるキーが通ってしまう
+describe('handler の identity', () => {
+  beforeEach(() => {
+    sendMock.mockReset();
+  });
+
+  it.each([
+    ['identity が無い', undefined],
+    ['sub が空', { sub: '' }],
+  ])('%s 呼び出しは S3 に触る前に弾く', async (_label, identity) => {
+    const event = { ...eventFor(['/purchase/a.jpg']), identity };
+    await expect(handler(event)).rejects.toThrow('Unauthorized: missing identity');
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('MAX_ORIGINAL_IMAGE_BYTES', () => {
   it('base64 にして上限ちょうどになる原本の大きさ（3.75MB）', () => {
     expect(MAX_ORIGINAL_IMAGE_BYTES).toBe(3_932_160);
