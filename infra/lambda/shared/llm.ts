@@ -160,8 +160,29 @@ export interface LlmClientOptions {
   bedrockTimeoutMs: number;
 }
 
+export interface CallOptions {
+  /**
+   * この時刻（Date.now() の値）までに返せないなら諦める。Lambda の残り時間から決める。
+   *
+   * 1 回の呼び出しは Claude API と Bedrock の 2 段になり、テイスティングノートは
+   * それを 2 回呼ぶ。それぞれの上限を足すと Lambda のタイムアウトを超えうるので、
+   * 残り時間で詰める。超えて Lambda に打ち切られると、何で失敗したかが残らない
+   */
+  deadline?: number;
+}
+
 export interface LlmClient {
-  callTool(request: ToolRequest): Promise<ToolResponse>;
+  callTool(request: ToolRequest, options?: CallOptions): Promise<ToolResponse>;
+}
+
+/** 締め切りがあるときは、上限と残り時間の短いほうを返す。残っていなければ投げる */
+function timeLeft(limitMs: number, deadline: number | undefined, feature: string): number {
+  if (deadline === undefined) return limitMs;
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) {
+    throw new Error(`[llm] ${feature}: Lambda の残り時間が尽きたため呼び出しません`);
+  }
+  return Math.min(limitMs, remaining);
 }
 
 /**
@@ -188,18 +209,25 @@ export function createLlmClient(options: LlmClientOptions): LlmClient {
   }
 
   return {
-    async callTool(request) {
+    async callTool(request, { deadline } = {}) {
       const { config, bedrock, anthropic } = init();
       if (anthropic) {
+        const anthropicMs = timeLeft(options.anthropicTimeoutMs, deadline, options.feature);
         try {
-          return await viaAnthropic(anthropic, config.anthropicModel, request, options.feature);
+          return await viaAnthropic(anthropic, config.anthropicModel, request, options.feature, anthropicMs);
         } catch (error) {
           const reason = fallbackReason(error);
           if (!reason) throw error;
           logFallback(options.feature, reason, error);
         }
       }
-      return viaBedrock(bedrock, config.bedrockModel, request, options.feature, options.bedrockTimeoutMs);
+      return viaBedrock(
+        bedrock,
+        config.bedrockModel,
+        request,
+        options.feature,
+        timeLeft(options.bedrockTimeoutMs, deadline, options.feature),
+      );
     },
   };
 }
@@ -276,9 +304,12 @@ async function viaAnthropic(
   model: string,
   request: ToolRequest,
   feature: string,
+  timeoutMs: number,
 ): Promise<ToolResponse> {
   const started = Date.now();
-  const message = await client.messages.create(buildAnthropicRequest(model, request));
+  const message = await client.messages.create(buildAnthropicRequest(model, request), {
+    timeout: timeoutMs,
+  });
   logUsage({
     feature,
     provider: 'anthropic',

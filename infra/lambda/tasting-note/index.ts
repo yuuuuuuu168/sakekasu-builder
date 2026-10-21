@@ -5,6 +5,7 @@ import {
   type TastingNoteResult,
 } from './extractTastingNote.js';
 import { searchSake, type SearchResult } from './webSearch.js';
+import { deadlineFrom, type RemainingTime } from '../shared/deadline';
 import { createLlmClient, type ToolRequest } from '../shared/llm';
 import { DEFAULT_ANTHROPIC_MODEL_NOTE } from '../../lib/llm-constants';
 
@@ -20,8 +21,8 @@ const llm = createLlmClient({
   anthropicModelEnvName: 'ANTHROPIC_MODEL_NOTE',
   defaultAnthropicModel: DEFAULT_ANTHROPIC_MODEL_NOTE,
   anthropicTimeoutMs: 8_000,
-  // Bedrock もモデルの 1 回は数秒で返る。Claude API と同じ長さで切り、遅いときは
-  // Lambda に打ち切られる前に失敗としてログに残す
+  // Bedrock もモデルの 1 回は数秒で返る。1 回あたりの上限で、実際には Lambda の残り時間
+  // （handler の deadline）でさらに詰める
   bedrockTimeoutMs: 8_000,
 });
 
@@ -129,13 +130,19 @@ export function assertNotableCategory(category: unknown): NotableCategory {
   return category;
 }
 
-export async function handler(event: AppSyncEvent): Promise<TastingNoteResult> {
+export async function handler(
+  event: AppSyncEvent,
+  context?: RemainingTime,
+): Promise<TastingNoteResult> {
   const sakeName = normalizeSakeName(event.arguments.sakeName);
   const category = assertNotableCategory(event.arguments.category);
+  // モデルを最大 2 回呼ぶ（間に検索）。それぞれの上限を足すと Lambda の 25 秒を超えうるので、
+  // 2 回目は残り時間で詰める（lambda/shared/llm.ts の CallOptions）
+  const deadline = deadlineFrom(context);
 
   // 1回目は学習知識だけで書かせる。有名な銘柄はこれで足りるので、
   // 検索の費用と待ち時間を全件には払わない
-  const fromKnowledge = await generateNote(sakeName, category, []);
+  const fromKnowledge = await generateNote(sakeName, category, [], deadline);
   if (fromKnowledge.tastingNote !== null) {
     logSummary(category, fromKnowledge, 'knowledge');
     return fromKnowledge;
@@ -149,7 +156,7 @@ export async function handler(event: AppSyncEvent): Promise<TastingNoteResult> {
     return fromKnowledge;
   }
 
-  const fromWeb = await generateNote(sakeName, category, results);
+  const fromWeb = await generateNote(sakeName, category, results, deadline);
   logSummary(
     category,
     fromWeb,
@@ -223,6 +230,7 @@ async function generateNote(
   sakeName: string,
   category: NotableCategory,
   searchResults: SearchResult[],
+  deadline: number | undefined,
 ): Promise<TastingNoteResult> {
   const { label, ask } = CATEGORY_PROMPT[category];
   const hasSearchResults = searchResults.length > 0;
@@ -267,7 +275,7 @@ ${sourceRule}
   let toolInput: unknown = null;
   try {
     // Claude API で失敗したら Bedrock でやり直す（lambda/shared/llm.ts）
-    const response = await llm.callTool(request);
+    const response = await llm.callTool(request, { deadline });
     // tool_choice で強制しているので通常は1つ。max_tokens 到達などで欠けた場合や
     // 複数返ってきた場合は、どれも採らず「書けなかった」として扱う（OCR と同じ）
     const toolUseBlocks = response.content.filter(
