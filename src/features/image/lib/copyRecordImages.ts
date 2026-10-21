@@ -1,8 +1,6 @@
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import { copyImages } from '@/graphql/mutations';
 import type { RecordType } from '@/types/sake';
-
-const client = generateClient();
 
 interface CopyImagesResponse {
   copyImages: string[];

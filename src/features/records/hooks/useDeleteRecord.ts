@@ -1,10 +1,8 @@
 import { useState, useCallback } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import { toast } from 'sonner';
 import { deletePurchaseRecord, deleteDrinkingRecord } from '@/graphql/mutations';
 import type { RecordType, UnifiedRecord } from '../types';
-
-const client = generateClient();
 
 export interface UseDeleteRecordReturn {
   deleteRecord: (id: string, type: RecordType) => Promise<void>;

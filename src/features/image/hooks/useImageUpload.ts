@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useRef } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import { generateUploadUrl } from '@/graphql/mutations';
 import { validateRecordImageFile } from '../utils/imageValidator';
 import { compressImage, createThumbnail } from '../utils/imageCompressor';
@@ -8,8 +8,6 @@ import { isTemporaryKey } from '../lib/tempImageKey';
 import { copyRecordImages } from '../lib/copyRecordImages';
 import { MAX_IMAGES } from '../lib/imageLimits';
 import type { RecordType } from '@/types/sake';
-
-const client = generateClient();
 
 
 export interface UseImageUploadOptions {

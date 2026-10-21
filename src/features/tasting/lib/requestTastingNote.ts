@@ -1,8 +1,6 @@
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import { generateTastingNote } from '@/graphql/mutations';
 import type { NotableCategory, TastingNote } from './tastingNoteMemo';
-
-const client = generateClient();
 
 /**
  * 銘柄名からテイスティングノートを取り寄せる。

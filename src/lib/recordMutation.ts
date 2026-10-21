@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import type { SaveResult } from '@/types/sake';
 
 /**
@@ -8,8 +8,6 @@ import type { SaveResult } from '@/types/sake';
  * どちらの保存フックも「送る → errors を見る → 失敗なら固定の文言で返す →
  * isSaving を戻す」が同じなので、input の組み立てだけを各フックに残す。
  */
-
-const client = generateClient();
 
 export const CREATE_FAILED_MESSAGE = '登録に失敗しました。もう一度お試しください';
 export const UPDATE_FAILED_MESSAGE = '更新に失敗しました。もう一度お試しください';

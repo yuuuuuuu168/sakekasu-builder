@@ -1,7 +1,5 @@
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import { getDownloadUrls } from '@/graphql/queries';
-
-const client = generateClient();
 
 /**
  * Presigned URL をメモリ保持する時間（ミリ秒）。

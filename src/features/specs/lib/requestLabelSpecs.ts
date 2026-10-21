@@ -1,4 +1,4 @@
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import { analyzeSakeLabel } from '@/graphql/mutations';
 import {
   LOW_CONFIDENCE_THRESHOLD,
@@ -6,8 +6,6 @@ import {
   type SakeSpecs,
   type SpecFieldName,
 } from '../types';
-
-const client = generateClient();
 
 /** 解析結果のうち、この関数が見る部分 */
 type AnalyzeResponse = Partial<SakeSpecs> & {
