@@ -28,8 +28,8 @@ python3 scripts/japanese-guard/test_japanese_guard.py
 | `JAPANESE_GUARD_MIN_LATIN` | `25` | 英字がこれ未満の本文は判定しない |
 | `JAPANESE_GUARD_RATIO` | `3` | 英字の数が日本語の文字数のこの倍を超えたら英語主体とみなす |
 
-## AI-DLC の Stop フックとの関係
+## ほかの Stop フックとの関係
 
-`aidlc-continue-workflow.ts` も Stop フックで、ワークフローの途中なら終了を止めて続きを促す。
-両方が同時に止めると、差し戻しの理由が2つまとめて届く。どちらかが止めた直後の終了では
-`stop_hook_active` が立つため、このフックはその1回を検査せずに通す（差し戻しは1ターン1回）。
+別の Stop フック（AI-DLC の `aidlc-continue-workflow.ts` など）を足すと、両方が同時に止めたときに
+差し戻しの理由が2つまとめて届く。どちらかが止めた直後の終了では `stop_hook_active` が立つため、
+このフックはその1回を検査せずに通す（差し戻しは1ターン1回）。

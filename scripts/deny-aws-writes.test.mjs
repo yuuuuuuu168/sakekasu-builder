@@ -383,6 +383,35 @@ test('変数展開でサービス名を隠しても止める', () => {
   denies('aws ${SERVICE} delete-object --bucket x --key y');
 });
 
+// bash はブレース展開とグロブを展開してから aws に渡す。`{s3,}` は s3 に、`s?` や `s[3]` は
+// カレントに s3 というファイルがあればそれに化ける（Issue sakekasu-template#36）
+test('ブレース展開やグロブでサービス名を隠しても止める', () => {
+  denies('aws {s3,} mv a s3://b');
+  denies('aws {,s3} rm s3://b');
+  denies('aws s[3] mv a s3://b');
+  denies('aws s? rm s3://b');
+  denies('aws s* rm s3://b');
+  denies('aws ?? rm s3://b');
+  // 値を取らないオプションの直後でも、知らない値として読み飛ばさない
+  denies('aws --no-paginate s? rm s3://b');
+  denies('aws --region us-east-1 s? rm s3://b');
+});
+
+test('操作名の位置のブレース展開やグロブも止める', () => {
+  denies('aws s3 r? s3://b');
+  denies('aws s3 {rm,} s3://b');
+  denies('aws s3 [r]m s3://b');
+});
+
+test('引数の中のグロブや波かっこは誤検知しない', () => {
+  allows('aws s3 ls s3://b/*');
+  allows('aws s3 ls "s3://b/{x}"');
+  allows('aws s3api get-object --bucket b --key "a*" out');
+  allows("aws logs filter-log-events --log-group-name g --filter-pattern '{ $.level = \"ERROR\" }'");
+  // 日本語の散文の記号は名前の候補にならない
+  allows('echo クラウドには aws は？ 入っていない');
+});
+
 // ここから下は誤検知側。散文やパスを呼び出しと読み違えないこと
 test('散文に混じった aws は呼び出しと見なさない', () => {
   allows('git commit -m "aws の導入手順を書き直す"');
