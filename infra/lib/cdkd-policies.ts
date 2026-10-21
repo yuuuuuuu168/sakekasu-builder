@@ -404,32 +404,16 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
       resources: ['*'],
     }),
 
-    // CloudFormation 側は3つの用途で要る:
-    //  1. 移行時の `cdkd import --migrate-from-cloudformation`
-    //     （Retain を注入する UpdateStack と DeleteStack）
-    //  2. 移行途中の Fn::ImportValue のフォールバック（ListExports）
-    //  3. CFn へ戻すときの `cdkd export`（IMPORT チェンジセット）
-    new iam.PolicyStatement({
-      sid: 'ManageCloudFormationDuringMigration',
-      actions: [
-        'cloudformation:ListExports',
-        'cloudformation:ListStacks',
-        'cloudformation:DescribeStacks',
-        'cloudformation:DescribeStackResource',
-        'cloudformation:DescribeStackResources',
-        'cloudformation:DescribeStackEvents',
-        'cloudformation:GetTemplate',
-        'cloudformation:GetTemplateSummary',
-        'cloudformation:UpdateStack',
-        'cloudformation:DeleteStack',
-        'cloudformation:CreateChangeSet',
-        'cloudformation:DescribeChangeSet',
-        'cloudformation:ExecuteChangeSet',
-        'cloudformation:DeleteChangeSet',
-        'cloudformation:ListChangeSets',
-      ],
-      resources: ['*'],
-    }),
+    // CloudFormation のスタックを操作する権限（UpdateStack / DeleteStack / チェンジセット /
+    // ListExports など）は付けない。用途は CloudFormation からの移行（`cdkd import
+    // --migrate-from-cloudformation`）と、CloudFormation へ戻す `cdkd export` だけで、
+    // 移行は済んでいる。deploy / diff / scrub が CloudFormation を呼ぶのは、
+    // CloudFormation のスタックが出した Export を Fn::ImportValue で引くとき（ListExports）と、
+    // Transform（マクロ）を展開するときだけ。このアプリの ImportValue は cdkd の state から
+    // 解決でき、Transform も使っていない。
+    //
+    // 戻す・取り込み直す必要が出たら、そのときだけステートメントを足して
+    // sakekasu-github-oidc を手で入れ直す
 
     // cdkd は型ごとの「作成時にしか指定できないプロパティ」を
     // cloudformation:DescribeType で引き、差し替えが要る変更かどうかを判定する。
