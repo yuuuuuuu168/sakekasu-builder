@@ -1,16 +1,10 @@
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ChevronDown, SlidersHorizontal } from 'lucide-react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { MAX_SEARCH_QUERY_LENGTH } from '../lib/filterStorage';
 import { countActiveAdvancedFilters } from '../lib/advancedFilters';
+import { FilterSelect } from './FilterSelect';
 import {
   RECORD_TYPE_OPTIONS,
   CATEGORY_FILTER_OPTIONS,
@@ -62,20 +56,10 @@ function valueToRating(value: string): RatingFilter {
   return value === 'all' ? 'all' : (Number(value) as RatingFilter);
 }
 
-/**
- * 選択が外れたとき（null）は何もしない。
- *
- * base-ui の Select は、選ばれている項目をもう一度押すと解除として null を
- * 渡してくる。そのまま絞り込みへ入れると、どの条件にも一致しなくなって
- * 記録が1件も出なくなる。解除は「操作なし」として扱い、今の絞り込みを残す
- */
-function onlyWhenSelected<T>(handler: (value: T) => void) {
-  return (value: string | null) => {
-    if (value !== null) {
-      handler(value as T);
-    }
-  };
-}
+const RATING_SELECT_OPTIONS = RATING_FILTER_OPTIONS.map((opt) => ({
+  value: ratingToValue(opt.value),
+  label: opt.label,
+}));
 
 export function FilterControls({
   recordType,
@@ -101,27 +85,11 @@ export function FilterControls({
   onCustomDateToChange,
   onReset,
 }: FilterControlsProps) {
-  const recordTypeLabel = RECORD_TYPE_OPTIONS.find(
-    (opt) => opt.value === recordType
-  )?.label;
-  const categoryLabel = CATEGORY_FILTER_OPTIONS.find(
-    (opt) => opt.value === category
-  )?.label;
-  const sortLabel = SORT_OPTIONS.find(
-    (opt) => opt.value === sortOption
-  )?.label;
-  const drinkingStatusLabel = DRINKING_STATUS_OPTIONS.find(
-    (opt) => opt.value === drinkingStatusFilter
-  )?.label;
-  const ratingLabel = RATING_FILTER_OPTIONS.find(
-    (opt) => opt.value === ratingFilter
-  )?.label;
-  const priceRangeLabel = PRICE_RANGE_OPTIONS.find(
-    (opt) => opt.value === priceRangeFilter
-  )?.label;
-  const dateRangeLabel = DATE_RANGE_OPTIONS.find(
-    (opt) => opt.value === dateRangeFilter
-  )?.label;
+  // 入力欄と詳細パネルの id。一覧が2つ並んでも衝突しないよう useId で作る
+  const searchId = useId();
+  const dateFromId = useId();
+  const dateToId = useId();
+  const advancedPanelId = useId();
 
   const activeAdvancedCount = countActiveAdvancedFilters({
     drinkingStatus: drinkingStatusFilter,
@@ -143,81 +111,38 @@ export function FilterControls({
     <div className="space-y-3">
       {/* 常時出す条件。記録を探すときにまず触るものだけをここに置く */}
       <div className="flex flex-wrap gap-3">
-        {/* 記録種別フィルタ */}
-        <div className="flex flex-col gap-1.5 min-w-[120px] flex-1">
-          <label className="text-xs text-muted-foreground">記録種別</label>
-          <Select
-            value={recordType}
-            onValueChange={onlyWhenSelected<RecordTypeFilter>(onRecordTypeChange)}
-          >
-            <SelectTrigger
-              className="w-full min-h-[44px] text-sm"
-              data-testid="filter-record-type"
-            >
-              <SelectValue placeholder="すべて">{recordTypeLabel}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {RECORD_TYPE_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* カテゴリフィルタ */}
-        <div className="flex flex-col gap-1.5 min-w-[120px] flex-1">
-          <label className="text-xs text-muted-foreground">カテゴリ</label>
-          <Select
-            value={category}
-            onValueChange={onlyWhenSelected<CategoryFilter>(onCategoryChange)}
-          >
-            <SelectTrigger
-              className="w-full min-h-[44px] text-sm"
-              data-testid="filter-category"
-            >
-              <SelectValue placeholder="すべて">{categoryLabel}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {CATEGORY_FILTER_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* 並び替え */}
-        <div className="flex flex-col gap-1.5 min-w-[120px] flex-1">
-          <label className="text-xs text-muted-foreground">並び替え</label>
-          <Select
-            value={sortOption}
-            onValueChange={onlyWhenSelected<SortOption>(onSortChange)}
-          >
-            <SelectTrigger
-              className="w-full min-h-[44px] text-sm"
-              data-testid="sort-option"
-            >
-              <SelectValue placeholder="日付（新しい順）">{sortLabel}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {SORT_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <FilterSelect
+          label="記録種別"
+          value={recordType}
+          options={RECORD_TYPE_OPTIONS}
+          onChange={onRecordTypeChange}
+          testId="filter-record-type"
+        />
+        <FilterSelect
+          label="カテゴリ"
+          value={category}
+          options={CATEGORY_FILTER_OPTIONS}
+          onChange={onCategoryChange}
+          testId="filter-category"
+        />
+        <FilterSelect
+          label="並び替え"
+          value={sortOption}
+          options={SORT_OPTIONS}
+          onChange={onSortChange}
+          testId="sort-option"
+          placeholder="日付（新しい順）"
+        />
       </div>
 
       {/* キーワード検索 + 詳細の開閉 + リセット */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1.5 min-w-[180px] flex-1">
-          <label className="text-xs text-muted-foreground">キーワード検索</label>
+          <label className="text-xs text-muted-foreground" htmlFor={searchId}>
+            キーワード検索
+          </label>
           <Input
+            id={searchId}
             type="text"
             maxLength={MAX_SEARCH_QUERY_LENGTH}
             placeholder="銘柄・店・場所・メモから検索..."
@@ -237,7 +162,7 @@ export function FilterControls({
           onClick={() => setIsAdvancedOpen((open) => !open)}
           className="min-h-[44px] text-sm shrink-0"
           aria-expanded={isAdvancedOpen}
-          aria-controls="filter-advanced"
+          aria-controls={advancedPanelId}
           data-testid="filter-advanced-toggle"
         >
           <SlidersHorizontal className="size-4" aria-hidden="true" />
@@ -272,102 +197,39 @@ export function FilterControls({
       {/* 詳細フィルタ。使う頻度が落ちる条件はここへ畳んでおく */}
       {isAdvancedOpen && (
         <div
-          id="filter-advanced"
+          id={advancedPanelId}
           className="space-y-3 rounded-md border border-border p-3"
           data-testid="filter-advanced-panel"
         >
           <div className="flex flex-wrap gap-3">
-            {/* 飲みきりステータス */}
-            <div className="flex flex-col gap-1.5 min-w-[120px] flex-1">
-              <label className="text-xs text-muted-foreground">飲みきり</label>
-              <Select
-                value={drinkingStatusFilter}
-                onValueChange={onlyWhenSelected<DrinkingStatusFilter>(onDrinkingStatusChange)}
-              >
-                <SelectTrigger
-                  className="w-full min-h-[44px] text-sm"
-                  data-testid="filter-drinking-status"
-                >
-                  <SelectValue placeholder="すべて">{drinkingStatusLabel}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {DRINKING_STATUS_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* 評価フィルタ */}
-            <div className="flex flex-col gap-1.5 min-w-[120px] flex-1">
-              <label className="text-xs text-muted-foreground">評価</label>
-              <Select
-                value={ratingToValue(ratingFilter)}
-                onValueChange={onlyWhenSelected<string>((val) => onRatingChange(valueToRating(val)))}
-              >
-                <SelectTrigger
-                  className="w-full min-h-[44px] text-sm"
-                  data-testid="filter-rating"
-                >
-                  <SelectValue placeholder="すべて">{ratingLabel}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {RATING_FILTER_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={ratingToValue(opt.value)}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* 価格帯フィルタ */}
-            <div className="flex flex-col gap-1.5 min-w-[120px] flex-1">
-              <label className="text-xs text-muted-foreground">価格帯</label>
-              <Select
-                value={priceRangeFilter}
-                onValueChange={onlyWhenSelected<PriceRangeFilter>(onPriceRangeChange)}
-              >
-                <SelectTrigger
-                  className="w-full min-h-[44px] text-sm"
-                  data-testid="filter-price-range"
-                >
-                  <SelectValue placeholder="すべて">{priceRangeLabel}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {PRICE_RANGE_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* 日付範囲フィルタ */}
-            <div className="flex flex-col gap-1.5 min-w-[120px] flex-1">
-              <label className="text-xs text-muted-foreground">日付</label>
-              <Select
-                value={dateRangeFilter}
-                onValueChange={onlyWhenSelected<DateRangeFilter>(onDateRangeChange)}
-              >
-                <SelectTrigger
-                  className="w-full min-h-[44px] text-sm"
-                  data-testid="filter-date-range"
-                >
-                  <SelectValue placeholder="すべて">{dateRangeLabel}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {DATE_RANGE_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <FilterSelect
+              label="飲みきり"
+              value={drinkingStatusFilter}
+              options={DRINKING_STATUS_OPTIONS}
+              onChange={onDrinkingStatusChange}
+              testId="filter-drinking-status"
+            />
+            <FilterSelect
+              label="評価"
+              value={ratingToValue(ratingFilter)}
+              options={RATING_SELECT_OPTIONS}
+              onChange={(val) => onRatingChange(valueToRating(val))}
+              testId="filter-rating"
+            />
+            <FilterSelect
+              label="価格帯"
+              value={priceRangeFilter}
+              options={PRICE_RANGE_OPTIONS}
+              onChange={onPriceRangeChange}
+              testId="filter-price-range"
+            />
+            <FilterSelect
+              label="日付"
+              value={dateRangeFilter}
+              options={DATE_RANGE_OPTIONS}
+              onChange={onDateRangeChange}
+              testId="filter-date-range"
+            />
           </div>
 
           {/* カスタム範囲の開始日・終了日。範囲を選んだときだけ出す。
@@ -377,11 +239,11 @@ export function FilterControls({
           {dateRangeFilter === 'custom' && (
             <div className="flex flex-wrap gap-3">
               <div className="flex flex-col gap-1.5 min-w-[140px] flex-1">
-                <label className="text-xs text-muted-foreground" htmlFor="filter-date-from">
+                <label className="text-xs text-muted-foreground" htmlFor={dateFromId}>
                   開始日
                 </label>
                 <Input
-                  id="filter-date-from"
+                  id={dateFromId}
                   type="date"
                   value={customDateFrom}
                   max={customDateTo || undefined}
@@ -391,11 +253,11 @@ export function FilterControls({
                 />
               </div>
               <div className="flex flex-col gap-1.5 min-w-[140px] flex-1">
-                <label className="text-xs text-muted-foreground" htmlFor="filter-date-to">
+                <label className="text-xs text-muted-foreground" htmlFor={dateToId}>
                   終了日
                 </label>
                 <Input
-                  id="filter-date-to"
+                  id={dateToId}
                   type="date"
                   value={customDateTo}
                   min={customDateFrom || undefined}
