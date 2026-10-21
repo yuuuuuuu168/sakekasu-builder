@@ -18,6 +18,10 @@ class FakeListObjectsV2Command {
   constructor(public input: { Bucket: string; Prefix: string }) {}
 }
 
+class FakeDeleteObjectCommand {
+  constructor(public input: { Bucket: string; Key: string }) {}
+}
+
 vi.mock('@aws-sdk/client-s3', () => ({
   S3Client: class {
     send = sendMock;
@@ -28,9 +32,7 @@ vi.mock('@aws-sdk/client-s3', () => ({
   GetObjectCommand: class {
     constructor(public input: unknown) {}
   },
-  DeleteObjectCommand: class {
-    constructor(public input: unknown) {}
-  },
+  DeleteObjectCommand: FakeDeleteObjectCommand,
   CopyObjectCommand: FakeCopyObjectCommand,
   HeadObjectCommand: FakeHeadObjectCommand,
   ListObjectsV2Command: FakeListObjectsV2Command,
@@ -403,6 +405,79 @@ describe('copyImages', () => {
     await expect(
       callCopyImages({ sourceKeys: [`${OWNER}/purchase/rec-1/a.jpg`] }),
     ).rejects.toThrow('SlowDown');
+  });
+
+  /** 実際に消したキーの一覧 */
+  function deletedKeys(): string[] {
+    return sendMock.mock.calls
+      .map((call) => call[0])
+      .filter((c): c is FakeDeleteObjectCommand => c instanceof FakeDeleteObjectCommand)
+      .map((c) => c.input.Key)
+      .sort();
+  }
+
+  /** n 回目の原画の複製で失敗させる（サムネイルの複製は数えない） */
+  function failOnOriginalCopy(n: number): void {
+    let originals = 0;
+    sendMock.mockImplementation(async (command: unknown) => {
+      if (command instanceof FakeCopyObjectCommand && !command.input.Key.includes('/thumb_')) {
+        originals += 1;
+        if (originals === n) throw new Error('InternalError');
+      }
+      return {};
+    });
+  }
+
+  // 途中で失敗すると、それまでに複製した分は記録から参照されず、タグも外してあるので
+  // ライフサイクルでも消えない。誰からも辿れない実体として残る
+  it('途中で失敗したら、それまでに複製した原画とサムネイルを消してから失敗させる', async () => {
+    failOnOriginalCopy(2);
+
+    await expect(
+      callCopyImages({
+        sourceKeys: [`${OWNER}/purchase/rec-1/a.jpg`, `${OWNER}/purchase/rec-1/b.jpg`],
+      }),
+    ).rejects.toThrow('InternalError');
+
+    expect(deletedKeys()).toEqual([
+      `${OWNER}/drinking/${RECORD_ID}/a.jpg`,
+      `${OWNER}/drinking/${RECORD_ID}/thumb_a.jpg`,
+    ]);
+  });
+
+  it('後片付けの削除に失敗しても、元のエラーを返して ERROR を残す', async () => {
+    let originals = 0;
+    sendMock.mockImplementation(async (command: unknown) => {
+      if (command instanceof FakeDeleteObjectCommand) throw new Error('AccessDenied');
+      if (command instanceof FakeCopyObjectCommand && !command.input.Key.includes('/thumb_')) {
+        originals += 1;
+        if (originals === 2) throw new Error('InternalError');
+      }
+      return {};
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(
+      callCopyImages({
+        sourceKeys: [`${OWNER}/purchase/rec-1/a.jpg`, `${OWNER}/purchase/rec-1/b.jpg`],
+      }),
+    ).rejects.toThrow('InternalError');
+
+    const logs = error.mock.calls.map((call) => JSON.parse(call[0] as string));
+    expect(logs).toHaveLength(2);
+    for (const log of logs) {
+      // 削除失敗のメトリクスフィルター（level=ERROR かつ action=deleteImage）に拾わせる
+      expect(log).toMatchObject({ level: 'ERROR', action: 'deleteImage', result: 'failed' });
+      // 利用者の sub はログに出さない
+      expect(JSON.stringify(log)).not.toContain(OWNER);
+    }
+    error.mockRestore();
+  });
+
+  it('成功したときは何も消さない', async () => {
+    await callCopyImages({ sourceKeys: [`${OWNER}/purchase/rec-1/a.jpg`] });
+
+    expect(deletedKeys()).toEqual([]);
   });
 
   it('購入記録どうしの複製もできる', async () => {
