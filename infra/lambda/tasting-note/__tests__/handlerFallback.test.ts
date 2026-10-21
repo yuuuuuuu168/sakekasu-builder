@@ -164,6 +164,20 @@ describe('handler の Web 検索フォールバック', () => {
     expect(mockSend).not.toHaveBeenCalled();
     expect(mockSearchSake).not.toHaveBeenCalled();
   });
+
+  // AppSync は Cognito 認可だけなので普段は入るが、入らない経路でも素の TypeError に
+  // せず認可エラーにする。誰の呼び出しか分からないものに課金を発生させない
+  it.each([
+    ['identity が無い', undefined],
+    ['identity が null', null],
+    ['sub が空', { sub: '' }],
+  ])('%s呼び出しは、モデルも検索も呼ばずに弾く', async (_, identity) => {
+    await expect(
+      handler({ ...event('山崎 12年', 'WHISKY'), identity }),
+    ).rejects.toThrow('Unauthorized: missing identity');
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockSearchSake).not.toHaveBeenCalled();
+  });
 });
 
 describe('buildSearchQueries', () => {

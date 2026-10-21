@@ -7,6 +7,7 @@ import {
 import { searchSake, type SearchResult } from './webSearch.js';
 import { deadlineFrom, type RemainingTime } from '../shared/deadline';
 import { createLlmClient, type ToolRequest } from '../shared/llm';
+import { requireOwnerSub, type AppSyncIdentity } from '../shared/owner';
 import { pickSingleToolInput } from '../shared/toolInput';
 import { DEFAULT_ANTHROPIC_MODEL_NOTE } from '../../lib/llm-constants';
 
@@ -35,9 +36,9 @@ interface AppSyncEvent {
     sakeName: string;
     category: string;
   };
-  identity: {
-    sub: string;
-  };
+  // AppSync は Cognito 認可だけなので普段は必ず入るが、直接呼び出しなど入らない経路も
+  // 型で残す（ocr-analyzer・presigned-url と同じ）
+  identity?: AppSyncIdentity | null;
 }
 
 /**
@@ -135,6 +136,9 @@ export async function handler(
   event: AppSyncEvent,
   context?: RemainingTime,
 ): Promise<TastingNoteResult> {
+  // 呼び出し 1 回が課金につながるので、誰の呼び出しか分からないものはモデルも検索も
+  // 呼ばずに弾く。sub そのものは使わない
+  requireOwnerSub(event);
   const sakeName = normalizeSakeName(event.arguments.sakeName);
   const category = assertNotableCategory(event.arguments.category);
   // モデルを最大 2 回呼ぶ（間に検索）。それぞれの上限を足すと Lambda の 25 秒を超えうるので、
