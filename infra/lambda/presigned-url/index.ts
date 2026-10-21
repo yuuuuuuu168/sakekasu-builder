@@ -415,52 +415,91 @@ async function copyImages(event: AppSyncEvent): Promise<string[]> {
   }
 
   const destinations: string[] = [];
+  // 書いた実体（原画とサムネイル）。途中で失敗したら消す
+  const written: string[] = [];
 
-  for (const source of uniqueSources) {
-    // `/` で終わるキーを渡されるとファイル名が空になり、複製先が
-    // フォルダを指すキーになる。記録には中身の無いキーが残る
-    const sourceFileName = source.slice(source.lastIndexOf('/') + 1);
-    assertFileName(sourceFileName);
+  try {
+    for (const source of uniqueSources) {
+      // `/` で終わるキーを渡されるとファイル名が空になり、複製先が
+      // フォルダを指すキーになる。記録には中身の無いキーが残る
+      const sourceFileName = source.slice(source.lastIndexOf('/') + 1);
+      assertFileName(sourceFileName);
 
-    const fileName = reserveFileName(sourceFileName, usedNames);
-    const destination = `${ownerSub}/${recordType}/${recordId}/${fileName}`;
+      const fileName = reserveFileName(sourceFileName, usedNames);
+      const destination = `${ownerSub}/${recordType}/${recordId}/${fileName}`;
 
-    await s3Client.send(
-      new CopyObjectCommand({
-        Bucket: BUCKET_NAME,
-        Key: destination,
-        CopySource: toCopySource(source),
-        // CopyObject の既定はタグの引き継ぎ。一時領域から複製すると
-        // 自動削除タグまで付いてきて、記録に紐づいた画像が 1 日で消える
-        TaggingDirective: 'REPLACE',
-        Tagging: '',
-      }),
-    );
-    destinations.push(destination);
-
-    // 元がすでにサムネイルなら、そこからさらに導出はしない。
-    // thumb_thumb_... という在りもしないキーを探しにいくだけになる
-    if (isThumbnailKey(source)) {
-      continue;
-    }
-
-    const sourceThumbnail = toThumbnailKey(source);
-    if (await objectExists(sourceThumbnail)) {
       await s3Client.send(
         new CopyObjectCommand({
           Bucket: BUCKET_NAME,
-          Key: toThumbnailKey(destination),
-          CopySource: toCopySource(sourceThumbnail),
-          // 原画と同じ理由でタグを落とす（サムネイルだけ 1 日で消えると
-          // 一覧が原画へフォールバックし、静かに重くなる）
+          Key: destination,
+          CopySource: toCopySource(source),
+          // CopyObject の既定はタグの引き継ぎ。一時領域から複製すると
+          // 自動削除タグまで付いてきて、記録に紐づいた画像が 1 日で消える
           TaggingDirective: 'REPLACE',
           Tagging: '',
         }),
       );
+      written.push(destination);
+      destinations.push(destination);
+
+      // 元がすでにサムネイルなら、そこからさらに導出はしない。
+      // thumb_thumb_... という在りもしないキーを探しにいくだけになる
+      if (isThumbnailKey(source)) {
+        continue;
+      }
+
+      const sourceThumbnail = toThumbnailKey(source);
+      if (await objectExists(sourceThumbnail)) {
+        await s3Client.send(
+          new CopyObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: toThumbnailKey(destination),
+            CopySource: toCopySource(sourceThumbnail),
+            // 原画と同じ理由でタグを落とす（サムネイルだけ 1 日で消えると
+            // 一覧が原画へフォールバックし、静かに重くなる）
+            TaggingDirective: 'REPLACE',
+            Tagging: '',
+          }),
+        );
+        written.push(toThumbnailKey(destination));
+      }
     }
+  } catch (error) {
+    // 途中で失敗すると、それまでに複製した分が S3 に残る。呼び出し側にはエラーが
+    // 返るので記録からは参照されず、タグも外してあるのでライフサイクルでも消えない。
+    // 誰からも辿れない実体になる前に消してから、元のエラーを投げ直す
+    await removeWritten(written, ownerSub);
+    throw error;
   }
 
   return destinations;
+}
+
+/**
+ * 複製の途中で失敗したときに、それまでに書いた実体を消す。
+ *
+ * 消せなかった分は孤児として残るので ERROR を残す。action を deleteImage にして
+ * 削除失敗のメトリクスフィルター（ImageDeleteFailCount）に拾わせ、アラーム経由で
+ * 運用側が気づけるようにする。ここでの失敗で元のエラーを隠さないよう、投げはしない
+ */
+async function removeWritten(keys: string[], ownerSub: string): Promise<void> {
+  await Promise.all(
+    keys.map(async (key) => {
+      try {
+        await s3Client.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+      } catch (error) {
+        console.error(JSON.stringify({
+          level: 'ERROR',
+          action: 'deleteImage',
+          reason: 'copyImages rollback',
+          // 利用者の sub はログに出さない（deleteImage と同じ）
+          imageKey: key.slice(ownerSub.length + 1),
+          result: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    }),
+  );
 }
 
 async function deleteImage(event: AppSyncEvent): Promise<{ success: boolean; imageDeleteFailed?: boolean }> {
