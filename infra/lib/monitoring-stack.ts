@@ -10,14 +10,10 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as applicationsignals from 'aws-cdk-lib/aws-applicationsignals';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { Runtime } from 'aws-cdk-lib/aws-lambda';
-import * as path from 'node:path';
-import * as url from 'node:url';
 import type { Construct } from 'constructs';
 import { lambdaLogGroup } from './log-retention.js';
+import { ESM_BUNDLING, LAMBDA_RUNTIME, lambdaEntry } from './lambda-defaults.js';
 import { applyRoleBoundary } from './role-boundary.js';
-
-const here = path.dirname(url.fileURLToPath(import.meta.url));
 
 /**
  * SLO の目標達成率（Issue #86）。
@@ -374,9 +370,9 @@ export class MonitoringStack extends cdk.Stack {
     const healthCheckFunctionName = `${namePrefix}-health-check`;
     const healthCheck = new NodejsFunction(this, 'HealthCheckFunction', {
       functionName: healthCheckFunctionName,
-      runtime: Runtime.NODEJS_22_X,
+      runtime: LAMBDA_RUNTIME,
       logGroup: lambdaLogGroup(this, 'HealthCheckLogGroup', healthCheckFunctionName),
-      entry: path.join(here, '../lambda/health-check/index.ts'),
+      entry: lambdaEntry('health-check'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(60),
       environment: {
@@ -384,12 +380,7 @@ export class MonitoringStack extends cdk.Stack {
         HEALTH_CHECK_TARGETS: JSON.stringify(healthCheckTargets),
         TIMEOUT_MS: '10000',
       },
-      bundling: {
-        format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
-        mainFields: ['module', 'main'],
-        banner:
-          "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
-      },
+      bundling: ESM_BUNDLING,
     });
 
     healthCheck.addToRolePolicy(

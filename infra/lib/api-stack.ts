@@ -5,11 +5,12 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { Architecture, LayerVersion, Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
+import { Architecture, LayerVersion, Tracing } from 'aws-cdk-lib/aws-lambda';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import type { Construct } from 'constructs';
 import { lambdaLogGroup } from './log-retention.js';
+import { ESM_BUNDLING, LAMBDA_RUNTIME, lambdaEntry } from './lambda-defaults.js';
 import { TEMP_TAG_KEY, TEMP_TAG_VALUE } from './image-constants.js';
 import { addMarkPurchaseOpenedResolver, addRecordResolvers } from './record-resolvers.js';
 import { applyRoleBoundary } from './role-boundary.js';
@@ -484,12 +485,9 @@ export class ApiStack extends cdk.Stack {
       'PresignedUrlFunction',
       {
         functionName: presignedUrlFunctionName,
-        runtime: Runtime.NODEJS_22_X,
+        runtime: LAMBDA_RUNTIME,
         logGroup: lambdaLogGroup(this, 'PresignedUrlLogGroup', presignedUrlFunctionName),
-        entry: path.join(
-          path.dirname(url.fileURLToPath(import.meta.url)),
-          '../lambda/presigned-url/index.ts',
-        ),
+        entry: lambdaEntry('presigned-url'),
         handler: 'handler',
         // 既定値の変化でレイヤーと噛み合わなくなるのを防ぐため明示する。
         // Application Signals のレイヤーは arm64 にも対応しているので、
@@ -532,11 +530,7 @@ export class ApiStack extends cdk.Stack {
           UPLOAD_EXPIRY: '300',
           DOWNLOAD_EXPIRY: '3600',
         },
-        bundling: {
-          format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
-          mainFields: ['module', 'main'],
-          banner: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
-        },
+        bundling: ESM_BUNDLING,
       },
     );
 
@@ -600,14 +594,11 @@ export class ApiStack extends cdk.Stack {
     const ocrAnalyzerFunctionName = `${props.envName}-sakekasu-ocr-analyzer`;
     this.ocrAnalyzerFunction = new NodejsFunction(this, 'OcrAnalyzerFunction', {
       functionName: ocrAnalyzerFunctionName,
-      runtime: Runtime.NODEJS_22_X,
+      runtime: LAMBDA_RUNTIME,
       logGroup: lambdaLogGroup(this, 'OcrAnalyzerLogGroup', ocrAnalyzerFunctionName),
       // Claude Console のルールがロールの ARN の前方一致で照合するため、名前を固定する
       role: this.llmExecutionRole('OcrAnalyzerRole', `${llmRoleNamePrefix(props.envName)}ocr-analyzer`),
-      entry: path.join(
-        path.dirname(url.fileURLToPath(import.meta.url)),
-        '../lambda/ocr-analyzer/index.ts',
-      ),
+      entry: lambdaEntry('ocr-analyzer'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(30),
       memorySize: 512,
@@ -625,11 +616,7 @@ export class ApiStack extends cdk.Stack {
         BEDROCK_MODEL_ID,
         ...llmEnvironment('ANTHROPIC_MODEL_OCR', DEFAULT_ANTHROPIC_MODEL_OCR, props.anthropicFederation),
       },
-      bundling: {
-        format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
-        mainFields: ['module', 'main'],
-        banner: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
-      },
+      bundling: ESM_BUNDLING,
     });
 
     // Application Signals の計装（Issue #86）。
@@ -685,14 +672,11 @@ export class ApiStack extends cdk.Stack {
     const tastingNoteFunctionName = `${props.envName}-sakekasu-tasting-note`;
     this.tastingNoteFunction = new NodejsFunction(this, 'TastingNoteFunction', {
       functionName: tastingNoteFunctionName,
-      runtime: Runtime.NODEJS_22_X,
+      runtime: LAMBDA_RUNTIME,
       logGroup: lambdaLogGroup(this, 'TastingNoteLogGroup', tastingNoteFunctionName),
       // Claude Console のルールがロールの ARN の前方一致で照合するため、名前を固定する
       role: this.llmExecutionRole('TastingNoteRole', `${llmRoleNamePrefix(props.envName)}tasting-note`),
-      entry: path.join(
-        path.dirname(url.fileURLToPath(import.meta.url)),
-        '../lambda/tasting-note/index.ts',
-      ),
+      entry: lambdaEntry('tasting-note'),
       handler: 'handler',
       // 知らない銘柄では「学習知識で1回 → Web 検索 → 検索結果つきでもう1回」と
       // 三段になる。実測でモデルが1回 1〜3秒、検索は6秒で打ち切るので、
@@ -708,12 +692,7 @@ export class ApiStack extends cdk.Stack {
         TAVILY_API_KEY_SECRET_ID: tavilyApiKeySecretName,
         ...llmEnvironment('ANTHROPIC_MODEL_NOTE', DEFAULT_ANTHROPIC_MODEL_NOTE, props.anthropicFederation),
       },
-      bundling: {
-        format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
-        mainFields: ['module', 'main'],
-        banner:
-          "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
-      },
+      bundling: ESM_BUNDLING,
     });
 
     // Bedrock InvokeModel 権限。許可する ARN の考え方は OCR 側と同じ
