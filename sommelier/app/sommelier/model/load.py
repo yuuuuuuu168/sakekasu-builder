@@ -18,6 +18,7 @@ Claude API が失敗したときに Bedrock でやり直すかどうかは fallb
 """
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional
 
@@ -222,18 +223,30 @@ def load_bedrock_model(config: LlmConfig) -> BedrockModel:
     return BedrockModel(model_id=config.bedrock_model)
 
 
-def load_models(config: Optional[LlmConfig] = None, region: Optional[str] = None) -> list:
+def load_models(
+    config: Optional[LlmConfig] = None,
+    region: Optional[str] = None,
+    on_unavailable: Optional[Callable[[str, BaseException], None]] = None,
+) -> list:
     """呼ぶ順に (呼び先, モデル) を並べて返す。先頭で失敗したら次でやり直す。
 
     Claude API が使えるときは [Claude API, Bedrock]、使えないときは [Bedrock] だけ。
     モデルはリクエストごとに作る（Agent と同じく、相談ごとに状態を持たせない）。
     Claude API のトークンはプロセスの中で使い回す（_anthropic_model のキャッシュ）
+
+    Claude API のモデルを作る段階で失敗したら（STS のクライアントが作れない、など）、
+    on_unavailable に知らせて Bedrock だけで返す。ここで落とすと、控えの Bedrock に
+    回らないまま相談そのものが失敗する
     """
     config = config or read_llm_config()
     region = region or os.getenv("AWS_REGION", "ap-northeast-1")
     models = []
     if config.provider == "anthropic":
-        models.append(("anthropic", _anthropic_model(config, region)))
+        try:
+            models.append(("anthropic", _anthropic_model(config, region)))
+        except Exception as err:
+            if on_unavailable is not None:
+                on_unavailable("anthropic", err)
     models.append(("bedrock", load_bedrock_model(config)))
     return models
 

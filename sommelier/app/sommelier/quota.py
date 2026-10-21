@@ -61,7 +61,10 @@ def user_key(sub: str) -> str:
 
 def consume(sub: str, now: datetime | None = None) -> QuotaResult:
     """今日の利用回数を 1 つ進める。上限に達していれば EXCEEDED。"""
-    table = os.environ.get("CHAT_QUOTA_TABLE_NAME", "")
+    # 起動時の検査（main.py）と同じく前後の空白を落とす。落とさないと、空白混じりの値で
+    # 起動だけは通り、そのあと update_item が毎回 ValidationException で UNAVAILABLE になって
+    # すべての相談を断る
+    table = os.environ.get("CHAT_QUOTA_TABLE_NAME", "").strip()
     if not table:
         return QuotaResult.OK
     now = (now or datetime.now(JST)).astimezone(JST)

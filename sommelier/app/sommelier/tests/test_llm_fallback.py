@@ -20,6 +20,7 @@ from strands.models.bedrock import BedrockModel
 from strands.types.exceptions import EventLoopException, ModelThrottledException
 
 import main
+import model.load as load_module
 from model.load import (
     DEFAULT_ANTHROPIC_MODEL_CHAT,
     DEFAULT_BEDROCK_MODEL_ID,
@@ -138,6 +139,22 @@ class TestLoadModels:
         models = load_models(read_llm_config({}), region="ap-northeast-1")
         assert [provider for provider, _ in models] == ["bedrock"]
 
+    def test_Claude_APIのモデルが作れなければ知らせてBedrockだけ(self, monkeypatch):
+        def broken(config, region):
+            raise RuntimeError("STS のクライアントが作れない")
+
+        monkeypatch.setattr(load_module, "_anthropic_model", broken)
+        reported = []
+
+        models = load_models(
+            read_llm_config(dict(FEDERATION_ENV)),
+            region="ap-northeast-1",
+            on_unavailable=lambda provider, err: reported.append((provider, str(err))),
+        )
+
+        assert [provider for provider, _ in models] == ["bedrock"]
+        assert reported == [("anthropic", "STS のクライアントが作れない")]
+
     def test_Claude_APIのモデルは使い回す(self):
         config = read_llm_config(dict(FEDERATION_ENV))
         first = load_models(config, region="ap-northeast-1")[0][1]
@@ -177,7 +194,7 @@ def scripted(monkeypatch):
     ScriptedAgent.created = []
     monkeypatch.setattr(main, "Agent", ScriptedAgent)
     # モデルの代わりに呼び先の名前を渡し、ScriptedAgent がそれで振る舞いを選ぶ
-    monkeypatch.setattr(main, "load_models", lambda: [("anthropic", "anthropic"), ("bedrock", "bedrock")])
+    monkeypatch.setattr(main, "load_models", lambda **_: [("anthropic", "anthropic"), ("bedrock", "bedrock")])
     monkeypatch.setattr(main, "_get_owner_sub", lambda context: OWNER_SUB)
     monkeypatch.setattr(main, "_build_tools", lambda owner_sub, search_enabled=None: [])
     return ScriptedAgent
@@ -243,6 +260,23 @@ class TestInvokeFallback:
             "status": 400,
             "message": entry["message"],
         }
+
+    def test_Claude_APIのモデルが作れなくてもBedrockで答えてログを残す(self, scripted, monkeypatch, caplog):
+        caplog.set_level(logging.WARNING)
+
+        def load_models_without_anthropic(on_unavailable=None, **_):
+            on_unavailable("anthropic", RuntimeError("STS のクライアントが作れない"))
+            return [("bedrock", "bedrock")]
+
+        monkeypatch.setattr(main, "load_models", load_models_without_anthropic)
+        scripted.scripts = {"bedrock": ["控えの答えです"]}
+
+        chunks = invoke({"prompt": "今夜は何を飲もう"})
+
+        assert chunks == ["控えの答えです"]
+        [entry] = fallback_logs(caplog)
+        assert entry["from"] == "anthropic"
+        assert entry["errorType"] == "credentials"
 
     def test_Bedrockには従来どおりの文字列のシステムプロンプトと再試行を渡す(self, scripted):
         scripted.scripts = {
@@ -390,7 +424,7 @@ class Test本物のAgentを通したフォールバック:
         monkeypatch.setattr(main, "_build_tools", lambda owner_sub, search_enabled=None: [])
 
         def use(models):
-            monkeypatch.setattr(main, "load_models", lambda: models)
+            monkeypatch.setattr(main, "load_models", lambda **_: models)
 
         return use
 
