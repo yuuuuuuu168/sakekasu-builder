@@ -15,6 +15,7 @@ import { buildLabelRequest, LABEL_TOOL_NAME } from './labelRequest.js';
 import { deadlineFrom, type RemainingTime } from '../shared/deadline';
 import { createLlmClient } from '../shared/llm';
 import { requireOwnerSub, type AppSyncIdentity } from '../shared/owner';
+import { pickSingleToolInput } from '../shared/toolInput';
 import { DEFAULT_ANTHROPIC_MODEL_OCR } from '../../lib/llm-constants';
 
 /**
@@ -96,25 +97,9 @@ export async function handler(event: AppSyncEvent, context?: RemainingTime): Pro
   try {
     const response = await llm.callTool(buildLabelRequest(images), { deadline });
     provider = response.provider;
-    // tool_choice で強制しているため通常は必ず tool_use ブロックが1つある。
-    // max_tokens 到達などで欠けた場合は toolInput が null のまま → 未検出扱い。
-    // 複数ある場合は旧 <answer> タグ複数時と同様、インジェクションの疑いとして
-    // どれも採用せず未検出扱いにする（異常検知の不変条件を維持）
-    const toolUseBlocks = response.content.filter(
-      (block) => block.type === 'tool_use' && block.name === LABEL_TOOL_NAME,
-    );
-    if (toolUseBlocks.length === 1) {
-      toolInput = toolUseBlocks[0].input ?? null;
-    } else {
-      console.warn(
-        '[OCR] unexpected tool_use block count:',
-        JSON.stringify({
-          count: toolUseBlocks.length,
-          stopReason: response.stopReason,
-          provider: response.provider,
-        }),
-      );
-    }
+    // tool_use ブロックが欠けた場合も複数ある場合も null → 未検出扱い。
+    // 複数はインジェクションの疑いとして、どれも採用しない（異常検知の不変条件を維持）
+    toolInput = pickSingleToolInput(response, LABEL_TOOL_NAME, '[OCR]');
   } catch (err) {
     console.error('[OCR] model invocation error:', err);
     throw new Error('OCR analysis failed');
