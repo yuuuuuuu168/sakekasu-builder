@@ -153,6 +153,11 @@ export interface LlmClientOptions {
    * 失敗したときに Bedrock でやり直す時間が残る長さにする
    */
   anthropicTimeoutMs: number;
+  /**
+   * Bedrock の 1 回の待ち時間（SDK の再試行も含めた合計）。付けないと、Bedrock が遅いときに
+   * Lambda ごと打ち切られ、何で失敗したかがログに残らない
+   */
+  bedrockTimeoutMs: number;
 }
 
 export interface LlmClient {
@@ -194,7 +199,7 @@ export function createLlmClient(options: LlmClientOptions): LlmClient {
           logFallback(options.feature, reason, error);
         }
       }
-      return viaBedrock(bedrock, config.bedrockModel, request, options.feature);
+      return viaBedrock(bedrock, config.bedrockModel, request, options.feature, options.bedrockTimeoutMs);
     },
   };
 }
@@ -303,6 +308,7 @@ async function viaBedrock(
   model: string,
   request: ToolRequest,
   feature: string,
+  timeoutMs: number,
 ): Promise<ToolResponse> {
   const started = Date.now();
   const response = await client.send(
@@ -312,6 +318,8 @@ async function viaBedrock(
       accept: 'application/json',
       body: JSON.stringify(buildBedrockRequest(request)),
     }),
+    // 再試行をまたいだ合計で切る（requestTimeout は 1 回ごとなので、再試行の分だけ延びる）
+    { abortSignal: AbortSignal.timeout(timeoutMs) },
   );
   const payload = JSON.parse(new TextDecoder().decode(response.body)) as {
     content?: ToolResponse['content'];

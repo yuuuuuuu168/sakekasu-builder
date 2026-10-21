@@ -641,6 +641,49 @@ describe('useImageUpload - 品質低下の警告', () => {
     expect(result.current.error).toContain('最大5枚');
   });
 
+  // 圧縮を並行に走らせると、終わった順に並び、最初の 1 枚が終わった時点で
+  // 「圧縮中」が下がって残りの圧縮中でもボタンが押せてしまう
+  it('複数ファイルは選んだ順に並び、全部終わるまで圧縮中のまま', async () => {
+    // 先に選んだ画像ほど圧縮に時間がかかる状況
+    const delays: Record<string, number> = { 'a.jpg': 30, 'b.jpg': 10, 'c.jpg': 0 };
+    mockCompress.mockImplementation(
+      (file: File) =>
+        new Promise((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                file,
+                originalSize: file.size,
+                compressedSize: file.size,
+                wasCompressed: false,
+                wasReadable: true,
+              }),
+            delays[file.name],
+          ),
+        ),
+    );
+    const { result } = renderHook(() => useImageUpload());
+
+    let all: Promise<unknown> = Promise.resolve();
+    act(() => {
+      all = Promise.all(
+        ['a', 'b', 'c'].map((n) => result.current.handleImageSelect(makeFile(`${n}.jpg`))),
+      );
+    });
+    // 1 枚目が終わった時点でも、残りがある間は圧縮中のまま
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    });
+    expect(result.current.imageFiles.map((f) => f.name)).toEqual(['a.jpg']);
+    expect(result.current.isCompressing).toBe(true);
+
+    await act(async () => {
+      await all;
+    });
+    expect(result.current.imageFiles.map((f) => f.name)).toEqual(['a.jpg', 'b.jpg', 'c.jpg']);
+    expect(result.current.isCompressing).toBe(false);
+  });
+
   it('外した分の枠は次の選択で使える', async () => {
     const { result } = renderHook(() => useImageUpload());
 

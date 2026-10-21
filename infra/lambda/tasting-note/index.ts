@@ -20,6 +20,9 @@ const llm = createLlmClient({
   anthropicModelEnvName: 'ANTHROPIC_MODEL_NOTE',
   defaultAnthropicModel: DEFAULT_ANTHROPIC_MODEL_NOTE,
   anthropicTimeoutMs: 8_000,
+  // Bedrock もモデルの 1 回は数秒で返る。Claude API と同じ長さで切り、遅いときは
+  // Lambda に打ち切られる前に失敗としてログに残す
+  bedrockTimeoutMs: 8_000,
 });
 
 interface AppSyncEvent {

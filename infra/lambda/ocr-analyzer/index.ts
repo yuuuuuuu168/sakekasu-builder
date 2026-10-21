@@ -26,6 +26,8 @@ const llm = createLlmClient({
   anthropicModelEnvName: 'ANTHROPIC_MODEL_OCR',
   defaultAnthropicModel: DEFAULT_ANTHROPIC_MODEL_OCR,
   anthropicTimeoutMs: 14_000,
+  // Claude API の 14 秒と合わせて 28 秒。Lambda と AppSync の 30 秒に収まる
+  bedrockTimeoutMs: 14_000,
 });
 
 interface AppSyncEvent {

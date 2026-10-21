@@ -239,6 +239,7 @@ describe('createLlmClient', () => {
       anthropicModelEnvName: 'ANTHROPIC_MODEL_TEST',
       defaultAnthropicModel: 'claude-haiku-5-5',
       anthropicTimeoutMs: 10_000,
+      bedrockTimeoutMs: 5_000,
     });
   }
 
@@ -270,6 +271,21 @@ describe('createLlmClient', () => {
         },
       },
     });
+  });
+
+  it('Bedrock の呼び出しには待ち時間の上限を付ける', async () => {
+    mockCreate.mockRejectedValueOnce(
+      apiError(400, 'Your credit balance is too low to access the Anthropic API.'),
+    );
+    mockBedrockSend.mockResolvedValueOnce(bedrockResponse());
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+
+    await client().callTool(REQUEST);
+
+    expect(timeout).toHaveBeenCalledWith(5_000);
+    const [, sendOptions] = mockBedrockSend.mock.calls[0] as [unknown, { abortSignal?: AbortSignal }];
+    expect(sendOptions.abortSignal).toBe(timeout.mock.results[0].value);
+    timeout.mockRestore();
   });
 
   it('使ったトークン数とキャッシュの効きをログに出す', async () => {

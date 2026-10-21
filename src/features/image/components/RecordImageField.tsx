@@ -1,6 +1,7 @@
 import { FormField } from '@/components/form/FormField';
 import { ImageUploadArea } from './ImageUploadArea';
 import { useImageUrls } from '../hooks/useImageUrls';
+import { MAX_IMAGES } from '../lib/imageLimits';
 import type { UseImageUploadReturn } from '../hooks/useImageUpload';
 import type { UseRecordOcrReturn } from '../hooks/useRecordOcr';
 
@@ -32,6 +33,8 @@ export function RecordImageField({
       <ImageUploadArea
         imageFiles={imageUpload.imageFiles}
         existingImageUrls={existingImageUrls}
+        existingCount={existingImageKeys?.length ?? 0}
+        maxImages={MAX_IMAGES}
         onImageChange={imageUpload.handleImageSelect}
         onImageRemove={imageUpload.removeImage}
         isCompressing={imageUpload.isCompressing}

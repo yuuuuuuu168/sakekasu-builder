@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { MAX_IMAGES } from '../lib/imageLimits';
 
 export interface ImageUploadAreaProps {
   /** 選択された画像ファイル一覧 */
@@ -35,6 +36,14 @@ export interface ImageUploadAreaProps {
    * 削除・差し替えは別 Issue のため、ここでは表示だけ行う（Issue #142）
    */
   existingImageUrls?: string[];
+  /**
+   * 既に記録に添付されている画像の枚数。
+   *
+   * 上限の判定にはこちらを使う。existingImageUrls は URL を取りに行った結果なので、
+   * 取得中や取得に失敗したときは空になる。それで数えると、枠が空いているように
+   * 見えるのに、選ぶと hook 側（キーの数で見る）が上限で弾く。省略時は URL の数で数える
+   */
+  existingCount?: number;
 }
 
 export function ImageUploadArea({
@@ -50,15 +59,16 @@ export function ImageUploadArea({
   onOcrTrigger,
   ocrMessage = null,
   hasOcrRun = false,
-  maxImages = 5,
+  maxImages = MAX_IMAGES,
   existingImageUrls = [],
+  existingCount,
 }: ImageUploadAreaProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
   const hasImages = imageFiles.length > 0;
   // 上限は記録あたりの枚数。編集時は既に添付されている分も数に入れる
-  const attachedCount = imageFiles.length + existingImageUrls.length;
+  const attachedCount = imageFiles.length + (existingCount ?? existingImageUrls.length);
   const hasAnyImage = attachedCount > 0;
   const canAddMore = attachedCount < maxImages;
 
@@ -197,6 +207,7 @@ export function ImageUploadArea({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
+          maxImages={maxImages}
         />
       )}
 
@@ -258,6 +269,7 @@ function DropZone({
   onDragOver,
   onDragLeave,
   onDrop,
+  maxImages,
 }: {
   isDragOver: boolean;
   isInteractive: boolean;
@@ -265,6 +277,7 @@ function DropZone({
   onDragOver: (e: React.DragEvent) => void;
   onDragLeave: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent) => void;
+  maxImages: number;
 }) {
   return (
     <div
@@ -297,7 +310,7 @@ function DropZone({
         画像を選択またはドラッグ＆ドロップ
       </p>
       <p className="text-xs text-muted-foreground/70">
-        JPEG・PNG（最大5枚）
+        JPEG・PNG（最大{maxImages}枚）
       </p>
     </div>
   );
