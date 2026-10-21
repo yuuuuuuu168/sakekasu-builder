@@ -2,21 +2,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// AWS SDK モジュールをモックして import エラーを回避
-vi.mock('@aws-sdk/client-s3', () => ({
-  S3Client: vi.fn(),
-  GetObjectCommand: vi.fn(),
-}));
-// モデルの呼び出し口（Claude API / Bedrock）は使わないので、SDK ごと読み込まない
-vi.mock('../../shared/llm', () => ({
-  createLlmClient: () => ({ callTool: vi.fn() }),
-}));
-
 import {
   detectImageMediaType,
   resolveMediaType,
   assertImagesAreRealImages,
-} from '../index.js';
+} from '../imageValidation.js';
 
 /** 先頭バイトの後ろに適当な本体を足したバイト列を作る */
 function bytesOf(header: number[], bodyLength = 32): Uint8Array {

@@ -6,7 +6,7 @@
 
 from datetime import datetime
 
-from main import SYSTEM_PROMPT, _build_system_prompt
+from prompt import SYSTEM_PROMPT, _build_system_prompt
 
 
 def has_preferences(prompt: str) -> bool:

@@ -38,7 +38,7 @@ export interface SiteStackProps extends cdk.StackProps {
   sommelierRegion: string;
 }
 
-/** 配信物を置くバケットの名前。deploy-site.yml と github-oidc-stack.ts も同じ形で組み立てる */
+/** 配信物を置くバケットの名前。deploy-site.yml と resource-names.ts の siteBucketsArn も同じ形で組み立てる */
 export function siteBucketName(envName: string, account: string): string {
   return `${envName}-sakekasu-site-${account}`;
 }

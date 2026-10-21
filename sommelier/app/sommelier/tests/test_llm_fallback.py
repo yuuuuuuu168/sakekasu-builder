@@ -28,6 +28,7 @@ from model.load import (
     load_models,
     read_llm_config,
 )
+from prompt import SYSTEM_PROMPT
 
 OWNER_SUB = "7a1b2c3d-4e5f-6789-abcd-ef0123456789"
 
@@ -234,7 +235,7 @@ class TestInvokeFallback:
 
         kwargs = scripted.created[0].kwargs
         blocks = kwargs["system_prompt"]
-        assert blocks[0]["text"].startswith(main.SYSTEM_PROMPT)
+        assert blocks[0]["text"].startswith(SYSTEM_PROMPT)
         assert blocks[1] == {"cachePoint": {"type": "default"}}
         # Strands の再試行（数分待つ）を止めて、すぐ Bedrock でやり直す
         assert kwargs["retry_strategy"] is None

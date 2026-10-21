@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import { listDrinkingRecords } from '@/graphql/queries';
 import type { DrinkingRecordType, DrinkingRecordConnection } from '@/types/schema';
 import { fetchAllPages, PAGE_LIMIT } from '@/lib/pagination';
 import { findPastRatings, MIN_QUERY_LENGTH } from '../lib/pastRatings';
 import type { PastRatingSummary } from '../lib/pastRatings';
-
-const client = generateClient();
 
 /** 銘柄名入力のデバウンス間隔（ms） */
 const DEBOUNCE_MS = 300;

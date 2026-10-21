@@ -1,8 +1,6 @@
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import { markPurchaseOpened } from '@/graphql/mutations';
 import type { PurchaseRecordType } from '@/types/schema';
-
-const client = generateClient();
 
 /**
  * 開封処理の結果。

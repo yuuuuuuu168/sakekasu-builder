@@ -7,6 +7,8 @@ import {
 import { searchSake, type SearchResult } from './webSearch.js';
 import { deadlineFrom, type RemainingTime } from '../shared/deadline';
 import { createLlmClient, type ToolRequest } from '../shared/llm';
+import { requireOwnerSub, type AppSyncIdentity } from '../shared/owner';
+import { pickSingleToolInput } from '../shared/toolInput';
 import { DEFAULT_ANTHROPIC_MODEL_NOTE } from '../../lib/llm-constants';
 
 /**
@@ -34,9 +36,9 @@ interface AppSyncEvent {
     sakeName: string;
     category: string;
   };
-  identity: {
-    sub: string;
-  };
+  // AppSync は Cognito 認可だけなので普段は必ず入るが、直接呼び出しなど入らない経路も
+  // 型で残す（ocr-analyzer・presigned-url と同じ）
+  identity?: AppSyncIdentity | null;
 }
 
 /**
@@ -134,6 +136,9 @@ export async function handler(
   event: AppSyncEvent,
   context?: RemainingTime,
 ): Promise<TastingNoteResult> {
+  // 呼び出し 1 回が課金につながるので、誰の呼び出しか分からないものはモデルも検索も
+  // 呼ばずに弾く。sub そのものは使わない
+  requireOwnerSub(event);
   const sakeName = normalizeSakeName(event.arguments.sakeName);
   const category = assertNotableCategory(event.arguments.category);
   // モデルを最大 2 回呼ぶ（間に検索）。それぞれの上限を足すと Lambda の 25 秒を超えうるので、
@@ -276,23 +281,9 @@ ${sourceRule}
   try {
     // Claude API で失敗したら Bedrock でやり直す（lambda/shared/llm.ts）
     const response = await llm.callTool(request, { deadline });
-    // tool_choice で強制しているので通常は1つ。max_tokens 到達などで欠けた場合や
-    // 複数返ってきた場合は、どれも採らず「書けなかった」として扱う（OCR と同じ）
-    const toolUseBlocks = response.content.filter(
-      (block) => block.type === 'tool_use' && block.name === NOTE_TOOL_NAME,
-    );
-    if (toolUseBlocks.length === 1) {
-      toolInput = toolUseBlocks[0].input ?? null;
-    } else {
-      console.warn(
-        '[TastingNote] unexpected tool_use block count:',
-        JSON.stringify({
-          count: toolUseBlocks.length,
-          stopReason: response.stopReason,
-          provider: response.provider,
-        }),
-      );
-    }
+    // tool_use ブロックが欠けた場合も複数ある場合も null。どれも採らず
+    // 「書けなかった」として扱う（OCR と同じ）
+    toolInput = pickSingleToolInput(response, NOTE_TOOL_NAME, '[TastingNote]');
   } catch (err) {
     console.error('[TastingNote] model invocation error:', err);
     throw new Error('Tasting note generation failed');

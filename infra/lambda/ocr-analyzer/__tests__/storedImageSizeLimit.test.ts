@@ -16,11 +16,11 @@ vi.mock('../../shared/llm', () => ({
   createLlmClient: () => ({ callTool: vi.fn() }),
 }));
 
+import { handler } from '../index.js';
 import {
   MAX_ORIGINAL_IMAGE_BYTES,
   assertStoredImageFitsBedrockLimit,
-  handler,
-} from '../index.js';
+} from '../imageValidation.js';
 
 /** Bedrock 側の上限（base64 エンコード後） */
 const BASE64_LIMIT = 5 * 1024 * 1024;

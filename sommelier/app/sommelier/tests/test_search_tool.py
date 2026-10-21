@@ -1,7 +1,7 @@
 """検索ツールと本体のつなぎ込みのテスト。
 
 web_search.py 側で「Tavily をどう叩くか」は見ているので、ここで見るのは
-main.py が持つ責務のほう。
+本体（tools.py・prompt.py・main.py）が持つ責務のほう。
 
 - 1回の相談で使える検索回数の上限（クロージャに持たせている）
 - 外部サイト由来の文字列を <web_data> に閉じ込められているか
@@ -13,12 +13,10 @@ import asyncio
 import pytest
 
 import main
-from main import (
-    MAX_SEARCH_CALLS_PER_REQUEST,
-    SYSTEM_PROMPT,
-    _build_system_prompt,
-    _build_tools,
-)
+import tools as agent_tools
+from prompt import SYSTEM_PROMPT, _build_system_prompt
+from sanitize import _UNSAFE_TEXT_PLACEHOLDER
+from tools import MAX_SEARCH_CALLS_PER_REQUEST, _build_tools
 from web_search import MAX_SNIPPET_LENGTH, WebSearch
 
 OWNER_SUB = "7a1b2c3d-4e5f-6789-abcd-ef0123456789"
@@ -48,7 +46,7 @@ def search_tool(monkeypatch):
 
     def _build(**kwargs):
         fake = FakeWebSearch(**kwargs)
-        monkeypatch.setattr(main, "_web_search", fake)
+        monkeypatch.setattr(agent_tools, "_web_search", fake)
         tools = _build_tools(OWNER_SUB)
         tool = next(t for t in tools if t.tool_name == "search_web")
         return tool, fake
@@ -58,14 +56,14 @@ def search_tool(monkeypatch):
 
 class Test検索ツールを渡すかどうか:
     def test_キーが未設定なら検索ツールを渡さない(self, monkeypatch):
-        monkeypatch.setattr(main, "_web_search", FakeWebSearch(enabled=False))
+        monkeypatch.setattr(agent_tools, "_web_search", FakeWebSearch(enabled=False))
 
         names = [t.tool_name for t in _build_tools(OWNER_SUB)]
 
         assert names == ["list_my_purchase_records", "list_my_drinking_records"]
 
     def test_キーがあれば検索ツールを渡す(self, monkeypatch):
-        monkeypatch.setattr(main, "_web_search", FakeWebSearch())
+        monkeypatch.setattr(agent_tools, "_web_search", FakeWebSearch())
 
         names = [t.tool_name for t in _build_tools(OWNER_SUB)]
 
@@ -76,7 +74,7 @@ class Test検索ツールを渡すかどうか:
         # invoke は設定を1回だけ読んで、ツールとシステムプロンプトの
         # 両方に同じ判断を渡す。別々に読むと「ツールはあるが注意書きが無い」
         # 組み合わせが生まれうる
-        monkeypatch.setattr(main, "_web_search", FakeWebSearch(enabled=True))
+        monkeypatch.setattr(agent_tools, "_web_search", FakeWebSearch(enabled=True))
 
         names = [t.tool_name for t in _build_tools(OWNER_SUB, search_enabled=False)]
 
@@ -222,7 +220,7 @@ class Test検索結果の無害化:
 
         got = tool(query="獺祭")
 
-        assert got["results"][0]["snippet"] == f"<web_data>{main._UNSAFE_TEXT_PLACEHOLDER}</web_data>"
+        assert got["results"][0]["snippet"] == f"<web_data>{_UNSAFE_TEXT_PLACEHOLDER}</web_data>"
 
     def test_長い要約は囲みの中で切り詰める(self, search_tool):
         tool, _ = search_tool(
@@ -247,7 +245,7 @@ class Testツールと注意書きの一致:
         monkeypatch.setattr(main, "Agent", FakeAgent)
         monkeypatch.setattr(main, "load_models", lambda **_: [("bedrock", object())])
         monkeypatch.setattr(main, "_get_owner_sub", lambda context: OWNER_SUB)
-        monkeypatch.setattr(main, "_web_search", FakeWebSearch())
+        monkeypatch.setattr(agent_tools, "_web_search", FakeWebSearch())
 
         async def collect():
             return [
@@ -302,6 +300,6 @@ class Test検索のシステムプロンプト:
         assert "- <user_data>辛口の純米が好き</user_data>" in prompt
 
     def test_設定を省略したら今の状態に従う(self, monkeypatch):
-        monkeypatch.setattr(main, "_web_search", WebSearch("", None))
+        monkeypatch.setattr(agent_tools, "_web_search", WebSearch("", None))
 
         assert "# Web 検索（search_web）" not in _build_system_prompt([])

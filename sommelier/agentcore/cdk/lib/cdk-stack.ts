@@ -10,7 +10,7 @@ import { Construct } from 'constructs';
 /** エージェントに渡すテーブル名の環境変数名（読み取り権限を付与する対象） */
 const TABLE_ENV_NAMES = ['PURCHASE_TABLE_NAME', 'DRINKING_TABLE_NAME'] as const;
 
-/** エージェントが参照する各テーブルの GSI 名（main.py と一致させる） */
+/** エージェントが参照する各テーブルの GSI 名（エージェントの records.py と一致させる） */
 const OWNER_INDEX_NAME = 'owner-index';
 
 /**

@@ -4,18 +4,8 @@
  * 呼び先（Claude API / Bedrock）に依らない部分だけをここで見る。呼び先ごとの違い
  * （temperature の有無、キャッシュの印、tool の強制）は lambda/shared/__tests__/llm.test.ts。
  */
-import { describe, it, expect, vi } from 'vitest';
-
-vi.mock('@aws-sdk/client-s3', () => ({
-  S3Client: vi.fn(),
-  GetObjectCommand: vi.fn(),
-}));
-// モデルの呼び出し口（Claude API / Bedrock）は使わないので、SDK ごと読み込まない
-vi.mock('../../shared/llm', () => ({
-  createLlmClient: () => ({ callTool: vi.fn() }),
-}));
-
-import { buildLabelRequest } from '../index.js';
+import { describe, it, expect } from 'vitest';
+import { buildLabelRequest } from '../labelRequest.js';
 
 describe('buildLabelRequest', () => {
   const images = [

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import { listPurchaseRecords, listDrinkingRecords } from '@/graphql/queries';
 import type {
   PurchaseRecordType,
@@ -10,8 +10,6 @@ import type {
 import { fetchAllPages, PAGE_LIMIT } from '@/lib/pagination';
 import { pickSakeSpecs } from '@/features/specs/lib/sakeSpecs';
 import type { UnifiedRecord } from '../types';
-
-const client = generateClient();
 
 /** imageKey(単一) と imageKeys(複数) を統合して配列に正規化 */
 function normalizeImageKeys(imageKey: string | null, imageKeys: string[] | null): string[] {

@@ -8,12 +8,8 @@ vi.mock('@aws-sdk/client-s3', () => ({
   S3Client: vi.fn(),
   GetObjectCommand: vi.fn(),
 }));
-// モデルの呼び出し口（Claude API / Bedrock）は使わないので、SDK ごと読み込まない
-vi.mock('../../shared/llm', () => ({
-  createLlmClient: () => ({ callTool: vi.fn() }),
-}));
 
-import { validateImageKeyAccess } from '../index.js';
+import { validateImageKeyAccess } from '../imageStore.js';
 
 /**
  * **Validates: Requirements 2.5, 7.2, 7.3, 7.4**

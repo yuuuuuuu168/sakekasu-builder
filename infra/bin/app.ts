@@ -9,6 +9,7 @@ import { SiteDnsStack } from '../lib/site-dns-stack.js';
 import { SiteStack } from '../lib/site-stack.js';
 import { parseSharedAuth, sharedAuthRegion, type SharedAuth } from '../lib/shared-auth.js';
 import { parseAnthropicFederation } from '../lib/anthropic-federation.js';
+import { APP_ENVS, appNamePrefix, type AppEnv } from '../lib/resource-names.js';
 import { readFileSync } from 'node:fs';
 
 const app = new cdk.App();
@@ -87,18 +88,15 @@ function buildApplicationStacks(app: cdk.App): void {
   // 環境名をコンテキストパラメータから取得（デフォルト: dev）
   const envName = app.node.tryGetContext('env') as string | undefined;
 
-  const validEnvs = ['dev', 'staging', 'prod'] as const;
-  type EnvName = (typeof validEnvs)[number];
-
-  if (!envName || !validEnvs.includes(envName as EnvName)) {
+  if (!envName || !APP_ENVS.includes(envName as AppEnv)) {
     throw new Error(
-      `環境名が無効です: "${envName}"。有効な値: ${validEnvs.join(', ')}。` +
+      `環境名が無効です: "${envName}"。有効な値: ${APP_ENVS.join(', ')}。` +
       ' 使用例: cdk deploy --all -c env=dev'
     );
   }
 
-  const env: EnvName = envName as EnvName;
-  const prefix = `sakekasu-${env}`;
+  const env: AppEnv = envName as AppEnv;
+  const prefix = appNamePrefix(env);
 
   // デプロイ先の AWS 環境（リージョン固定）
   const cdkEnv: cdk.Environment = {

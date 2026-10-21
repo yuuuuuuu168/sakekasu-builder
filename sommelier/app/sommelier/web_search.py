@@ -12,11 +12,11 @@
   例外は投げない
 - 従量課金なので上限は呼び出し側の裁量に任せない。件数・検索の深さ・
   クエリ長・レスポンスサイズはこのモジュールが固定する
-  （1リクエストあたりの検索回数だけは main.py がリクエスト単位で数える）
+  （1リクエストあたりの検索回数だけは tools.py がリクエスト単位で数える）
 - 返すのは無害化していない生の文字列。URL だけは「そのまま出典として
   出せる形」でないと意味がないので、ここで検証してから返す。タイトルと
-  本文の無害化と <web_data> による囲みは呼び出し側（main.py）に任せる
-  （preference_memory.py と同じ線引き）
+  本文の無害化と <web_data> による囲みは呼び出し側（tools.py）に任せる
+  （conversation_memory.py と同じ線引き）
 - API キーは Secrets Manager に置き、初回の検索で1回だけ取得して
   メモリに保持する。起動時に取ることもできるが、検索しないリクエストにまで
   コールドスタートの遅さと失敗の可能性を持ち込む理由がない
@@ -36,7 +36,7 @@ from typing import Optional
 
 import boto3
 
-# preference_memory.py と同じ理由で "bedrock_agentcore.app" の子として作る
+# conversation_memory.py と同じ理由で "bedrock_agentcore.app" の子として作る
 log = logging.getLogger("bedrock_agentcore.app.web_search")
 
 # API キーを入れた Secrets Manager のシークレット名を渡す環境変数。
@@ -46,7 +46,7 @@ API_KEY_SECRET_ID_ENV_NAME = "TAVILY_API_KEY_SECRET_ID"
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 
 # 検索クエリの文字数上限。長文を投げても精度は上がらず費用だけ増える。
-# ここと下の件数を変えたら、main.py の search_web の説明文も直すこと
+# ここと下の件数を変えたら、tools.py の search_web の説明文も直すこと
 # （モデルに見えるのはツールの説明文のほうなので、ずれると無駄な指定が増える）
 MAX_QUERY_LENGTH = 200
 # 1回の検索で受け取る件数。既定と上限の両方をこちら側で決め、

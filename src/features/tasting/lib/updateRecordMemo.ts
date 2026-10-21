@@ -1,7 +1,5 @@
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import { updatePurchaseRecord } from '@/graphql/mutations';
-
-const client = generateClient();
 
 /**
  * 購入記録の備考だけを書き換える。

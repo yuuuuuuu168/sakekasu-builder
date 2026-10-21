@@ -1,9 +1,7 @@
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import { updatePurchaseRecord, updateDrinkingRecord } from '@/graphql/mutations';
 import type { RecordType } from '@/features/records/types';
 import { SPEC_FIELD_NAMES, type SakeSpecs } from '../types';
-
-const client = generateClient();
 
 /**
  * 記録の詳細スペックだけを書き換える。

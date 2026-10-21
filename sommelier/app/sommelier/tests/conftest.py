@@ -1,10 +1,10 @@
 """テスト用の環境変数を、main.py の読み込みより先に用意する。
 
-main.py は設定ミスを起動段階で落とす（フェイルクローズ）ため、
+main.py（が読み込む config.py）は設定ミスを起動段階で落とす（フェイルクローズ）ため、
 テーブル名と Cognito の設定が無いと import すらできない。
 値は形式が通れば何でもよく、テスト中に AWS へは一切アクセスしない。
 
-LOCAL_DEV は設定しない。main.py は LOCAL_DEV と COGNITO_* の同時設定を
+LOCAL_DEV は設定しない。config.py は LOCAL_DEV と COGNITO_* の同時設定を
 拒否するので、本番と同じ「Cognito 設定あり」の側で読み込む。
 """
 
@@ -21,7 +21,7 @@ os.environ.pop("MEMORY_PREFERENCE_ID", None)
 # Web 検索も同じ。シークレット名が設定されていると読み込み時に
 # Secrets Manager のクライアントを作ってしまう
 os.environ.pop("TAVILY_API_KEY_SECRET_ID", None)
-# 相談の回数の上限。main.py は名前が無いと起動を止めるので入れておく。
+# 相談の回数の上限。config.py は名前が無いと起動を止めるので入れておく。
 # 実際に数えるのは各テストで差し替える（下の fixture。AWS には行かない）
 os.environ.setdefault("CHAT_QUOTA_TABLE_NAME", "test-chat-quota")
 

@@ -7,13 +7,9 @@ import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { Runtime } from 'aws-cdk-lib/aws-lambda';
-import * as path from 'node:path';
-import * as url from 'node:url';
 import type { Construct } from 'constructs';
 import { lambdaLogGroup } from './log-retention.js';
-
-const here = path.dirname(url.fileURLToPath(import.meta.url));
+import { ESM_BUNDLING, LAMBDA_RUNTIME, lambdaEntry } from './lambda-defaults.js';
 
 export interface BillingNotifierStackProps extends cdk.StackProps {
   /** レポートで個別に表示するアカウント。先頭から順に表示される */
@@ -37,13 +33,6 @@ export class BillingNotifierStack extends cdk.Stack {
     const prefix = 'sakekasu-billing';
     const webhookParameterName = `/${prefix}/slack-webhook-url`;
 
-    const bundling = {
-      format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
-      mainFields: ['module', 'main'],
-      banner:
-        "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
-    };
-
     const webhookParameterArn =
       `arn:aws:ssm:${this.region}:${this.account}:parameter${webhookParameterName}`;
 
@@ -52,16 +41,16 @@ export class BillingNotifierStack extends cdk.Stack {
     const billingNotifierFunctionName = `${prefix}-notifier`;
     const billingNotifier = new NodejsFunction(this, 'BillingNotifierFunction', {
       functionName: billingNotifierFunctionName,
-      runtime: Runtime.NODEJS_22_X,
+      runtime: LAMBDA_RUNTIME,
       logGroup: lambdaLogGroup(this, 'BillingNotifierLogGroup', billingNotifierFunctionName),
-      entry: path.join(here, '../lambda/billing-notifier/index.ts'),
+      entry: lambdaEntry('billing-notifier'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(60),
       environment: {
         WEBHOOK_PARAMETER_NAME: webhookParameterName,
         TARGET_ACCOUNTS: JSON.stringify(props.targetAccounts),
       },
-      bundling,
+      bundling: ESM_BUNDLING,
     });
 
     // Cost Explorer はリソース単位の絞り込みに対応していないため * にする
@@ -99,15 +88,15 @@ export class BillingNotifierStack extends cdk.Stack {
     const slackNotifierFunctionName = `${prefix}-slack-notifier`;
     const slackNotifier = new NodejsFunction(this, 'SlackNotifierFunction', {
       functionName: slackNotifierFunctionName,
-      runtime: Runtime.NODEJS_22_X,
+      runtime: LAMBDA_RUNTIME,
       logGroup: lambdaLogGroup(this, 'SlackNotifierLogGroup', slackNotifierFunctionName),
-      entry: path.join(here, '../lambda/slack-notifier/index.ts'),
+      entry: lambdaEntry('slack-notifier'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(15),
       environment: {
         WEBHOOK_PARAMETER_NAME: webhookParameterName,
       },
-      bundling,
+      bundling: ESM_BUNDLING,
     });
     slackNotifier.addToRolePolicy(
       new iam.PolicyStatement({

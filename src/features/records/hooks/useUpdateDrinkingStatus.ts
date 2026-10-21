@@ -1,12 +1,10 @@
 import { useState } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import { updatePurchaseRecord } from '@/graphql/mutations';
 import type { DrinkingStatus } from '@/types/schema';
 import type { UnifiedRecord } from '../types';
 import { getRemainingBottles, planStatusChange } from '../lib/bottleCount';
 import { toast } from 'sonner';
-
-const client = generateClient();
 
 interface UseUpdateDrinkingStatusReturn {
   /**

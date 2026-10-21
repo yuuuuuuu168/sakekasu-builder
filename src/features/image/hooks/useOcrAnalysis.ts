@@ -1,10 +1,8 @@
 import { useState, useCallback } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { client } from '@/lib/graphqlClient';
 import { analyzeSakeLabel } from '@/graphql/mutations';
 import type { SakeCategory } from '@/types/sake';
 import type { SakeSpecs, SpecFieldName } from '@/features/specs/types';
-
-const client = generateClient();
 
 /**
  * 項目ごとの確信度（0.0〜1.0）。低確信の項目は「要確認」表示に使う。
