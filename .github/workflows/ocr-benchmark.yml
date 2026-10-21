@@ -69,6 +69,9 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sakekasu-cdkd-deploy
           aws-region: ap-northeast-1
           role-chaining: true
+          # cdkd のロールの信頼ポリシーは sts:TagSession を許していない。chaining では
+          # アクションが既定でセッションタグを付けようとして AccessDenied になる
+          role-skip-session-tagging: true
       - name: 比較を起動する
         run: |
           aws lambda invoke \
