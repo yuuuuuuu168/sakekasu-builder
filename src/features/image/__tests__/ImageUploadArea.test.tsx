@@ -164,6 +164,15 @@ describe('ImageUploadArea', () => {
       expect(screen.getByText('5/5枚')).toBeInTheDocument();
     });
 
+    // URL は取りに行った結果なので、取得中や失敗時は空になる。枚数は記録のキーの数で数える
+    it('画像の URL がまだ取れていなくても、登録済みの枚数で上限を見る', () => {
+      renderUploadArea({ existingImageUrls: [], existingCount: 5 });
+
+      expect(screen.queryByTestId('image-add-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('image-drop-zone')).not.toBeInTheDocument();
+      expect(screen.getByText('5/5枚')).toBeInTheDocument();
+    });
+
     // 削除・差し替えは別 Issue。誤って消せる導線を出さない
     it('登録済みの画像には削除ボタンを出さない', () => {
       renderUploadArea({ existingImageUrls: ['https://example.invalid/a.jpg'] });

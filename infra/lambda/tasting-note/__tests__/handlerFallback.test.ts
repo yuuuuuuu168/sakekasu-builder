@@ -54,6 +54,27 @@ describe('handler の Web 検索フォールバック', () => {
     vi.clearAllMocks();
   });
 
+  // 2 回呼ぶとそれぞれの上限の合計が Lambda の 25 秒を超えうるので、Lambda の残り時間から
+  // 決めた 1 つの締め切りを両方に渡す（2 回目は 1 回目と検索で使った分だけ短くなる）
+  it('2 回の呼び出しの両方に、Lambda の残り時間から決めた締め切りを渡す', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1_000_000);
+    mockSend
+      .mockResolvedValueOnce(modelResponse(UNKNOWN))
+      .mockResolvedValueOnce(modelResponse(KNOWN));
+    mockSearchSake.mockResolvedValueOnce([{ title: '蔵元', snippet: '華やかな吟醸香' }]);
+
+    await handler(event('聞いたことのない地酒', 'NIHONSHU'), {
+      getRemainingTimeInMillis: () => 25_000,
+    });
+
+    expect(mockSend).toHaveBeenCalledTimes(2);
+    // 返す分として 1 秒残す
+    expect(mockSend.mock.calls[0][1]).toEqual({ deadline: 1_024_000 });
+    expect(mockSend.mock.calls[1][1]).toEqual({ deadline: 1_024_000 });
+    vi.useRealTimers();
+  });
+
   it('学習知識で書けたら検索しない', async () => {
     mockSend.mockResolvedValueOnce(modelResponse(KNOWN));
 

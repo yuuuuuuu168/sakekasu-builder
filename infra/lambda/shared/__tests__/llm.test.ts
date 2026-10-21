@@ -239,6 +239,7 @@ describe('createLlmClient', () => {
       anthropicModelEnvName: 'ANTHROPIC_MODEL_TEST',
       defaultAnthropicModel: 'claude-haiku-5-5',
       anthropicTimeoutMs: 10_000,
+      bedrockTimeoutMs: 5_000,
     });
   }
 
@@ -269,6 +270,65 @@ describe('createLlmClient', () => {
           baseURL: 'https://api.anthropic.com',
         },
       },
+    });
+  });
+
+  it('Bedrock の呼び出しには待ち時間の上限を付ける', async () => {
+    mockCreate.mockRejectedValueOnce(
+      apiError(400, 'Your credit balance is too low to access the Anthropic API.'),
+    );
+    mockBedrockSend.mockResolvedValueOnce(bedrockResponse());
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+
+    await client().callTool(REQUEST);
+
+    expect(timeout).toHaveBeenCalledWith(5_000);
+    const [, sendOptions] = mockBedrockSend.mock.calls[0] as [unknown, { abortSignal?: AbortSignal }];
+    expect(sendOptions.abortSignal).toBe(timeout.mock.results[0].value);
+    timeout.mockRestore();
+  });
+
+  describe('Lambda の残り時間（deadline）', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('Claude API と Bedrock の待ち時間を、残り時間までに詰める', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(1_000_000);
+      mockCreate.mockRejectedValueOnce(
+        apiError(400, 'Your credit balance is too low to access the Anthropic API.'),
+      );
+      mockBedrockSend.mockResolvedValueOnce(bedrockResponse());
+      const timeout = vi.spyOn(AbortSignal, 'timeout');
+
+      // 残りは 3 秒。上限（Claude API 10 秒、Bedrock 5 秒）より短い
+      await client().callTool(REQUEST, { deadline: 1_003_000 });
+
+      expect(mockCreate.mock.calls[0][1]).toEqual({ timeout: 3_000 });
+      expect(timeout).toHaveBeenCalledWith(3_000);
+      timeout.mockRestore();
+    });
+
+    it('残り時間が上限より長ければ上限で切る', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(1_000_000);
+      mockCreate.mockResolvedValueOnce(anthropicMessage());
+
+      await client().callTool(REQUEST, { deadline: 1_060_000 });
+
+      expect(mockCreate.mock.calls[0][1]).toEqual({ timeout: 10_000 });
+    });
+
+    it('残り時間が尽きていれば呼ばずに失敗する', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(1_000_000);
+
+      await expect(client().callTool(REQUEST, { deadline: 999_000 })).rejects.toThrow(
+        'Lambda の残り時間が尽きた',
+      );
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockBedrockSend).not.toHaveBeenCalled();
     });
   });
 

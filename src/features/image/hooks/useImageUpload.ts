@@ -6,12 +6,11 @@ import { compressImage, createThumbnail } from '../utils/imageCompressor';
 import { toThumbnailFileName } from '../lib/thumbnailKey';
 import { isTemporaryKey } from '../lib/tempImageKey';
 import { copyRecordImages } from '../lib/copyRecordImages';
+import { MAX_IMAGES } from '../lib/imageLimits';
 import type { RecordType } from '@/types/sake';
 
 const client = generateClient();
 
-/** 1 つの記録に添付できる画像の上限（サーバー側の copyImages と揃える） */
-const MAX_IMAGES = 5;
 
 export interface UseImageUploadOptions {
   /**
@@ -92,6 +91,22 @@ export function useImageUpload(
    */
   const selectedCountRef = useRef(0);
 
+  /**
+   * 圧縮は 1 枚ずつ順に行う（前の圧縮が終わってから次に取りかかる）。
+   *
+   * 複数ファイルを一度に選ぶと、ファイル選択もドラッグ＆ドロップも 1 枚ずつ
+   * この hook を呼ぶ。並行に走らせると、終わった順に並ぶので選んだ順にならない
+   */
+  const compressionQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  /**
+   * 圧縮を待っている・圧縮中の枚数。
+   *
+   * isCompressing を真偽値で上げ下げすると、最初の 1 枚が終わった時点で下がり、
+   * 残りの圧縮中でも追加・削除・OCR のボタンが押せてしまう
+   */
+  const compressingCountRef = useRef(0);
+
   const beginUpload = () => {
     uploadingRef.current = true;
     setIsUploading(true);
@@ -150,27 +165,35 @@ export function useImageUpload(
     selectedCountRef.current += 1;
 
     // 長辺の正規化と 5MB 超の圧縮（必要ない画像はそのまま返る）
+    compressingCountRef.current += 1;
     setIsCompressing(true);
-    try {
-      const result = await compressImage(file);
-      // 読めなかった画像はそのまま保存される。縮小もサムネイルも無い状態を
-      // 選んだ時点で伝えないと、一覧が重くなった理由を後から辿れない
-      setImageFiles((prev) => [...prev, result.file]);
-      setFileWarnings((prev) => [
-        ...prev,
-        result.wasReadable ? null : UNREADABLE_WARNING,
-      ]);
-    } catch (err) {
-      // 追加できなかったので枠を返す
-      selectedCountRef.current -= 1;
-      const message =
-        err instanceof Error
-          ? err.message
-          : '画像の圧縮に失敗しました。5MB以下の画像を選択してください';
-      setError(message);
-    } finally {
-      setIsCompressing(false);
-    }
+    const compressOne = async () => {
+      try {
+        const result = await compressImage(file);
+        // 読めなかった画像はそのまま保存される。縮小もサムネイルも無い状態を
+        // 選んだ時点で伝えないと、一覧が重くなった理由を後から辿れない
+        setImageFiles((prev) => [...prev, result.file]);
+        setFileWarnings((prev) => [
+          ...prev,
+          result.wasReadable ? null : UNREADABLE_WARNING,
+        ]);
+      } catch (err) {
+        // 追加できなかったので枠を返す
+        selectedCountRef.current -= 1;
+        const message =
+          err instanceof Error
+            ? err.message
+            : '画像の圧縮に失敗しました。5MB以下の画像を選択してください';
+        setError(message);
+      } finally {
+        compressingCountRef.current -= 1;
+        if (compressingCountRef.current === 0) setIsCompressing(false);
+      }
+    };
+    // compressOne は例外を外へ出さないので、列が途中で止まることはない
+    const done = compressionQueueRef.current.then(compressOne);
+    compressionQueueRef.current = done;
+    await done;
   }, [selectableCount, alreadyAttached]);
 
   const removeImage = useCallback(

@@ -6,6 +6,7 @@ import {
   type FieldConfidence,
   type SpecFields,
 } from './extractLabelInfo.js';
+import { deadlineFrom, type RemainingTime } from '../shared/deadline';
 import { createLlmClient, type ToolRequest } from '../shared/llm';
 import { assertOwnedKey, requireOwnerSub, type AppSyncIdentity } from '../shared/owner';
 import { DEFAULT_ANTHROPIC_MODEL_OCR } from '../../lib/llm-constants';
@@ -26,6 +27,8 @@ const llm = createLlmClient({
   anthropicModelEnvName: 'ANTHROPIC_MODEL_OCR',
   defaultAnthropicModel: DEFAULT_ANTHROPIC_MODEL_OCR,
   anthropicTimeoutMs: 14_000,
+  // 1 回あたりの上限。実際には Lambda の残り時間（handler の deadline）でさらに詰める
+  bedrockTimeoutMs: 14_000,
 });
 
 interface AppSyncEvent {
@@ -553,7 +556,9 @@ export function buildLabelRequest(images: { base64: string; mediaType: string }[
   };
 }
 
-export async function handler(event: AppSyncEvent): Promise<OcrResult> {
+export async function handler(event: AppSyncEvent, context?: RemainingTime): Promise<OcrResult> {
+  // S3 の取得に時間を取られた分は、モデルの待ち時間から詰める（lambda/shared/llm.ts の CallOptions）
+  const deadline = deadlineFrom(context);
   const { imageKey, additionalImageKeys } = event.arguments;
   const sub = requireOwnerSub(event);
 
@@ -618,7 +623,7 @@ export async function handler(event: AppSyncEvent): Promise<OcrResult> {
   let toolInput: unknown = null;
   let provider: string | undefined;
   try {
-    const response = await llm.callTool(buildLabelRequest(images));
+    const response = await llm.callTool(buildLabelRequest(images), { deadline });
     provider = response.provider;
     // tool_choice で強制しているため通常は必ず tool_use ブロックが1つある。
     // max_tokens 到達などで欠けた場合は toolInput が null のまま → 未検出扱い。
