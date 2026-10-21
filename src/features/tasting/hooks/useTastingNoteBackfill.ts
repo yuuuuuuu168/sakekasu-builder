@@ -1,6 +1,11 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { UnifiedRecord } from '@/features/records/types';
 import { useAuth } from '@/features/auth/AuthContext';
+import {
+  useSequentialBackfill,
+  type BackfillItemOutcome,
+  type BackfillProgress,
+} from '@/lib/useSequentialBackfill';
 import {
   loadSkippedKeys,
   saveSkippedKeys,
@@ -15,16 +20,7 @@ import {
   type NotableCategory,
 } from '@/features/tasting/lib/tastingNoteMemo';
 
-export interface BackfillProgress {
-  /** 処理し終えた件数（書けたかどうかによらず進む） */
-  done: number;
-  /** 対象の総数 */
-  total: number;
-  /** 実際に備考へ書き足せた件数 */
-  written: number;
-  /** ノートを起こせなかった・保存できなかった件数 */
-  skipped: number;
-}
+export type { BackfillProgress };
 
 export interface UseTastingNoteBackfillReturn {
   /** まだノートの無いウイスキー・日本酒の購入記録（前回書けなかったものを除く） */
@@ -36,8 +32,6 @@ export interface UseTastingNoteBackfillReturn {
   isRunning: boolean;
   progress: BackfillProgress;
 }
-
-const IDLE_PROGRESS: BackfillProgress = { done: 0, total: 0, written: 0, skipped: 0 };
 
 /**
  * 機能追加より前に登録した記録へ、テイスティングノートをまとめて書き足す。
@@ -57,12 +51,10 @@ export function useTastingNoteBackfill(
   records: UnifiedRecord[],
   onMemoUpdated: (id: string, memo: string) => void,
 ): UseTastingNoteBackfillReturn {
-  const [isRunning, setIsRunning] = useState(false);
-  const [progress, setProgress] = useState<BackfillProgress>(IDLE_PROGRESS);
+  // skippedRevision は「書けなかった記録」を読み直す合図。控えを書き換えるたびに増える
+  const { isRunning, progress, skippedRevision, runQueue } = useSequentialBackfill();
   const { user } = useAuth();
   const userId = user?.userId ?? '';
-  // 「書けなかった記録」を読み直す合図。実行のたびに増やす
-  const [skippedRevision, setSkippedRevision] = useState(0);
 
   const skippedKeys = useMemo(
     () => new Set(loadSkippedKeys(userId)),
@@ -86,57 +78,42 @@ export function useTastingNoteBackfill(
     );
     // 今回書けなかった記録。次回の対象から外すために控える
     const failedKeys: string[] = [];
-    const result: BackfillProgress = { done: 0, total: queue.length, written: 0, skipped: 0 };
 
-    setIsRunning(true);
-    setProgress({ ...result });
-
-    try {
-      for (const record of queue) {
-        // selectTastingNoteTargets で絞ってあるが、型を狭めるために見る
-        if (!supportsTastingNote(record.category)) {
-          continue;
-        }
-        const category: NotableCategory = record.category;
-        const note = await requestTastingNote(record.sakeName.trim(), category);
-        if (note === null) {
-          // 呼び出し自体の失敗。やり直せば結果が変わりうるので控えない
-          result.skipped += 1;
-          result.done += 1;
-          setProgress({ ...result });
-          continue;
-        }
-        const memo = appendTastingNoteToMemo(record.memo ?? '', note);
-
-        // 知らない銘柄では memo が変わらない。無駄な更新は投げない
-        if (memo !== (record.memo ?? '')) {
-          const saved = await updateRecordMemo(record.id, memo);
-          if (saved) {
-            result.written += 1;
-            onMemoUpdated(record.id, memo);
-          } else {
-            // 保存の失敗は一時的なものかもしれないので、対象から外さない
-            result.skipped += 1;
-          }
-        } else {
-          // ノートを起こせなかった記録。同じ銘柄名なら次も同じ結果になるので控える
-          result.skipped += 1;
-          failedKeys.push(skipKey(record.id, record.sakeName));
-        }
-
-        result.done += 1;
-        setProgress({ ...result });
+    const processRecord = async (record: UnifiedRecord): Promise<BackfillItemOutcome> => {
+      // selectTastingNoteTargets で絞ってあるが、型を狭めるために見る
+      if (!supportsTastingNote(record.category)) {
+        return 'ignored';
       }
-    } finally {
-      if (failedKeys.length > 0) {
-        saveSkippedKeys(userId, failedKeys);
-        setSkippedRevision((prev) => prev + 1);
+      const category: NotableCategory = record.category;
+      const note = await requestTastingNote(record.sakeName.trim(), category);
+      if (note === null) {
+        // 呼び出し自体の失敗。やり直せば結果が変わりうるので控えない
+        return 'skipped';
       }
-      setIsRunning(false);
-    }
+      const memo = appendTastingNoteToMemo(record.memo ?? '', note);
 
-    return result;
-  }, [records, onMemoUpdated, userId]);
+      // 知らない銘柄では memo が変わらない。無駄な更新は投げない
+      if (memo === (record.memo ?? '')) {
+        // ノートを起こせなかった記録。同じ銘柄名なら次も同じ結果になるので控える
+        failedKeys.push(skipKey(record.id, record.sakeName));
+        return 'skipped';
+      }
+
+      const saved = await updateRecordMemo(record.id, memo);
+      if (!saved) {
+        // 保存の失敗は一時的なものかもしれないので、対象から外さない
+        return 'skipped';
+      }
+      onMemoUpdated(record.id, memo);
+      return 'written';
+    };
+
+    return runQueue(queue, processRecord, () => {
+      if (failedKeys.length === 0) return false;
+      saveSkippedKeys(userId, failedKeys);
+      return true;
+    });
+  }, [records, onMemoUpdated, userId, runQueue]);
 
   return { targets, skippedCount, run, isRunning, progress };
 }
