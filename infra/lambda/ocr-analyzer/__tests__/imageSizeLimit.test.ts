@@ -2,17 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// AWS SDK モジュールをモックして import エラーを回避
-vi.mock('@aws-sdk/client-s3', () => ({
-  S3Client: vi.fn(),
-  GetObjectCommand: vi.fn(),
-}));
-// モデルの呼び出し口（Claude API / Bedrock）は使わないので、SDK ごと読み込まない
-vi.mock('../../shared/llm', () => ({
-  createLlmClient: () => ({ callTool: vi.fn() }),
-}));
-
-import { assertImagesFitBedrockLimit } from '../index.js';
+import { assertImagesFitBedrockLimit } from '../imageValidation.js';
 
 /** Bedrock 側の上限（base64 エンコード後） */
 const LIMIT = 5 * 1024 * 1024;
