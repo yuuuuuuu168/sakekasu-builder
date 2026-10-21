@@ -765,51 +765,6 @@ export class ApiStack extends cdk.Stack {
       fieldName: 'generateTastingNote',
     });
 
-    // OCR のモデル比較（lambda/ocr-benchmark、docs/ocr-benchmark.md）。
-    //
-    // 手動でだけ起動する（ocr-benchmark.yml か、コンソール・CLI からの invoke）。AppSync には
-    // つながない。保存済みの記録と画像を読み、本番の OCR と同じ頼み方で複数のモデルに読ませる。
-    // Bedrock へのやり直しはしないので、Bedrock の権限は渡さない
-    const ocrBenchmarkFunctionName = `sakekasu-builder-${props.envName}-ocr-benchmark`;
-    const ocrBenchmarkFunction = new NodejsFunction(this, 'OcrBenchmarkFunction', {
-      functionName: ocrBenchmarkFunctionName,
-      runtime: Runtime.NODEJS_22_X,
-      logGroup: lambdaLogGroup(this, 'OcrBenchmarkLogGroup', ocrBenchmarkFunctionName),
-      // Claude Console のルールがロールの ARN の前方一致で照合するため、名前を固定する
-      role: this.llmExecutionRole('OcrBenchmarkRole', `${llmRoleNamePrefix(props.envName)}ocr-benchmark`),
-      entry: path.join(
-        path.dirname(url.fileURLToPath(import.meta.url)),
-        '../lambda/ocr-benchmark/index.ts',
-      ),
-      handler: 'handler',
-      // 1 回で 30 件 × 4 モデルほどを回す。Fable は 1 回に数十秒かかることがある
-      timeout: cdk.Duration.minutes(15),
-      // 記録ごとの画像（最大 3 枚・各 4MB 弱）を並行して持つ
-      memorySize: 1024,
-      architecture: Architecture.X86_64,
-      // 同時に 1 つだけ。2 回続けて起動しても、2 つ目は 1 つ目が終わるまで待つ
-      reservedConcurrentExecutions: 1,
-      // 非同期の起動で失敗しても自動でやり直さない。やり直すとクレジットを二重に使う
-      retryAttempts: 0,
-      environment: {
-        BUCKET_NAME: this.imageBucket.bucketName,
-        PURCHASE_TABLE_NAME: this.purchaseTable.tableName,
-        DRINKING_TABLE_NAME: this.drinkingTable.tableName,
-        // readLlmConfig が要求する。比較では Bedrock を呼ばない
-        BEDROCK_MODEL_ID,
-        ...anthropicFederationEnvironment(props.anthropicFederation),
-      },
-      bundling: {
-        format: cdk.aws_lambda_nodejs.OutputFormat.ESM,
-        mainFields: ['module', 'main'],
-        banner: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
-      },
-    });
-    this.imageBucket.grantRead(ocrBenchmarkFunction);
-    this.purchaseTable.grantReadData(ocrBenchmarkFunction);
-    this.drinkingTable.grantReadData(ocrBenchmarkFunction);
-    this.grantClaudeApiAccess(ocrBenchmarkFunction, props.anthropicFederation);
-
     // リゾルバーを登録
     addRecordResolvers(this, this.graphqlApi, this.purchaseDataSource, 'PurchaseRecord', presignedUrlDataSource);
     addRecordResolvers(this, this.graphqlApi, this.drinkingDataSource, 'DrinkingRecord', presignedUrlDataSource);

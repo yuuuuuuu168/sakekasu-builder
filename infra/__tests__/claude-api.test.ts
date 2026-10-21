@@ -103,58 +103,7 @@ describe('Claude を呼ぶ Lambda の実行ロール', () => {
     const roleNames = Object.values(template.findResources('AWS::IAM::Role'))
       .map((role) => (role as { Properties: { RoleName?: string } }).Properties.RoleName)
       .filter((name): name is string => typeof name === 'string' && name.includes('-llm-'));
-    expect(roleNames.sort()).toEqual(
-      [...LLM_FUNCTIONS.map((f) => f.roleName), OCR_BENCHMARK.roleName].sort(),
-    );
-  });
-});
-
-/** OCR のモデル比較。Claude API だけを呼び、Bedrock へはやり直さない */
-const OCR_BENCHMARK = {
-  functionName: 'sakekasu-builder-dev-ocr-benchmark',
-  roleName: 'sakekasu-dev-llm-ocr-benchmark',
-} as const;
-
-describe('OCR のモデル比較', () => {
-  const template = apiTemplate(FEDERATION);
-  const fn = functionNamed(template, OCR_BENCHMARK.functionName);
-  const roleLogicalId = fn.Properties.Role['Fn::GetAtt'][0];
-  const statements = statementsOfRole(template, roleLogicalId);
-
-  it('ロール名を固定し、Permissions Boundary を付ける', () => {
-    const role = template.findResources('AWS::IAM::Role')[roleLogicalId] as {
-      Properties: { RoleName: string; PermissionsBoundary?: unknown };
-    };
-    expect(role.Properties.RoleName).toBe(OCR_BENCHMARK.roleName);
-    expect(role.Properties.PermissionsBoundary).toBeDefined();
-  });
-
-  it('ID 連携の値を受け取り、Anthropic 宛ての ID トークンだけを取れる', () => {
-    expect(fn.Properties.Environment.Variables).toMatchObject({
-      ANTHROPIC_FEDERATION_RULE_ID: FEDERATION.ruleId,
-      ANTHROPIC_SERVICE_ACCOUNT_ID: FEDERATION.serviceAccountId,
-    });
-    const sts = statements.filter((s) => s.Action === 'sts:GetWebIdentityToken');
-    expect(sts).toHaveLength(1);
-    expect(sts[0]).toMatchObject({
-      Condition: { 'ForAllValues:StringEquals': { 'sts:IdentityTokenAudience': ['https://api.anthropic.com'] } },
-    });
-  });
-
-  it('Bedrock は呼べず、記録と画像は読むだけ', () => {
-    const actions = statements.flatMap((s) => [s.Action].flat() as string[]);
-    expect(actions.some((a) => a.startsWith('bedrock:'))).toBe(false);
-    expect(actions.filter((a) => /^(s3|dynamodb):/.test(a)).every((a) => /:(Get|List|Scan|Query|Batch(Get)|Describe|ConditionCheck)/.test(a))).toBe(true);
-  });
-
-  it('非同期の起動で失敗しても自動でやり直さない', () => {
-    const configs = Object.values(template.findResources('AWS::Lambda::EventInvokeConfig')) as {
-      Properties: { FunctionName: { Ref: string }; MaximumRetryAttempts: number };
-    }[];
-    const logicalId = Object.entries(template.findResources('AWS::Lambda::Function')).find(
-      ([, f]) => (f as { Properties: { FunctionName?: string } }).Properties.FunctionName === OCR_BENCHMARK.functionName,
-    )?.[0];
-    expect(configs.find((c) => c.Properties.FunctionName.Ref === logicalId)?.Properties.MaximumRetryAttempts).toBe(0);
+    expect(roleNames.sort()).toEqual(LLM_FUNCTIONS.map((f) => f.roleName).sort());
   });
 });
 
