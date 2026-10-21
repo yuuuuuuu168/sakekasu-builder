@@ -399,7 +399,7 @@ period-based は「期間ごとに good / bad を判定して、good な期間�
 
 ### SLO を割ったときのアラーム
 
-`sakekasu-builder-dev-ocr-slo-availability` と `sakekasu-builder-dev-ocr-slo-latency` の2つ。共通基盤の SNS（`sakekasu-integrated-alerts`）に繋いである（2026-10 までは builder の `dev-sakekasu-alerts`）。monitoring スタック側に置いているのは、ApiStack に置くと通知先の SNS を参照して循環参照になるため。
+関数ごとに可用性とレイテンシーの 2 つずつで、計 4 つ（`sakekasu-builder-dev-{ocr,presigned-url}-slo-{availability,latency}`）。共通基盤の SNS（`sakekasu-integrated-alerts`）に繋いである（2026-10 までは builder の `dev-sakekasu-alerts`）。monitoring スタック側に置いているのは、ApiStack に置くと通知先の SNS を参照して循環参照になるため。
 
 **バーンレートではなく達成率（`AttainmentRate`）を見ている。** バーンレートは「エラー率 ÷ (100% − 目標)」なので、日に数回の規模だと1回の失敗で 3.3 まで跳ねる。必ず鳴る形は「30日で9回まで許容する」という budget の設計と噛み合わない。達成率なら30日の成功率そのものなので、失敗が積み上がったときだけ 90 を割る。
 
