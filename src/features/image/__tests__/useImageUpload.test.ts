@@ -103,6 +103,40 @@ describe('useImageUpload - uploadImages', () => {
     expect(result.current.warning).toBeNull();
   });
 
+  // 途中で失敗したときに上げ終えた分のキーを捨てると、再試行で全部を上げ直し、
+  // 前回上げた分が誰からも参照されない実体として S3 に残る
+  it('途中で失敗しても、上げ終えた分は再試行で上げ直さない', async () => {
+    mockUploadUrl('key-0');
+    // 2 枚目の原画で署名済み URL がもらえない
+    mockGraphql.mockResolvedValueOnce({ errors: [{ message: 'boom' }] });
+
+    const { result } = renderHook(() => useImageUpload());
+    for (const name of ['a.jpg', 'b.jpg', 'c.jpg']) {
+      await act(async () => {
+        await result.current.handleImageSelect(makeFile(name));
+      });
+    }
+
+    let keys: string[] = [];
+    await act(async () => {
+      keys = await result.current.uploadImages('purchase', 'rec-1');
+    });
+    expect(keys).toEqual([]);
+    expect(result.current.error).toContain('アップロードに失敗');
+    expect(result.current.imageKeys).toEqual(['key-0', '', '']);
+
+    // 再試行では 2 枚目と 3 枚目だけを上げる
+    mockGraphql.mockClear();
+    mockUploadUrl('key-1');
+    mockUploadUrl('key-2');
+    await act(async () => {
+      keys = await result.current.uploadImages('purchase', 'rec-2');
+    });
+
+    expect(keys).toEqual(['key-0', 'key-1', 'key-2']);
+    expect(mockGraphql).toHaveBeenCalledTimes(4);
+  });
+
   it('OCR 事前アップロード済みの 1 枚目は再利用し、残りだけアップロードする（バグ再発防止）', async () => {
     // preUploadImages 用
     mockUploadUrl('ocr-pre-0');
