@@ -338,36 +338,43 @@ export function useImageUpload(
     return key;
   };
 
+  /**
+   * まだキーの無い画像だけを上げ、全画像分のキーを返す。1 枚でも失敗したら null。
+   *
+   * 途中で失敗しても、上げ終えた分のキーは state に残す。残さないと再試行で全部を
+   * 上げ直し、前回上げた分が誰からも参照されない実体として S3 に残る（記録のキーの
+   * 場所は一時領域ではないので、ライフサイクルでも消えない）
+   */
+  const uploadMissing = async (
+    recordType: RecordType,
+    recordId: string,
+    temporary: boolean,
+  ): Promise<string[] | null> => {
+    // OCR の事前アップロードなどで既にキーがある画像は再利用する
+    const keys = imageFiles.map((_, i) => imageKeys[i] ?? '');
+    try {
+      for (let i = 0; i < imageFiles.length; i++) {
+        if (keys[i]) continue;
+        const key = await uploadSingleFile(imageFiles[i], recordType, recordId, i, temporary);
+        if (key === null) return null;
+        keys[i] = key;
+      }
+      return keys;
+    } finally {
+      setImageKeys([...keys]);
+    }
+  };
+
   const uploadImages = useCallback(
     async (recordType: RecordType, recordId: string): Promise<string[]> => {
       if (imageFiles.length === 0) return [];
 
-      // 全ファイル分のキーが揃っているか（OCR の事前アップロード済みなど）
-      const allUploaded =
-        imageKeys.length === imageFiles.length && imageKeys.every((k) => k);
-
       beginUpload();
       try {
-        let keys: string[];
-
-        if (allUploaded) {
-          keys = imageKeys;
-        } else {
-          keys = [];
-          for (let i = 0; i < imageFiles.length; i++) {
-            // OCR 事前アップロード等で既に key がある場合は再利用
-            const existing = imageKeys[i];
-            if (existing) {
-              keys.push(existing);
-              continue;
-            }
-            const key = await uploadSingleFile(imageFiles[i], recordType, recordId, i);
-            if (key === null) {
-              setError('画像のアップロードに失敗しました。もう一度お試しください');
-              return [];
-            }
-            keys.push(key);
-          }
+        const keys = await uploadMissing(recordType, recordId, false);
+        if (keys === null) {
+          setError('画像のアップロードに失敗しました。もう一度お試しください');
+          return [];
         }
 
         // 一時領域のキーは記録に持たせられない。ライフサイクルで実体が消えて
@@ -415,29 +422,11 @@ export function useImageUpload(
 
       beginUpload();
       try {
-        const tempRecordId = crypto.randomUUID();
-        const keys: string[] = [];
-        for (let i = 0; i < imageFiles.length; i++) {
-          // 既にアップロード済みのキーは再利用
-          const existing = imageKeys[i];
-          if (existing) {
-            keys.push(existing);
-            continue;
-          }
-          const key = await uploadSingleFile(
-            imageFiles[i],
-            recordType,
-            tempRecordId,
-            i,
-            true,
-          );
-          if (key === null) {
-            setError('画像のアップロードに失敗しました。もう一度お試しください');
-            return [];
-          }
-          keys.push(key);
+        const keys = await uploadMissing(recordType, crypto.randomUUID(), true);
+        if (keys === null) {
+          setError('画像のアップロードに失敗しました。もう一度お試しください');
+          return [];
         }
-        setImageKeys(keys);
         return keys;
       } catch (err) {
         console.error('Image pre-upload failed:', err);
