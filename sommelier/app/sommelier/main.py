@@ -1187,7 +1187,7 @@ async def invoke(payload, context):
     # 利用者には同じ答えが二重に届く。途中で切れたものは従来どおり失敗として終える。
     # 記録を引く tool は読み取り専用なので、やり直しで 2 回呼ばれても害は無い。
     # 検索の回数の上限は tools ごとに数えているので、やり直しをまたいでも増えない
-    models = load_models()
+    models = load_models(on_unavailable=lambda provider, err: _log_fallback(provider, "credentials", err))
     for attempt, (provider, model) in enumerate(models):
         agent = Agent(
             model=model,

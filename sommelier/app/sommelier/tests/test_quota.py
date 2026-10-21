@@ -62,6 +62,12 @@ def test_subはそのまま保存せずハッシュにする(table):
     assert len(key) == 64
 
 
+def test_テーブル名の前後の空白は落として使う(table, monkeypatch):
+    monkeypatch.setenv("CHAT_QUOTA_TABLE_NAME", " test-quota\n")
+    assert quota.consume("user-1", datetime(2026, 10, 11, tzinfo=JST)) is QuotaResult.OK
+    assert table.calls[0]["TableName"] == "test-quota"
+
+
 def test_数えられないときはUNAVAILABLE(monkeypatch):
     fake = FakeDynamo(fail_with=ClientError({"Error": {"Code": "ResourceNotFoundException"}}, "UpdateItem"))
     monkeypatch.setenv("CHAT_QUOTA_TABLE_NAME", "test-quota")
@@ -119,7 +125,7 @@ def test_上限に達したか数えられないときはモデルを呼ばな�
     monkeypatch.setattr(main, "consume_quota", lambda sub: result)
     monkeypatch.setattr(main, "daily_limit", lambda: 50)
 
-    def no_models():
+    def no_models(**_):
         raise AssertionError("モデルを呼んではいけない")
 
     monkeypatch.setattr(main, "load_models", no_models)
