@@ -12,13 +12,10 @@ from decimal import Decimal
 
 import pytest
 
-import main
-from main import (
-    MAX_MEMO_LENGTH,
-    MAX_QUERY_PAGES,
-    MAX_TEXT_FIELD_LENGTH,
-    _build_tools,
-)
+import records
+from records import MAX_MEMO_LENGTH, MAX_QUERY_PAGES, MAX_TEXT_FIELD_LENGTH
+from sanitize import _UNSAFE_TEXT_PLACEHOLDER
+from tools import _build_tools
 
 OWNER_SUB = "7a1b2c3d-4e5f-6789-abcd-ef0123456789"
 
@@ -50,8 +47,8 @@ def tables(monkeypatch):
     def _setup(purchase=None, drinking=None, owner_sub=OWNER_SUB):
         purchase = purchase or FakeTable()
         drinking = drinking or FakeTable()
-        monkeypatch.setattr(main, "_purchase_table", purchase)
-        monkeypatch.setattr(main, "_drinking_table", drinking)
+        monkeypatch.setattr(records, "_purchase_table", purchase)
+        monkeypatch.setattr(records, "_drinking_table", drinking)
         tools = {t.tool_name: t for t in _build_tools(owner_sub, search_enabled=False)}
         return tools, purchase, drinking
 
@@ -103,7 +100,7 @@ class Test本人の記録だけを引く:
     def test_ツールはsubごとに作り直す(self, monkeypatch):
         # sub はクロージャに固定しているので、別の利用者のツールが混線しない
         table = FakeTable()
-        monkeypatch.setattr(main, "_purchase_table", table)
+        monkeypatch.setattr(records, "_purchase_table", table)
         tool_a = next(t for t in _build_tools("user-a", search_enabled=False) if t.tool_name == "list_my_purchase_records")
         tool_b = next(t for t in _build_tools("user-b", search_enabled=False) if t.tool_name == "list_my_purchase_records")
 
@@ -314,6 +311,6 @@ class Test記録の整形:
 
         got = tools["list_my_purchase_records"]()[0]
 
-        assert got["memo"] == f"<user_data>{main._UNSAFE_TEXT_PLACEHOLDER}</user_data>"
+        assert got["memo"] == f"<user_data>{_UNSAFE_TEXT_PLACEHOLDER}</user_data>"
         # 差し替えは該当の列だけ。ほかの列は残す
         assert got["sakeName"] == "<user_data>獺祭</user_data>"

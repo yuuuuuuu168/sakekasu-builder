@@ -11,8 +11,8 @@ import base64
 
 import pytest
 
-import main
-from main import (
+import images
+from images import (
     MAX_IMAGE_BASE64_LENGTH,
     MAX_IMAGE_BYTES,
     MAX_IMAGES,
@@ -177,7 +177,7 @@ class Test大きさの上限:
         # （上限ちょうどの 2 枚に、ごく小さい 1 枚を足す）
         big = JPEG + b"\x00" * (MAX_IMAGE_BYTES - len(JPEG))
         items = [image(big), image(big), image(b"\xff\xd8\xff")]
-        assert sum(len(i["data"]) for i in items) <= main.MAX_TOTAL_IMAGE_BASE64_LENGTH
+        assert sum(len(i["data"]) for i in items) <= images.MAX_TOTAL_IMAGE_BASE64_LENGTH
         assert len(big) * 2 + 3 > MAX_TOTAL_IMAGE_BYTES
 
         assert _build_image_blocks(items) == ([], self.total_too_large)

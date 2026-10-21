@@ -186,7 +186,7 @@ def load_anthropic_model(config: LlmConfig, region: str) -> AnthropicModel:
 
     - SDK の再試行はしない。失敗したら Bedrock でやり直すほうが速い
     - プロンプトキャッシュを効かせる。tool の定義と、システムプロンプトのうち毎回同じ部分
-      （main.py が cachePoint で区切る）。1 回の相談の中でも、記録を引く tool を挟むたびに
+      （prompt.py が cachePoint で区切る）。1 回の相談の中でも、記録を引く tool を挟むたびに
       同じ前置きでモデルを呼び直すので、相談 1 回の中でも読み直しが安くなる
     - temperature は渡さない。今の世代は既定値以外を 400 で弾く
     """
