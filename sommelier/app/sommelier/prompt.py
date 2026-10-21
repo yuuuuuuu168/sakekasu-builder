@@ -1,9 +1,10 @@
 """システムプロンプトの本文と、相談ごとに差し込む節の組み立て。"""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Optional
 
 import tools
+from config import JST
 from conversation_memory import MAX_PREFERENCE_TEXT_LENGTH
 from sanitize import _flatten_whitespace, _neutralize_text
 
@@ -93,8 +94,8 @@ NOT_STARTED（未開封）, IN_PROGRESS（飲み中）, FINISHED（飲みきり�
 # 答える。新酒・今年の受賞歴・相場のように年が効く話題では必ず外れる。
 #
 # 入れるのは日付だけで、時刻は入れない。時刻まで入れるとシステムプロンプトが
-# リクエストごとに変わり、プロンプトキャッシュが毎回無効になる
-_JST = timezone(timedelta(hours=9))
+# リクエストごとに変わり、プロンプトキャッシュが毎回無効になる。
+# 日付は日本時間（config.py の JST）で決める
 
 _DATE_PROMPT_TEMPLATE = """
 # 今日の日付
@@ -148,7 +149,7 @@ _PREFERENCE_PROMPT_HEADER = """
 def _today_section(today=None) -> str:
     """今日の日付の節を組み立てる（日本時間）。"""
     if today is None:
-        today = datetime.now(_JST)
+        today = datetime.now(JST)
     return _DATE_PROMPT_TEMPLATE.format(
         year=today.year, month=today.month, day=today.day
     )

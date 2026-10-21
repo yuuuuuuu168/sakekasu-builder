@@ -1,6 +1,7 @@
 """相談の回数の上限（quota.py）と、上限に達したときの invoke の振る舞い。"""
 
 import asyncio
+import logging
 from datetime import datetime
 
 import pytest
@@ -73,6 +74,25 @@ def test_数えられないときはUNAVAILABLE(monkeypatch):
     monkeypatch.setenv("CHAT_QUOTA_TABLE_NAME", "test-quota")
     monkeypatch.setattr(quota, "_ddb", fake)
     assert quota.consume("user-1") is QuotaResult.UNAVAILABLE
+
+
+def test_数えられないときのログはアプリのロガーに流す(monkeypatch):
+    # BedrockAgentCoreApp が handler を付けるのは "bedrock_agentcore.app" だけなので、
+    # その子でないと CloudWatch に体裁の揃った形で出ない（root に流れて INFO も消える）
+    fake = FakeDynamo(fail_with=ClientError({"Error": {"Code": "ResourceNotFoundException"}}, "UpdateItem"))
+    monkeypatch.setenv("CHAT_QUOTA_TABLE_NAME", "test-quota")
+    monkeypatch.setattr(quota, "_ddb", fake)
+    captured = []
+    handler = logging.Handler()
+    handler.emit = captured.append
+    app_logger = logging.getLogger("bedrock_agentcore.app")
+    app_logger.addHandler(handler)
+    try:
+        quota.consume("user-1")
+    finally:
+        app_logger.removeHandler(handler)
+
+    assert [r.getMessage() for r in captured] == ["利用回数を記録できませんでした"]
 
 
 def test_テーブル名が無ければ数えない_手元の確認用(monkeypatch):

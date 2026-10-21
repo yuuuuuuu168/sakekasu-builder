@@ -3,9 +3,11 @@
 設定ミスは起動段階で落とす（フェイルクローズ）。認証（auth.py）と
 記録の読み出し（records.py）の両方がここの値を使うので、どちらを先に
 読み込んでも、値を使う前に検証が済んでいるようにここへまとめている。
+日本時間（JST）のように、複数のモジュールが同じ値を使う定数もここに置く。
 """
 
 import os
+from datetime import timedelta, timezone
 
 PURCHASE_TABLE_NAME = os.getenv("PURCHASE_TABLE_NAME", "")
 DRINKING_TABLE_NAME = os.getenv("DRINKING_TABLE_NAME", "")
@@ -22,6 +24,9 @@ COGNITO_APP_CLIENT_IDS = frozenset(
     value.strip() for value in COGNITO_APP_CLIENT_ID.split(",") if value.strip()
 )
 IS_LOCAL_DEV = os.getenv("LOCAL_DEV") == "1"
+# 日本時間。相談の回数を数える日の区切り（quota.py）と、システムプロンプトに
+# 差し込む今日の日付（prompt.py）が、同じ「今日」を指すようにここで1つにする
+JST = timezone(timedelta(hours=9))
 
 # 起動時検証（設定ミスは起動段階で落とすフェイルクローズ）
 if not PURCHASE_TABLE_NAME:

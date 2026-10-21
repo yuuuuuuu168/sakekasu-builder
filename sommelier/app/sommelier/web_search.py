@@ -16,7 +16,7 @@
 - 返すのは無害化していない生の文字列。URL だけは「そのまま出典として
   出せる形」でないと意味がないので、ここで検証してから返す。タイトルと
   本文の無害化と <web_data> による囲みは呼び出し側（tools.py）に任せる
-  （preference_memory.py と同じ線引き）
+  （conversation_memory.py と同じ線引き）
 - API キーは Secrets Manager に置き、初回の検索で1回だけ取得して
   メモリに保持する。起動時に取ることもできるが、検索しないリクエストにまで
   コールドスタートの遅さと失敗の可能性を持ち込む理由がない
@@ -36,7 +36,7 @@ from typing import Optional
 
 import boto3
 
-# preference_memory.py と同じ理由で "bedrock_agentcore.app" の子として作る
+# conversation_memory.py と同じ理由で "bedrock_agentcore.app" の子として作る
 log = logging.getLogger("bedrock_agentcore.app.web_search")
 
 # API キーを入れた Secrets Manager のシークレット名を渡す環境変数。

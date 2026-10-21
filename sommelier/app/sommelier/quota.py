@@ -18,15 +18,18 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from enum import Enum
 
 import boto3
 from botocore.exceptions import ClientError
 
-log = logging.getLogger(__name__)
+# 日付の区切りの日本時間は、プロンプトに差し込む今日の日付と同じものを使う
+from config import JST
 
-JST = timezone(timedelta(hours=9))
+# conversation_memory.py と同じ理由で "bedrock_agentcore.app" の子として作る
+log = logging.getLogger("bedrock_agentcore.app.quota")
+
 DEFAULT_DAILY_LIMIT = 50
 # 日付が変わってからも少し残す（TTL の削除は即時ではないので、判定には使わない）
 _RETENTION = timedelta(days=2)
