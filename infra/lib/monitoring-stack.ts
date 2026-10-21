@@ -467,15 +467,48 @@ export class MonitoringStack extends cdk.Stack {
   }
 
   /**
-   * アラームを作って通知先を繋ぐ。
-   * 復旧も通知するので、鳴りっぱなしか直ったかが Slack だけで分かる。
-   */
-  /**
-   * OCR の SLO を定義する（Issue #86）。
+   * SLO 名を組み立てる唯一の場所（Issue #86）。
    *
-   * 対象は `analyzeSakeLabel` を実行する `ocr-analyzer` だけ。`presigned-url` は
-   * 計装が 2026-08-16 に入ったばかりで、しきい値を決める材料が無いので後回し。
-   * SLO は Application Signals の課金対象なので、増やすときは理由を持って増やす。
+   * SLO の `name` と、アラームの `SloName` ディメンションは一致していないと
+   * いけない。ずれるとアラームは `INSUFFICIENT_DATA` のまま居座り、
+   * 「監視が入っている」ように見えて何も鳴らない。合成もデプロイも成功するので、
+   * 気づく手立てが無い。
+   *
+   * 定義側とアラーム側でそれぞれ文字列を書いていると、名前を変えるときに
+   * 片方だけ直して壊せる。ここを通してしか作らせない（PR #165 のレビュー指摘）。
+   *
+   * サービス名は Application Signals が実機で付けている名前（Lambda の関数名）と
+   * 一致していないといけない。ここがずれると SLO が対象を見つけられず、
+   * 達成率が空のまま出来上がる。
+   */
+  private static sloNames(
+    envName: string,
+    target: SloTarget,
+  ): {
+    serviceName: string;
+    availability: string;
+    latency: string;
+  } {
+    const serviceName = `${envName}-sakekasu-${target.functionSlug}`;
+    return {
+      serviceName,
+      availability: `${serviceName}-availability`,
+      latency: `${serviceName}-latency`,
+    };
+  }
+
+  private addServiceLevelObjectives(envName: string): void {
+    for (const target of SLO_TARGETS) {
+      this.addServiceLevelObjectivesFor(envName, target);
+    }
+  }
+
+  /**
+   * 1 つの関数の SLO（可用性とレイテンシー）と、それを割ったときのアラームを作る（Issue #86）。
+   *
+   * 対象は SLO_TARGETS（`ocr-analyzer` と `presigned-url`）。レイテンシーのしきい値は
+   * 関数ごとに SLO_TARGETS に置いてある。SLO は Application Signals の課金対象なので、
+   * 増やすときは理由を持って増やす。以下は最初に入れた OCR での判断の記録。
    *
    * ## なぜ既存のアラームがあるのに要るか
    *
@@ -513,43 +546,6 @@ export class MonitoringStack extends cdk.Stack {
    * request-based は「リクエストの成功割合」を直接数えるので、疎なトラフィックでも
    * 意味のある値になる。
    */
-  /**
-   * SLO 名を組み立てる唯一の場所（Issue #86）。
-   *
-   * SLO の `name` と、アラームの `SloName` ディメンションは一致していないと
-   * いけない。ずれるとアラームは `INSUFFICIENT_DATA` のまま居座り、
-   * 「監視が入っている」ように見えて何も鳴らない。合成もデプロイも成功するので、
-   * 気づく手立てが無い。
-   *
-   * 定義側とアラーム側でそれぞれ文字列を書いていると、名前を変えるときに
-   * 片方だけ直して壊せる。ここを通してしか作らせない（PR #165 のレビュー指摘）。
-   *
-   * サービス名は Application Signals が実機で付けている名前（Lambda の関数名）と
-   * 一致していないといけない。ここがずれると SLO が対象を見つけられず、
-   * 達成率が空のまま出来上がる。
-   */
-  private static sloNames(
-    envName: string,
-    target: SloTarget,
-  ): {
-    serviceName: string;
-    availability: string;
-    latency: string;
-  } {
-    const serviceName = `${envName}-sakekasu-${target.functionSlug}`;
-    return {
-      serviceName,
-      availability: `${serviceName}-availability`,
-      latency: `${serviceName}-latency`,
-    };
-  }
-
-  private addServiceLevelObjectives(envName: string): void {
-    for (const target of SLO_TARGETS) {
-      this.addServiceLevelObjectivesFor(envName, target);
-    }
-  }
-
   private addServiceLevelObjectivesFor(envName: string, target: SloTarget): void {
     const { serviceName, availability, latency } = MonitoringStack.sloNames(envName, target);
     // Application Signals が Lambda のサービスに付ける環境名。実機の
@@ -675,6 +671,10 @@ export class MonitoringStack extends cdk.Stack {
     }
   }
 
+  /**
+   * アラームを作って通知先を繋ぐ。
+   * 復旧も通知するので、鳴りっぱなしか直ったかが Slack だけで分かる。
+   */
   private addAlarm(
     id: string,
     options: {
