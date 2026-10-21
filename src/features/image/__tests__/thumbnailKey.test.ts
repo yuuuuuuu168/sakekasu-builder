@@ -49,8 +49,8 @@ describe('toThumbnailFileName', () => {
 });
 
 describe('THUMBNAIL_PREFIX', () => {
-  it('バックフィルスクリプトと同じ値である', () => {
-    // infra/scripts/backfill-thumbnails.py の THUMBNAIL_PREFIX と揃える
+  it('サーバー側と同じ値である', () => {
+    // infra/lambda/presigned-url/index.ts の THUMBNAIL_PREFIX と揃える
     expect(THUMBNAIL_PREFIX).toBe('thumb_');
   });
 });

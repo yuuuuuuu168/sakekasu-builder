@@ -193,7 +193,7 @@ Bedrock では Anthropic のホスト型 Web 検索ツールが使えないた�
 - **サムネイル生成**: アップロード時に長辺 320px の画像を原画の兄弟キー（`thumb_` プレフィックス）として保存。一覧はサムネイルを優先し、無い場合は原画へ自動フォールバック
 - **遅延読み込み**: `loading="lazy"` / `decoding="async"`
 - **Presigned URL のメモリキャッシュ**: 有効期限内は再利用し、同一キーへの同時リクエストを1本に束ねる
-- **既存画像のバックフィル**: `infra/scripts/backfill-thumbnails.py`（EXIF の向きを補正してから縮小する。忘れると写真が横倒しになる）
+- **既存画像のバックフィル**: 仕組みの導入前に上げた画像のサムネイルは、2026-08 に一度きりのスクリプトで作って済ませた（スクリプトは git の履歴にある。EXIF の向きを補正してから縮小しないと写真が横倒しになる）
 
 ## AgentCore ソムリエエージェント
 
@@ -524,7 +524,7 @@ infra/
   lambda/        # Lambda 関数（presigned-url, ocr-analyzer, tasting-note,
                  #              health-check, billing-notifier,
                  #              slack-notifier（料金通知の送り出し）, shared）
-  scripts/       # amplify_outputs.json 生成、サムネイルのバックフィル
+  scripts/       # amplify_outputs.json 生成、CI の補助（lockfile の検査、diff のコメント）
 sommelier/       # AgentCore プロジェクト（ソムリエエージェント）
   app/sommelier/ # Strands Agent 本体（Python）
   agentcore/     # AgentCore 設定と CDK
