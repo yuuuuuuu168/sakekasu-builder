@@ -4,6 +4,18 @@ import type { Construct } from 'constructs';
 import { cdkdDeployStatements, cdkdDiffStatements } from './cdkd-policies.js';
 import { deployGuardrailStatements } from './deploy-guardrail.js';
 import { createRoleBoundary } from './role-boundary.js';
+import {
+  APP_ENVS,
+  CDKD_DEPLOY_ROLE_NAME,
+  GITHUB_ACTIONS_DEPLOY_ROLE_NAME,
+  GITHUB_ACTIONS_DIFF_ROLE_NAME,
+  GITHUB_ACTIONS_ROLE_NAMES,
+  GITHUB_ACTIONS_SITE_ROLE_NAME,
+  GITHUB_OIDC_DOMAIN,
+  appNamePrefix,
+  iamRoleArn,
+  siteBucketsArn,
+} from './resource-names.js';
 
 export interface GithubOidcStackProps extends cdk.StackProps {
   /** 信頼する GitHub リポジトリ（owner/repo 形式） */
@@ -73,7 +85,7 @@ export class GithubOidcStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: GithubOidcStackProps) {
     super(scope, id, props);
 
-    const githubDomain = 'token.actions.githubusercontent.com';
+    const githubDomain = GITHUB_OIDC_DOMAIN;
 
     const provider = new iam.OpenIdConnectProvider(this, 'GithubOidcProvider', {
       url: `https://${githubDomain}`,
@@ -83,10 +95,10 @@ export class GithubOidcStack extends cdk.Stack {
     // CDK bootstrap のロール名にはリージョンが含まれるため、ワイルドカードで
     // ap-northeast-1 と us-east-1 の両方を許可する（us-east-1 は以前 health-global
     // スタックに使っていた。いまは無いが、境界を狭める理由も無いので残す）
-    const bootstrapRoleArns = `arn:aws:iam::${this.account}:role/cdk-hnb659fds-*`;
+    const bootstrapRoleArns = iamRoleArn(this.account, 'cdk-hnb659fds-*');
 
     const deployRole = new iam.Role(this, 'DeployRole', {
-      roleName: 'sakekasu-github-actions-deploy',
+      roleName: GITHUB_ACTIONS_DEPLOY_ROLE_NAME,
       // IAM の description は ASCII + Latin-1 のみ（日本語を入れるとデプロイが 400 で落ちる）
       description: 'CDK deploy from GitHub Actions (main branch only)',
       assumedBy: new iam.WebIdentityPrincipal(
@@ -114,7 +126,7 @@ export class GithubOidcStack extends cdk.Stack {
     // ロール名を固定しているのは、ワークフローの CDKD_ROLE_ARN と
     // 移行手順（docs/cdkd-migration.md）から名前で参照するため。
     const cdkdDeployRole = new iam.Role(this, 'CdkdDeployRole', {
-      roleName: 'sakekasu-cdkd-deploy',
+      roleName: CDKD_DEPLOY_ROLE_NAME,
       description: 'cdkd deploy target (assumed by the GitHub Actions deploy role)',
       assumedBy: new iam.ArnPrincipal(deployRole.roleArn),
       // 既定の1時間。cdkd のデプロイは数分で終わる想定で、長く持たせる理由がない
@@ -135,13 +147,9 @@ export class GithubOidcStack extends cdk.Stack {
       statements: deployGuardrailStatements({
         account: this.account,
         app: 'builder',
-        resourceNamePrefixes: ['sakekasu-dev-', 'sakekasu-staging-', 'sakekasu-prod-'],
-        protectedRoleNames: [
-          'sakekasu-cdkd-deploy',
-          'sakekasu-github-actions-deploy',
-          'sakekasu-github-actions-diff',
-          'sakekasu-github-actions-site',
-        ],
+        // sakekasu-dev- / sakekasu-staging- / sakekasu-prod-
+        resourceNamePrefixes: APP_ENVS.map((env) => `${appNamePrefix(env)}-`),
+        protectedRoleNames: GITHUB_ACTIONS_ROLE_NAMES,
       }),
     });
 
@@ -156,7 +164,7 @@ export class GithubOidcStack extends cdk.Stack {
     );
 
     const diffRole = new iam.Role(this, 'DiffRole', {
-      roleName: 'sakekasu-github-actions-diff',
+      roleName: GITHUB_ACTIONS_DIFF_ROLE_NAME,
       description: 'Read-only cdk diff from GitHub Actions (pull_request)',
       assumedBy: new iam.WebIdentityPrincipal(
         provider.openIdConnectProviderArn,
@@ -184,7 +192,7 @@ export class GithubOidcStack extends cdk.Stack {
     // 認証情報を入れるのはビルドの後（deploy-site.yml）なので、ビルド中の
     // スクリプトからはこのロールにも届かない。分けてあるのは多層の守り
     const siteRole = new iam.Role(this, 'SiteDeployRole', {
-      roleName: 'sakekasu-github-actions-site',
+      roleName: GITHUB_ACTIONS_SITE_ROLE_NAME,
       description: 'Upload the frontend build to the site bucket (main branch only)',
       assumedBy: new iam.WebIdentityPrincipal(
         provider.openIdConnectProviderArn,
@@ -193,7 +201,7 @@ export class GithubOidcStack extends cdk.Stack {
       maxSessionDuration: cdk.Duration.hours(1),
     });
     // バケット名は site-stack.ts の siteBucketName と同じ形。環境接頭辞は * で拾う
-    const siteBucketArn = `arn:aws:s3:::*-sakekasu-site-${this.account}`;
+    const siteBucketArn = siteBucketsArn(this.account);
     siteRole.addToPolicy(
       new iam.PolicyStatement({
         sid: 'ListSiteBucket',

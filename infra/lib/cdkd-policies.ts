@@ -1,5 +1,15 @@
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { roleBoundaryArn } from './role-boundary.js';
+import {
+  GITHUB_ACTIONS_ROLE_NAMES,
+  GITHUB_OIDC_DOMAIN,
+  IMAGE_BUCKETS_ARN,
+  appRolesArn,
+  cdkdAssetsBucketsArn,
+  cdkdStateBucketArn,
+  iamRoleArn,
+  siteBucketsArn,
+} from './resource-names.js';
 
 /**
  * ロールを渡す先のサービス。合成した4スタックの信頼ポリシーを走査した結果、
@@ -206,10 +216,10 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
       sid: 'ManageCdkdStateAndAssets',
       actions: ['s3:*'],
       resources: [
-        `arn:aws:s3:::cdkd-state-${account}`,
-        `arn:aws:s3:::cdkd-state-${account}/*`,
-        `arn:aws:s3:::cdkd-assets-${account}-*`,
-        `arn:aws:s3:::cdkd-assets-${account}-*/*`,
+        cdkdStateBucketArn(account),
+        `${cdkdStateBucketArn(account)}/*`,
+        cdkdAssetsBucketsArn(account),
+        `${cdkdAssetsBucketsArn(account)}/*`,
       ],
     }),
 
@@ -244,7 +254,7 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
         's3:PutBucketTagging',
       ],
       // 環境接頭辞が付くため dev / staging / prod をまとめて拾う
-      resources: ['arn:aws:s3:::*-sakekasu-images', `arn:aws:s3:::*-sakekasu-site-${account}`],
+      resources: [IMAGE_BUCKETS_ARN, siteBucketsArn(account)],
     }),
 
     ...siteDeliveryStatements(siteZone),
@@ -271,7 +281,7 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
         'iam:DetachRolePolicy',
         'iam:PutRolePermissionsBoundary',
       ],
-      resources: [`arn:aws:iam::${account}:role/sakekasu-*`],
+      resources: [appRolesArn(account)],
       conditions: {
         ArnEquals: { 'iam:PermissionsBoundary': roleBoundaryArn(account) },
       },
@@ -306,7 +316,7 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
         'iam:TagRole',
         'iam:UntagRole',
       ],
-      resources: [`arn:aws:iam::${account}:role/sakekasu-*`],
+      resources: [appRolesArn(account)],
     }),
 
     // iam:PassedToService は PassRole 専用の条件キーで、他のアクションには
@@ -314,7 +324,7 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
     new iam.PolicyStatement({
       sid: 'PassApplicationRolesToKnownServices',
       actions: ['iam:PassRole'],
-      resources: [`arn:aws:iam::${account}:role/sakekasu-*`],
+      resources: [appRolesArn(account)],
       conditions: {
         StringEquals: { 'iam:PassedToService': PASS_ROLE_TARGET_SERVICES },
       },
@@ -342,11 +352,8 @@ export function cdkdDeployStatements(account: string, siteZone: string): iam.Pol
       effect: iam.Effect.DENY,
       actions: ['iam:*'],
       resources: [
-        `arn:aws:iam::${account}:role/sakekasu-cdkd-deploy`,
-        `arn:aws:iam::${account}:role/sakekasu-github-actions-deploy`,
-        `arn:aws:iam::${account}:role/sakekasu-github-actions-diff`,
-        `arn:aws:iam::${account}:role/sakekasu-github-actions-site`,
-        `arn:aws:iam::${account}:oidc-provider/token.actions.githubusercontent.com`,
+        ...GITHUB_ACTIONS_ROLE_NAMES.map((name) => iamRoleArn(account, name)),
+        `arn:aws:iam::${account}:oidc-provider/${GITHUB_OIDC_DOMAIN}`,
       ],
     }),
 
@@ -600,7 +607,7 @@ export function cdkdDiffStatements(account: string): iam.PolicyStatement[] {
         's3:GetBucketOwnershipControls',
         's3:GetBucketTagging',
       ],
-      resources: ['arn:aws:s3:::*-sakekasu-images', `arn:aws:s3:::*-sakekasu-site-${account}`],
+      resources: [IMAGE_BUCKETS_ARN, siteBucketsArn(account)],
     }),
 
     // フロントの配信（site-dns-stack.ts / site-stack.ts）。どれも利用者のデータを持たない
@@ -632,8 +639,8 @@ export function cdkdDiffStatements(account: string): iam.PolicyStatement[] {
       sid: 'ReadCdkdState',
       actions: ['s3:GetObject', 's3:ListBucket', 's3:GetBucketLocation'],
       resources: [
-        `arn:aws:s3:::cdkd-state-${account}`,
-        `arn:aws:s3:::cdkd-state-${account}/*`,
+        cdkdStateBucketArn(account),
+        `${cdkdStateBucketArn(account)}/*`,
       ],
     }),
 
@@ -651,7 +658,7 @@ export function cdkdDiffStatements(account: string): iam.PolicyStatement[] {
     new iam.PolicyStatement({
       sid: 'ProbeCdkdAssetStorage',
       actions: ['s3:ListBucket'],
-      resources: [`arn:aws:s3:::cdkd-assets-${account}-*`],
+      resources: [cdkdAssetsBucketsArn(account)],
     }),
 
     new iam.PolicyStatement({
@@ -663,7 +670,7 @@ export function cdkdDiffStatements(account: string): iam.PolicyStatement[] {
         'iam:ListAttachedRolePolicies',
         'iam:ListRoleTags',
       ],
-      resources: [`arn:aws:iam::${account}:role/sakekasu-*`],
+      resources: [appRolesArn(account)],
     }),
 
     // 未対応型は Cloud Control 経由で読む。移行途中は Fn::ImportValue が

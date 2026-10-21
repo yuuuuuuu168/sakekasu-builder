@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import type { Construct } from 'constructs';
 import { applyRoleBoundary } from './role-boundary.js';
+import { appNamePrefix, iamRoleArn } from './resource-names.js';
 
 export interface DevOpsAgentStackProps extends cdk.StackProps {
   /** 環境名（dev, staging, prod） */
@@ -52,7 +53,7 @@ export class DevOpsAgentStack extends cdk.Stack {
     // 他のリソースと違って `${prefix}-`（= dev-sakekasu-）を使えないのはこのため。
     // スタック名が `sakekasu-dev-devops-agent` なので、そちらに揃う形でもある
     const monitoringRole = new iam.Role(this, 'MonitoringRole', {
-      roleName: `sakekasu-${props.envName}-devops-agent-monitoring`,
+      roleName: `${appNamePrefix(props.envName)}-devops-agent-monitoring`,
       // IAM の description は ASCII + Latin-1 のみ（日本語を入れるとデプロイが 400 で落ちる）
       description: 'Read-only role assumed by AWS DevOps Agent for cross-account investigation',
       assumedBy: new iam.ServicePrincipal('aidevops.amazonaws.com', {
@@ -79,8 +80,10 @@ export class DevOpsAgentStack extends cdk.Stack {
         sid: 'AllowCreateServiceLinkedRoles',
         actions: ['iam:CreateServiceLinkedRole'],
         resources: [
-          `arn:aws:iam::${this.account}:role/aws-service-role/` +
-            'resource-explorer-2.amazonaws.com/AWSServiceRoleForResourceExplorer',
+          iamRoleArn(
+            this.account,
+            'aws-service-role/resource-explorer-2.amazonaws.com/AWSServiceRoleForResourceExplorer',
+          ),
         ],
       }),
     );

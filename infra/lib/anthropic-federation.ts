@@ -1,3 +1,5 @@
+import { appNamePrefix } from './resource-names.js';
+
 /**
  * Claude API に API キーなしで入るための Workload Identity Federation の値。
  * Claude Console の Settings → Workload identity で作ったルール・サービスアカウントの ID で、
@@ -35,7 +37,7 @@ const WORKSPACE_ID = /^wrkspc_[A-Za-z0-9]+$/;
  * 続けて `llm-` を挟むのは、ルールの前方一致を Claude を呼ぶロールだけに絞るため
  */
 export function llmRoleNamePrefix(envName: string): string {
-  return `sakekasu-${envName}-llm-`;
+  return `${appNamePrefix(envName)}-llm-`;
 }
 
 /**
