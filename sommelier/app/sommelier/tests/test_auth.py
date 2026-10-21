@@ -120,3 +120,50 @@ class TestGetOwnerSub:
 
     def test_request_headersが無いcontextでも落ちない(self):
         assert main._get_owner_sub(types.SimpleNamespace()) == ""
+
+
+class Test許可するアプリクライアント:
+    """COGNITO_APP_CLIENT_ID はカンマ区切りで複数指定できる（外形監視のカナリア用）。"""
+
+    @pytest.fixture(autouse=True)
+    def two_clients(self, monkeypatch):
+        monkeypatch.setattr(main, "COGNITO_APP_CLIENT_IDS", frozenset({CLIENT_ID, "canary-client"}))
+
+    def test_列挙したどのクライアントのaccess_tokenも通す(self):
+        assert main._verify_and_get_sub(sign(claims(client_id="canary-client"))) == SUB
+
+    def test_列挙したどのクライアントのid_tokenも通す(self):
+        token = sign(claims(token_use="id", client_id=None, aud="canary-client"))
+        assert main._verify_and_get_sub(token) == SUB
+
+    def test_列挙していないクライアントは拒否する(self):
+        assert main._verify_and_get_sub(sign(claims(client_id="other-client"))) == ""
+
+    def test_access_tokenのaudでは通さない(self):
+        # access token は client_id で照合する。aud を足しても代わりにはならない
+        token = sign(claims(client_id="other-client", aud=CLIENT_ID))
+        assert main._verify_and_get_sub(token) == ""
+
+
+class TestLOCAL_DEVのなりすまし:
+    """LOCAL_DEV=1 の手元確認でだけ、LOCAL_DEV_OWNER_SUB を sub として使う。"""
+
+    @pytest.fixture(autouse=True)
+    def local_dev(self, monkeypatch):
+        monkeypatch.setattr(main, "IS_LOCAL_DEV", True)
+        monkeypatch.setenv("LOCAL_DEV_OWNER_SUB", "local-dev-sub")
+
+    def test_トークンが無ければなりすまし用のsubを返す(self):
+        assert main._get_owner_sub(context_with({})) == "local-dev-sub"
+
+    def test_検証に失敗したトークンでもなりすまし用のsubに落ちる(self):
+        context = context_with({"Authorization": f"Bearer {sign(claims(), key=FOREIGN_KEY)}"})
+        assert main._get_owner_sub(context) == "local-dev-sub"
+
+    def test_検証できたトークンがあればそちらを優先する(self):
+        context = context_with({"Authorization": f"Bearer {sign(claims())}"})
+        assert main._get_owner_sub(context) == SUB
+
+    def test_なりすまし用のsubが未設定なら空を返す(self, monkeypatch):
+        monkeypatch.delenv("LOCAL_DEV_OWNER_SUB")
+        assert main._get_owner_sub(context_with({})) == ""
