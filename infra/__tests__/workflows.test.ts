@@ -136,7 +136,59 @@ describe.each(['deploy.yml', 'cdk-diff.yml'])('%s', (file) => {
     const offenders = lines
       .map((line, index) => ({ line: line.trim(), number: index + 1, index }))
       .filter(({ index }) => index > credentials)
-      .filter(({ line }) => /\bnpx cdk (deploy|diff|synth)\b/.test(line))
+      .filter(({ line }) => /\bnpx (aws-)?cdk (deploy|diff|synth)\b/.test(line))
+      .filter(({ line }) => !line.includes('--app cdk.out'))
+      .map(({ line, number }) => `${number}行目: ${line}`);
+
+    expect(offenders, '合成済みを渡さない CDK CLI の呼び出しが認証後にある').toEqual([]);
+  });
+});
+
+/**
+ * ソムリエのデプロイ（deploy-sommelier.yml）も同じ形を保つ。
+ *
+ * こちらは cdkd ではなく CDK CLI で CloudFormation に出す。CLI の名前は `npx aws-cdk`
+ * （`npx cdk` だとこのパッケージ自身の bin が先に解決され、何もせず成功する）。
+ * 合成済みの成果物は `--app cdk.out` で渡す
+ */
+describe('deploy-sommelier.yml', () => {
+  const lines = readFileSync(join(WORKFLOW_DIR, 'deploy-sommelier.yml'), 'utf8').split('\n');
+  const synthCommand = 'npx aws-cdk synth';
+
+  it('合成が認証情報の設定より前にあり、CDK_DEFAULT_ACCOUNT を明示している', () => {
+    const synth = lineIndexOf(lines, synthCommand, '合成のステップ');
+    const credentials = lineIndexOf(lines, CREDENTIALS_ACTION, '認証情報のステップ');
+    expect(synth, '合成が認証より後にある').toBeLessThan(credentials);
+
+    const stepStart = lines
+      .slice(0, synth)
+      .reduce((last, line, index) => (/^ {6}- /.test(line) ? index : last), 0);
+    expect(
+      lines.slice(stepStart, synth + 1).some((line) => /^\s*CDK_DEFAULT_ACCOUNT:/.test(line)),
+      '合成のステップに CDK_DEFAULT_ACCOUNT が無い',
+    ).toBe(true);
+  });
+
+  it('lockfile の取得元の検査が、依存の取得と認証情報より前にある', () => {
+    const check = lineIndexOf(lines, 'check-lockfile-registry.mjs', '取得元の検査');
+    const install = lineIndexOf(lines, 'npm ci --ignore-scripts', '依存の取得');
+    const credentials = lineIndexOf(lines, CREDENTIALS_ACTION, '認証情報のステップ');
+
+    expect(check, '取得元の検査が npm ci より後にある').toBeLessThan(install);
+    expect(check, '取得元の検査が認証より後にある').toBeLessThan(credentials);
+  });
+
+  it('認証情報より後に CDK アプリを合成し直すコマンドが無い', () => {
+    const credentials = lineIndexOf(lines, CREDENTIALS_ACTION, '認証情報のステップ');
+
+    // `npx cdk` と `npx aws-cdk` の両方を見る。build（tsc）も認証後に走らせない
+    const offenders = lines
+      .map((line, index) => ({ line: line.trim(), number: index + 1, index }))
+      .filter(({ index }) => index > credentials)
+      .filter(
+        ({ line }) =>
+          /\bnpx (aws-)?cdk (deploy|diff|synth)\b/.test(line) || /\bnpm run build\b/.test(line),
+      )
       .filter(({ line }) => !line.includes('--app cdk.out'))
       .map(({ line, number }) => `${number}行目: ${line}`);
 
