@@ -24,7 +24,7 @@ let buildPayloadForMessage: (message: string, subject?: string | null) => Promis
 
 beforeAll(async () => {
   // ハンドラは Slack へ送ってしまうため、送信部分だけ差し替えて中身を取り出す
-  const mod = await import('../index.ts');
+  const mod = await import('../index');
   buildBlocksForMessage = async (message, subject = null) => {
     const captured: Block[] = [];
     const originalFetch = globalThis.fetch;
@@ -194,7 +194,7 @@ describe('通知プレビュー文（text フィールド）', () => {
 // 「うっかり漏らしても守られる」ことをここで担保する
 describe('送信直前の砦', () => {
   it('プレビュー文は必ず無害化されてから送られる', async () => {
-    const mod = await import('../index.ts');
+    const mod = await import('../index');
     let payload = '';
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (_url: string, init: { body: string }) => {
@@ -539,7 +539,7 @@ describe('Health イベントをログに残す', () => {
 
   // 記録を残すのが目的なので、Slack が落ちているときこそ残っていてほしい
   it('Slack への送信が失敗しても残る', async () => {
-    const mod = await import('../index.ts');
+    const mod = await import('../index');
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => ({ ok: false, status: 500 }) as Response) as typeof fetch;

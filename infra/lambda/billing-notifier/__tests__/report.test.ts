@@ -16,7 +16,7 @@ const {
   sumServicesAcrossAccounts,
   formatUsd,
   buildBlocks,
-} = await import('../index.ts');
+} = await import('../index');
 
 const TARGETS = [{ id: '222222222222', label: 'sakekasu-builder（アプリ本体）' }];
 

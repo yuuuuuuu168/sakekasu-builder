@@ -245,6 +245,16 @@ const SPEC_PARSERS: { [K in keyof SpecFields]: (value: unknown) => SpecFields[K]
 /** 詳細スペックの項目名一覧（抽出・確信度・rawTexts で同じ並びを使う） */
 export const SPEC_FIELD_NAMES = Object.keys(SPEC_PARSERS) as (keyof SpecFields)[];
 
+/**
+ * SPEC_FIELD_NAMES の全項目に値を入れて SpecFields を組み立てる。
+ * Object.fromEntries はキーと値の型を落とすので、型を戻すのはここ 1 か所に寄せる
+ */
+function buildSpecs(valueOf: (field: keyof SpecFields) => SpecFields[keyof SpecFields]): SpecFields {
+  return Object.fromEntries(
+    SPEC_FIELD_NAMES.map((field) => [field, valueOf(field)]),
+  ) as unknown as SpecFields;
+}
+
 /** 確信度を報告させるプロパティ名（sakeName → sakeNameConfidence） */
 function confidenceKey(field: string): string {
   return `${field}Confidence`;
@@ -264,9 +274,7 @@ function asConfidence(value: unknown, fieldValue: unknown): number {
 }
 
 /** 全項目 null の詳細スペック */
-const EMPTY_SPECS = Object.fromEntries(
-  SPEC_FIELD_NAMES.map((field) => [field, null]),
-) as SpecFields;
+const EMPTY_SPECS = buildSpecs(() => null);
 
 const ZERO_CONFIDENCE: FieldConfidence = {
   sakeName: 0,
@@ -342,18 +350,16 @@ export function extractLabelInfo(toolInput: unknown): ExtractResult {
   // ラベルに実際に書かれていた値だけを採る（捏造対策）
   const haystack = toLabelHaystack(input.labelTexts);
   const ungrounded: string[] = [];
-  const specs = Object.fromEntries(
-    SPEC_FIELD_NAMES.map((field) => {
-      const value = SPEC_PARSERS[field](input[field]);
-      // 照合はモデルが報告した生の値に対して行う。丸めたあとの値で見ると、
-      // ラベルに「49.8」と書いてあるのに「50」を探すことになって外れる
-      if (value !== null && GROUNDED_SPEC_FIELDS.has(field) && !isGroundedInLabel(input[field], haystack)) {
-        ungrounded.push(field);
-        return [field, null];
-      }
-      return [field, value];
-    }),
-  ) as SpecFields;
+  const specs = buildSpecs((field) => {
+    const value = SPEC_PARSERS[field](input[field]);
+    // 照合はモデルが報告した生の値に対して行う。丸めたあとの値で見ると、
+    // ラベルに「49.8」と書いてあるのに「50」を探すことになって外れる
+    if (value !== null && GROUNDED_SPEC_FIELDS.has(field) && !isGroundedInLabel(input[field], haystack)) {
+      ungrounded.push(field);
+      return null;
+    }
+    return value;
+  });
 
   if (ungrounded.length > 0) {
     // 項目名だけ出す。落とした値はラベル由来の文字列なのでログに残さない
