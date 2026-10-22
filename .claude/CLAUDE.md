@@ -57,7 +57,7 @@ AWS 側の `verify` プロファイルは読み取り専用の Permission Set �
 
 bun が要る。全 CLI ツールと 17 個のフックが bun で動く。クラウドVMのイメージには
 入っていて、`~/.bashrc` に PATH も通っている。無い世代を引いたときは
-`scripts/cloud-setup.sh` が npm から入れる（`bun.sh` はこの環境の egress で塞がれている）。
+`scripts/cloud-setup.d/10-bun.sh`（`scripts/cloud-setup.sh` が呼ぶ）が npm から入れる（`bun.sh` はこの環境の egress で塞がれている）。
 
 ## 上流のドキュメント
 
