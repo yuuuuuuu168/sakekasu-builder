@@ -8,7 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const getSignedUrlMock = vi.fn(async () => 'https://example.invalid/signed');
+const getSignedUrlMock = vi.fn(async (..._args: unknown[]) => 'https://example.invalid/signed');
 
 class FakePutObjectCommand {
   constructor(
