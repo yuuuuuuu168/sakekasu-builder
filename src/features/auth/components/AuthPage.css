@@ -4,25 +4,14 @@
  * infra/lib/portal.ts）に合わせ、CSS もそこから移している。
  *
  * この画面だけは OS やアプリの設定によらず黒（ダーク）に固定する。<html> の
- * data-theme は触らず、共通テーマの --sk-* をこの要素の中だけで上書きする。
- * 値は theme/sakekasu-theme.css のダークと同じもので、ずれたら
- * __tests__/AuthPage.theme.test.ts が落ちる。ログイン後の画面には効かない。
+ * data-theme は触らず、この要素に color-scheme: dark を付ける。共通テーマの色は
+ * light-dark() で書かれていて、使う要素の color-scheme で決まるので、中だけダークの値になる。
+ * ログイン後の画面には効かない。
  */
 .signin-cover {
   color-scheme: dark;
 
-  --sk-bg: #1a1a2e;
-  --sk-surface: #22223a;
-  --sk-border: #3a3a58;
-  --sk-ink: #f2efe8;
-  --sk-muted: #9a97ab;
-  --sk-accent: #d4af37;
-  --sk-accent-ink: #1a1a2e;
-  --sk-gold-line: #b8964f;
-  --sk-focus: #d4af37;
-  --sk-danger: #ef8a82;
-
-  /* 青海波の金。gold-line に透明度 0x40 を付けたもの */
+  /* 青海波の金。ダークの gold-line に透明度 0x40 を付けたもの。ずれたら __tests__/AuthPage.theme.test.ts が落ちる */
   --signin-wave-gold: #b8964f40;
   --signin-wave: radial-gradient(
     circle at 50% 100%,
@@ -192,9 +181,13 @@
 /*
  * iPhone で引っぱって画面の外が見えたときに白くならないよう、この画面を出している
  * 間だけ <html> の地も黒にする。クラスは AuthPage が付け外しするので、
- * ログイン後の画面には残らない
+ * ログイン後の画面には残らない。
+ *
+ * [data-theme] つきのセレクタも並べるのは、共通テーマの :root[data-theme='light'] の
+ * color-scheme: light に詳細度で負けないため（ライトを選んでいる人は data-theme="light" が付く）
  */
-html.signin-active {
+html.signin-active,
+html.signin-active[data-theme] {
   color-scheme: dark;
   background: #1a1a2e;
 }
