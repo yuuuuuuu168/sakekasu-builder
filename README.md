@@ -531,8 +531,7 @@ sommelier/       # AgentCore プロジェクト（ソムリエエージェント
 docs/            # 設計ドキュメント
 theme/           # 共通テーマ（sakekasu-template から同期）
 scripts/         # クラウドセッション用の補助（AWS SSO ログイン、フック）
-.claude/         # Claude Code の設定と AI-DLC（使い方は CLAUDE.md）
-aidlc/           # AI-DLC のルールと成果物
+.claude/         # Claude Code の設定（フック・スキル）
 .github/         # GitHub Actions（test / cdk-diff / deploy / deploy-sommelier /
                  #   deploy-site / claude-review / claude-hooks）
 ```
@@ -552,7 +551,7 @@ aidlc/           # AI-DLC のルールと成果物
 | [docs/agent-verify-permission-set.md](docs/agent-verify-permission-set.md) | クラウドセッションから AWS を見るための読み取り専用 Permission Set |
 | [docs/operations.md](docs/operations.md) | 手で打つ運用手順（ソムリエの手動デプロイと確認・利用料金通知のデプロイ・OIDC の初回セットアップ） |
 | [docs/npm-audit.md](docs/npm-audit.md) | npm audit への対応の記録（本番に入る依存の見分け方・依存の更新） |
-| [CLAUDE.md](CLAUDE.md) | 開発の進め方（ブランチ運用・AI-DLC・AWS 確認の認証フロー） |
+| [CLAUDE.md](CLAUDE.md) | 開発の進め方（ブランチ運用・AWS 確認の認証フロー） |
 
 ## セットアップ
 
@@ -641,5 +640,5 @@ npm ci && npm test
 
 claude.ai/code のクラウドセッションで開発する。セッションは GitHub へ push と PR 作成まで行い、マージは人が行う。
 AWS へは読み取り専用の SSO（`verify` / `verify-org` / `verify-ops`。3 アカウントとも Permission Set `AgentVerifyAccess`）だけで入り、
-変更操作は `PreToolUse` フックでも止める。AI-DLC v2 のフックとスキルも入れてある（[.claude/CLAUDE.md](.claude/CLAUDE.md)）。
+変更操作は `PreToolUse` フックでも止める。
 フック・MCP・環境の作り方は [docs/claude-code-web.md](docs/claude-code-web.md)、運用ルールは [CLAUDE.md](CLAUDE.md) にある。

@@ -26,8 +26,8 @@ const ALLOWED = new Set([
   '615299751070',
 ]);
 
-/** 依存の lockfile と、上流が配る同梱物（AI-DLC）は見ない。ハッシュや版番号に 12 桁が混ざる */
-const IGNORED = [/(^|\/)package-lock\.json$/, /(^|\/)uv\.lock$/, /^aidlc\//, /^\.claude\//];
+/** 依存の lockfile は見ない。ハッシュや版番号に 12 桁が混ざる */
+const IGNORED = [/(^|\/)package-lock\.json$/, /(^|\/)uv\.lock$/];
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..');
 
