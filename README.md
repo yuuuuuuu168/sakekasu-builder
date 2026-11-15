@@ -540,6 +540,7 @@ scripts/         # クラウドセッション用の補助（AWS SSO ログイ�
 
 | ドキュメント | 内容 |
 |------------|------|
+| [docs/design.md](docs/design.md) | セキュリティ観点の設計書（構成・データ・認証認可・信頼境界・IAM・CI/CD・既知の制約）。AWS Security Agent のデザインレビュー用 |
 | [docs/claude-api.md](docs/claude-api.md) | Claude API への切り替え（ID 連携・Bedrock へのフォールバック・環境変数・IAM の差分・有効にする手順） |
 | [docs/shared-login.md](docs/shared-login.md) | 共通ログインへの切り替え（変わったこと・旧プールを外す手順・カナリア・旧 sub から新 sub へのデータの付け替えの記録） |
 | [docs/devops-agent.md](docs/devops-agent.md) | DevOps Agent のセットアップ手順・Slack の双方向通信・優先度の割り当て・カスタムスキル・費用 |
