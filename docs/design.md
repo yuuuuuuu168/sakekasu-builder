@@ -4,7 +4,8 @@
 対象リポジトリ: `yuuuuuuu168/sakekasu-builder`（main ブランチ時点の実装）
 
 この文書は、AWS Security Agent のデザインレビューに渡すために、実装済みの構成をセキュリティの観点から書き起こしたものである。
-機能の細かな仕様は [README.md](../README.md)、手順は各 docs にあり、ここでは「何がどこにあり、誰が何にアクセスでき、どこで何を検証しているか」に絞る。
+レビューにはこの 1 ファイルだけを渡しても読めるように書いてある。リポジトリの他の文書（README や docs 配下）は参照しなくてよく、必要な事項は本書に要約した。
+内容は「何がどこにあり、誰が何にアクセスでき、どこで何を検証しているか」に絞る。
 アカウント ID、ユーザープール ID、クライアント ID などの識別子は伏せ、`<...>` で示す。
 
 ---
@@ -146,7 +147,7 @@
 
 ### 3.3 GraphQL スキーマ（要点）
 
-全文は [infra/graphql/schema.graphql](../infra/graphql/schema.graphql)。
+定義の本体はリポジトリの `infra/graphql/schema.graphql`。レビューに要る操作の一覧を下に挙げる。
 
 | 種別 | 操作 | 実装 |
 | --- | --- | --- |
@@ -387,7 +388,7 @@ cdkd が作るアプリのロール（Lambda など）には `sakekasu-role-boun
 ### 7.4 手元からの操作
 
 - 手元からの `cdkd deploy` / `cdk deploy` は禁止（例外は GitHub Actions のロールのスタックと管理アカウントの billing-notifier）。
-- AI エージェント（Claude Code）が AWS を確認するときは、読み取り専用の Permission Set（`AgentVerifyAccess`）を SSO で使う。S3 オブジェクト本文・DynamoDB のレコード・Cognito ユーザー・SSM パラメータは IAM 側で拒否している（[docs/agent-verify-permission-set.md](agent-verify-permission-set.md)）。
+- AI エージェント（Claude Code）が AWS を確認するときは、読み取り専用の Permission Set（`AgentVerifyAccess`）を SSO で使う。S3 オブジェクト本文・DynamoDB のレコード・Cognito ユーザー・SSM パラメータは IAM 側で拒否している。
 
 ---
 
@@ -457,16 +458,18 @@ cdkd が作るアプリのロール（Lambda など）には `sakekasu-role-boun
 
 ---
 
-## 11. 関連ドキュメント
+## 11. 本書に含めていない資料
 
-| 文書 | 内容 |
-| --- | --- |
-| [README.md](../README.md) | 機能、設計判断の経緯、監視、デプロイ、テスト |
-| [docs/shared-login.md](shared-login.md) | 共通ログインへの切り替え |
-| [docs/claude-api.md](claude-api.md) | Claude API の ID 連携と Bedrock へのフォールバック |
-| [docs/aws-infra-rules.md](aws-infra-rules.md) | 同居アプリとの分離、ガードレール、Permissions Boundary |
-| [docs/sake-subdomain.md](sake-subdomain.md) | S3 + CloudFront での配信 |
-| [docs/agent-verify-permission-set.md](agent-verify-permission-set.md) | AI エージェント用の読み取り専用 Permission Set |
-| [docs/application-signals.md](application-signals.md) | APM の計装と SLO |
-| [docs/devops-agent.md](devops-agent.md) | DevOps Agent の設定 |
-| [docs/operations.md](operations.md) | 手作業の運用手順 |
+次の文書はリポジトリにあるが、レビューには渡していない。設計の判断に要る事項は本書の各章に要約してある。
+
+| リポジトリ内のパス | 内容 | 本書での要約先 |
+| --- | --- | --- |
+| `README.md` | 機能、設計判断の経緯、監視、デプロイ、テスト | 1・2・9 章 |
+| `docs/shared-login.md` | 共通ログインへの切り替え | 4.1 |
+| `docs/claude-api.md` | Claude API の ID 連携と Bedrock へのフォールバック | 4.3 |
+| `docs/aws-infra-rules.md` | 同居アプリとの分離、ガードレール、Permissions Boundary | 2.3・7 章 |
+| `docs/sake-subdomain.md` | S3 + CloudFront での配信 | 5.5 |
+| `docs/agent-verify-permission-set.md` | AI エージェント用の読み取り専用 Permission Set | 7.4 |
+| `docs/application-signals.md` | APM の計装と SLO | 9 章 |
+| `docs/devops-agent.md` | DevOps Agent の設定 | 4.3・9 章 |
+| `docs/operations.md` | 手作業の運用手順 | 7.4 |
