@@ -1,12 +1,13 @@
-# 酒カス（sakekasu-builder）設計書
+# お酒の記録アプリ 設計書
 
 最終更新: 2026-11-15
-対象リポジトリ: `yuuuuuuu168/sakekasu-builder`（main ブランチ時点の実装）
+対象: アプリ本体・インフラ・AI エージェントを収めたリポジトリの main ブランチ時点の実装
 
 この文書は、AWS Security Agent のデザインレビューに渡すために、実装済みの構成をセキュリティの観点から書き起こしたものである。
 レビューにはこの 1 ファイルだけを渡しても読めるように書いてある。リポジトリの他の文書（README や docs 配下）は参照しなくてよく、必要な事項は本書に要約した。
 内容は「何がどこにあり、誰が何にアクセスでき、どこで何を検証しているか」に絞る。
 アカウント ID、ユーザープール ID、クライアント ID などの識別子は伏せ、`<...>` で示す。
+リソース名とドメインは一般化してある。名前の接頭辞を `app`、ドメインを `example.com` に置き換えており、実物の名前とは異なる。
 
 ---
 
@@ -44,28 +45,28 @@
 
 ```
                        ┌──────────────────────────────────────────┐
- 利用者のブラウザ ────▶ │ CloudFront（sake.sakekasu-builder.com）     │──OAC──▶ S3（画面の静的ファイル）
+ 利用者のブラウザ ────▶ │ CloudFront（app.example.com）            │──OAC──▶ S3（画面の静的ファイル）
   (React SPA)          │  TLS1.2+ / HSTS / CSP / X-Frame-Options   │
                        └──────────────────────────────────────────┘
       │
       │ ① ログイン: 共通ログイン（Cognito マネージドログイン、Authorization code + PKCE、TOTP 必須）
-      │             auth.sakekasu-builder.com  ※別リポジトリ（sakekasu-integrated_environment）が管理
+      │             auth.example.com  ※共通基盤のリポジトリが管理
       │
       │ ② GraphQL（Cognito のトークン）
       ▼
  ┌──────────────────────┐      ┌───────────────────────────────┐
  │ AWS AppSync          │─────▶│ DynamoDB                      │
- │ 認可: Cognito User    │ JS   │  dev-sakekasu-purchase-records │
- │ Pool（クライアント限定） │ resolver│  dev-sakekasu-drinking-records │
+ │ 認可: Cognito User    │ JS   │  dev-app-purchase-records     │
+ │ Pool（クライアント限定） │ resolver│  dev-app-drinking-records     │
  └──────────────────────┘      │  （GSI: owner-index）           │
       │ Lambda リゾルバー         └───────────────────────────────┘
-      ├──▶ presigned-url Lambda ──▶ S3（dev-sakekasu-images。画像の原画とサムネイル）
+      ├──▶ presigned-url Lambda ──▶ S3（dev-app-images。画像の原画とサムネイル）
       ├──▶ ocr-analyzer Lambda ──▶ S3 から画像取得 → Claude API（失敗時 Bedrock）
       └──▶ tasting-note Lambda ──▶ Claude API（失敗時 Bedrock）＋ Tavily 検索 API
       │
       │ ③ 画像の PUT / GET（S3 の Presigned URL。ブラウザから S3 へ直接）
       ▼
-     S3（dev-sakekasu-images）
+     S3（dev-app-images）
 
       │ ④ ソムリエ相談（Cognito のアクセストークンを Bearer で付与、ストリーミング応答）
       ▼
@@ -74,7 +75,7 @@
  │  Strands Agent（Python）           │
  └──────────────────────────────────┘
       ├──▶ DynamoDB（記録の読み取りのみ。owner-index を検証済み sub で引く）
-      ├──▶ DynamoDB（dev-sakekasu-sommelier-chat-quota。1 日の相談回数）
+      ├──▶ DynamoDB（dev-app-sommelier-chat-quota。1 日の相談回数）
       ├──▶ AgentCore Memory（会話の続きと好み。actorId = sub、90 日で失効）
       ├──▶ Claude API（失敗時 Bedrock）
       └──▶ Tavily 検索 API（API キーは Secrets Manager）
@@ -84,19 +85,19 @@
 
 | スタック | アカウント / リージョン | デプロイ方法 | 中身 |
 | --- | --- | --- | --- |
-| `sakekasu-dev-api` | アプリ / ap-northeast-1 | cdkd（GitHub Actions） | AppSync、DynamoDB 2 本、画像の S3、Lambda 3 本 |
-| `sakekasu-dev-monitoring` | アプリ / ap-northeast-1 | cdkd（GitHub Actions） | CloudWatch アラーム 22 件、SLO、外形監視 Lambda |
-| `sakekasu-dev-devops-agent` | アプリ / ap-northeast-1 | cdkd（GitHub Actions） | DevOps Agent が引き受ける読み取りロール |
-| `sakekasu-dev-site-dns` | アプリ / ap-northeast-1 | cdkd（GitHub Actions） | `sake.sakekasu-builder.com` のホストゾーン |
-| `sakekasu-dev-site` | アプリ / us-east-1 | cdkd（GitHub Actions） | 画面の S3、CloudFront、Route 53 レコード |
+| `app-dev-api` | アプリ / ap-northeast-1 | cdkd（GitHub Actions） | AppSync、DynamoDB 2 本、画像の S3、Lambda 3 本 |
+| `app-dev-monitoring` | アプリ / ap-northeast-1 | cdkd（GitHub Actions） | CloudWatch アラーム 22 件、SLO、外形監視 Lambda |
+| `app-dev-devops-agent` | アプリ / ap-northeast-1 | cdkd（GitHub Actions） | DevOps Agent が引き受ける読み取りロール |
+| `app-dev-site-dns` | アプリ / ap-northeast-1 | cdkd（GitHub Actions） | `app.example.com` のホストゾーン |
+| `app-dev-site` | アプリ / us-east-1 | cdkd（GitHub Actions） | 画面の S3、CloudFront、Route 53 レコード |
 | `AgentCore-sommelier-dev` | アプリ / ap-northeast-1 | CDK（GitHub Actions） | AgentCore Runtime、Memory、相談回数のテーブル |
-| `sakekasu-github-oidc` | アプリ / ap-northeast-1 | CloudFormation（手動） | GitHub OIDC プロバイダー、Actions 用ロール、Permissions Boundary |
-| `sakekasu-billing-notifier` | 管理 / ap-northeast-1 | CloudFormation（手動） | 毎日の利用料金を Slack へ通知 |
+| `app-github-oidc` | アプリ / ap-northeast-1 | CloudFormation（手動） | GitHub OIDC プロバイダー、Actions 用ロール、Permissions Boundary |
+| `app-billing-notifier` | 管理 / ap-northeast-1 | CloudFormation（手動） | 毎日の利用料金を Slack へ通知 |
 
 ### 2.3 同居している他システムとの関係
 
-- 同じ AWS アカウント・リージョンに、別リポジトリの 4 アプリ（reinvent、kakeibo、learning、integrated）が同居している。
-- 認証基盤（Cognito ユーザープール）と監視の通知先（SNS トピック、Slack 通知、DevOps Agent への転送）は integrated（共通基盤）が持ち、本アプリは参照するだけ。
+- 同じ AWS アカウント・リージョンに、別リポジトリで管理する他の 4 システム（3 つのアプリと共通基盤）が同居している。
+- 認証基盤（Cognito ユーザープール）と監視の通知先（SNS トピック、Slack 通知、DevOps Agent への転送）は共通基盤が持ち、本アプリは参照するだけ。
 - 他アプリとの分離は、命名規約・App タグ・デプロイ用ロールのガードレール（拒否ポリシー）・アプリのロールの Permissions Boundary で行う（8 章）。
 
 ### 2.4 技術スタック
@@ -119,13 +120,13 @@
 
 | ストア | 名前 | キー | 保護設定 |
 | --- | --- | --- | --- |
-| DynamoDB | `dev-sakekasu-purchase-records` | PK `id`（UUID）、GSI `owner-index`（PK `owner`） | PITR 有効、削除保護、スタック削除時に保持（RETAIN）、AWS 管理キーで暗号化（既定） |
-| DynamoDB | `dev-sakekasu-drinking-records` | 同上 | 同上 |
-| DynamoDB | `dev-sakekasu-sommelier-chat-quota` | PK `userKey`（sub の SHA-256）、SK `day` | TTL（`expiresAt`、2 日）。消えても困らないため RemovalPolicy は DESTROY |
-| S3 | `dev-sakekasu-images` | `{sub}/{purchase|drinking|tmp}/{recordId}/{fileName}` | パブリックアクセス全遮断、SSE-S3、バージョニング、ライフサイクル（下記）、CORS は画面のオリジンと localhost のみ |
-| S3 | `dev-sakekasu-site-<アカウントID>` | 画面の静的ファイル | パブリックアクセス全遮断、SSE-S3、`enforceSSL`、CloudFront の OAC 経由でのみ読む |
+| DynamoDB | `dev-app-purchase-records` | PK `id`（UUID）、GSI `owner-index`（PK `owner`） | PITR 有効、削除保護、スタック削除時に保持（RETAIN）、AWS 管理キーで暗号化（既定） |
+| DynamoDB | `dev-app-drinking-records` | 同上 | 同上 |
+| DynamoDB | `dev-app-sommelier-chat-quota` | PK `userKey`（sub の SHA-256）、SK `day` | TTL（`expiresAt`、2 日）。消えても困らないため RemovalPolicy は DESTROY |
+| S3 | `dev-app-images` | `{sub}/{purchase|drinking|tmp}/{recordId}/{fileName}` | パブリックアクセス全遮断、SSE-S3、バージョニング、ライフサイクル（下記）、CORS は画面のオリジンと localhost のみ |
+| S3 | `dev-app-site-<アカウントID>` | 画面の静的ファイル | パブリックアクセス全遮断、SSE-S3、`enforceSSL`、CloudFront の OAC 経由でのみ読む |
 | AgentCore Memory | `preference` | 名前空間 `sommelier/preference/{actorId}`、actorId は sub | イベントは 90 日で失効 |
-| Secrets Manager | `dev-sakekasu/sommelier/tavily-api-key` | — | 値はリポジトリに置かず手で登録。読めるのは tasting-note Lambda とソムリエ Runtime のロールだけ |
+| Secrets Manager | `dev-app/sommelier/tavily-api-key` | — | 値はリポジトリに置かず手で登録。読めるのは tasting-note Lambda とソムリエ Runtime のロールだけ |
 
 画像バケットのライフサイクル:
 
@@ -173,14 +174,14 @@
 | 項目 | 内容 |
 | --- | --- |
 | IdP | Amazon Cognito ユーザープール（4 アプリ共通。共通基盤が管理） |
-| ログイン画面 | Cognito マネージドログイン（`auth.sakekasu-builder.com`）へリダイレクト |
+| ログイン画面 | Cognito マネージドログイン（`auth.example.com`）へリダイレクト |
 | フロー | OAuth 2.0 Authorization code + PKCE。クライアントシークレットなし（パブリッククライアント） |
 | MFA | TOTP 必須（パスキーでのログインにも対応） |
 | パスワード | 16 文字以上 |
 | ユーザー作成 | 管理者のみ（セルフサインアップなし） |
 | スコープ | `openid` `email` `profile`。`aws.cognito.signin.user.admin` は付与していない（画面から属性変更・MFA 変更・パスワード変更の API を呼べない） |
 | トークン寿命 | アクセス 1 時間、リフレッシュ 30 日 |
-| 戻り先 URL | `https://sake.sakekasu-builder.com/`、`http://localhost:5173/`（完全一致）。ログアウト後は共通の入口 `https://sakekasu-builder.com/` |
+| 戻り先 URL | `https://app.example.com/`、`http://localhost:5173/`（完全一致）。ログアウト後は共通の入口 `https://example.com/` |
 | サインアウト | Amplify の `signOut`（トークン失効）。ソムリエの画面履歴とセッション ID もあわせて削除 |
 
 ### 4.2 API の認可
@@ -188,7 +189,7 @@
 **AppSync**
 
 - 既定の認可方式は Cognito User Pool のみ（API キー・IAM・OIDC の追加方式なし）。
-- 共有プールには他アプリのクライアントもいるため、`appIdClientRegex` で builder のクライアント ID に完全一致するトークンだけを通す。
+- 共有プールには他アプリのクライアントもいるため、`appIdClientRegex` で 本アプリのクライアント ID に完全一致するトークンだけを通す。
 - 記録単位の認可はリゾルバーで、トークンの `sub`（`ctx.identity.sub`）と記録の `owner` を突き合わせる。
 
 | 操作 | 所有者の確かめ方 |
@@ -204,7 +205,7 @@
 
 二段で検証する。
 
-1. AgentCore Runtime の JWT Authorizer（`CUSTOM_JWT`）。共通プールの OIDC ディスカバリー URL を使い、`allowedClients` で builder のクライアントに限定する。Runtime に渡すヘッダーは `Authorization` のみ（`requestHeaderAllowlist`）。
+1. AgentCore Runtime の JWT Authorizer（`CUSTOM_JWT`）。共通プールの OIDC ディスカバリー URL を使い、`allowedClients` で 本アプリのクライアントに限定する。Runtime に渡すヘッダーは `Authorization` のみ（`requestHeaderAllowlist`）。
 2. アプリ内での再検証（`sommelier/app/sommelier/auth.py`）。
    - JWKS で署名を検証（RS256 のみ）。`exp`・`iss`・`sub` を必須にする。
    - `token_use` が `access` なら `client_id`、`id` なら `aud` を許可リストと照合。それ以外の `token_use` は拒否。
@@ -218,7 +219,7 @@
 
 | 呼び出し元 → 先 | 方式 |
 | --- | --- |
-| Lambda / Runtime → Claude API | STS `GetWebIdentityToken` で AWS 署名の JWT（宛先 `https://api.anthropic.com`、寿命 300 秒以内、RS256）を取り、Anthropic 側のフェデレーションルール（発行者・ロール ARN の前方一致 `sakekasu-dev-llm-`・宛先）で短命の資格情報と交換。API キーは持たない |
+| Lambda / Runtime → Claude API | STS `GetWebIdentityToken` で AWS 署名の JWT（宛先 `https://api.anthropic.com`、寿命 300 秒以内、RS256）を取り、Anthropic 側のフェデレーションルール（発行者・ロール ARN の前方一致 `app-dev-llm-`・宛先）で短命の資格情報と交換。API キーは持たない |
 | Lambda / Runtime → Bedrock | 実行ロールの IAM。`bedrock:InvokeModel` を推論プロファイル 1 つとその振り先の foundation-model（ap-northeast-1 / ap-northeast-3）に限定（API スタックの Lambda） |
 | Lambda / Runtime → Tavily | Secrets Manager の API キー。読み取り権限はそのシークレットの ARN（`<名前>-*`）だけ |
 | GitHub Actions → AWS | GitHub OIDC。ロールごとに `sub`（main ブランチ / pull_request）と `aud` を照合（7 章） |
@@ -352,10 +353,10 @@ frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
 | ワークフロー | きっかけ | 使うロール | 内容 |
 | --- | --- | --- | --- |
 | `test.yml` | PR | なし | フロント・infra・ソムリエのテスト、lint、型検査 |
-| `cdk-diff.yml` | PR | `sakekasu-github-actions-diff`（読み取りのみ、`sub` = `pull_request`） | cdkd diff を PR にコメント |
-| `deploy.yml` | main へのマージ | `sakekasu-github-actions-deploy` → `sakekasu-cdkd-deploy` | infra を cdkd でデプロイ |
-| `deploy-sommelier.yml` | main へのマージ（`sommelier/` の変更） | `sakekasu-github-actions-deploy` | pytest と synth テストの後に CDK でデプロイ |
-| `deploy-site.yml` | main へのマージ | `sakekasu-github-actions-site` | フロントをビルドしてから認証情報を取り、配信バケットへ同期 |
+| `cdk-diff.yml` | PR | `app-github-actions-diff`（読み取りのみ、`sub` = `pull_request`） | cdkd diff を PR にコメント |
+| `deploy.yml` | main へのマージ | `app-github-actions-deploy` → `app-cdkd-deploy` | infra を cdkd でデプロイ |
+| `deploy-sommelier.yml` | main へのマージ（`sommelier/` の変更） | `app-github-actions-deploy` | pytest と synth テストの後に CDK でデプロイ |
+| `deploy-site.yml` | main へのマージ | `app-github-actions-site` | フロントをビルドしてから認証情報を取り、配信バケットへ同期 |
 | `claude-review.yml` | PR | なし（Claude Code の OAuth トークン） | AI によるコードレビュー |
 | `claude-hooks.yml` | PR | なし | Claude Code のフックのテスト |
 
@@ -365,22 +366,22 @@ frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
 
 | ロール | 信頼 | 権限 |
 | --- | --- | --- |
-| `sakekasu-github-actions-deploy` | GitHub OIDC、main ブランチのみ | cdkd ロールと CDK bootstrap ロールへの AssumeRole だけ |
-| `sakekasu-cdkd-deploy` | 上の deploy ロールのみ（GitHub から直接は引き受けられない）。セッション 1 時間 | builder のリソースを作り替える権限 ＋ 拒否だけのガードレール（下記） |
-| `sakekasu-github-actions-diff` | GitHub OIDC、pull_request のみ | 読み取りのみ |
-| `sakekasu-github-actions-site` | GitHub OIDC、main ブランチのみ。セッション 1 時間 | 配信バケットの List / Put / Delete のみ。CloudFront・IAM には触れない |
+| `app-github-actions-deploy` | GitHub OIDC、main ブランチのみ | cdkd ロールと CDK bootstrap ロールへの AssumeRole だけ |
+| `app-cdkd-deploy` | 上の deploy ロールのみ（GitHub から直接は引き受けられない）。セッション 1 時間 | 本アプリのリソースを作り替える権限 ＋ 拒否だけのガードレール（下記） |
+| `app-github-actions-diff` | GitHub OIDC、pull_request のみ | 読み取りのみ |
+| `app-github-actions-site` | GitHub OIDC、main ブランチのみ。セッション 1 時間 | 配信バケットの List / Put / Delete のみ。CloudFront・IAM には触れない |
 
-ガードレール（`sakekasu-cdkd-deploy-guardrail`、拒否のみ）の主な文:
+ガードレール（`app-cdkd-deploy-guardrail`、拒否のみ）の主な文:
 
 - 他アプリのリソース・他アプリの App タグが付いたリソースへの操作を拒否
-- builder の接頭辞の外にあるロールの作成・変更を拒否、GitHub Actions 用ロールの改ざんを拒否
+- 本アプリの接頭辞の外にあるロールの作成・変更を拒否、GitHub Actions 用ロールの改ざんを拒否
 - Permissions Boundary を付けないロールの作成、境界の取り外し・書き換えを拒否
 - cdkd の状態バケットの設定変更、他アプリの状態ファイルの書き込み、共用資産の破壊を拒否
 - 他アプリの AgentCore Runtime への操作を拒否
 
 ### 7.3 アプリのロールの Permissions Boundary
 
-cdkd が作るアプリのロール（Lambda など）には `sakekasu-role-boundary` を必ず付ける。
+cdkd が作るアプリのロール（Lambda など）には `app-role-boundary` を必ず付ける。
 
 - `iam:*`、`organizations:*`、`account:*` を拒否
 - `sts:*` を拒否。例外は宛先を指定した `sts:GetWebIdentityToken` だけで、宛先が `https://api.anthropic.com` 以外なら拒否
@@ -399,9 +400,9 @@ cdkd が作るアプリのロール（Lambda など）には `sakekasu-role-boun
 | ロール | 主な権限 |
 | --- | --- |
 | presigned-url Lambda | 画像バケットの読み書き（`grantReadWrite`）、ログ、X-Ray、Application Signals |
-| ocr-analyzer Lambda（`sakekasu-dev-llm-ocr-analyzer`） | 画像バケットの読み取り、`bedrock:InvokeModel`（1 モデルのみ）、`sts:GetWebIdentityToken`（条件付き）、ログ、X-Ray、Application Signals |
-| tasting-note Lambda（`sakekasu-dev-llm-tasting-note`） | `bedrock:InvokeModel`（1 モデルのみ）、`sts:GetWebIdentityToken`（条件付き）、Tavily キーの `GetSecretValue`、ログ、X-Ray |
-| ソムリエ Runtime（`sakekasu-dev-llm-sommelier`） | 記録 2 テーブルの `Query` / `GetItem`、回数テーブルの `UpdateItem`、`sts:GetWebIdentityToken`（条件付き）、Tavily キーの `GetSecretValue`、AgentCore Memory と Bedrock の呼び出し（AgentCore の CDK コンストラクトが付与） |
+| ocr-analyzer Lambda（`app-dev-llm-ocr-analyzer`） | 画像バケットの読み取り、`bedrock:InvokeModel`（1 モデルのみ）、`sts:GetWebIdentityToken`（条件付き）、ログ、X-Ray、Application Signals |
+| tasting-note Lambda（`app-dev-llm-tasting-note`） | `bedrock:InvokeModel`（1 モデルのみ）、`sts:GetWebIdentityToken`（条件付き）、Tavily キーの `GetSecretValue`、ログ、X-Ray |
+| ソムリエ Runtime（`app-dev-llm-sommelier`） | 記録 2 テーブルの `Query` / `GetItem`、回数テーブルの `UpdateItem`、`sts:GetWebIdentityToken`（条件付き）、Tavily キーの `GetSecretValue`、AgentCore Memory と Bedrock の呼び出し（AgentCore の CDK コンストラクトが付与） |
 | AppSync のデータソース | 各テーブルへの読み書き（CDK の `addDynamoDbDataSource` の既定）、各 Lambda の Invoke |
 | DevOps Agent 用 | `AIDevOpsAgentAccessPolicy`（読み取り）、Resource Explorer のサービスリンクロール作成のみ |
 
