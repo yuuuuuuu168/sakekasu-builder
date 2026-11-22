@@ -116,11 +116,11 @@ export const DRINKING_STATUS_OPTIONS: { value: DrinkingStatusFilter; label: stri
 // 評価フィルタのラベルマッピング（高い方から並べる）
 export const RATING_FILTER_OPTIONS: { value: RatingFilter; label: string }[] = [
   { value: 'all', label: 'すべて' },
-  { value: 5, label: '★5' },
-  { value: 4, label: '★4以上' },
-  { value: 3, label: '★3以上' },
-  { value: 2, label: '★2以上' },
-  { value: 1, label: '★1以上' },
+  { value: 5, label: '星5' },
+  { value: 4, label: '星4以上' },
+  { value: 3, label: '星3以上' },
+  { value: 2, label: '星2以上' },
+  { value: 1, label: '星1以上' },
 ];
 
 // 飲みきりステータスの表示ラベル

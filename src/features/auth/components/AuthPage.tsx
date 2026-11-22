@@ -81,8 +81,10 @@ export function AuthPage() {
 
   return (
     <main className="signin-cover" data-testid="auth-page">
+      {/* 入口の表紙（sakekasu-integrated_environment の portal.ts）と同じ屋号の印。
+          この画面は表紙と同じ見た目にそろえているので、ここだけ変えない */}
       <div className="signin-mark" aria-hidden="true">
-        🍶
+        🍶{/* check-ui-ignore: 入口の表紙と共通の屋号の印 */}
       </div>
       <h1 className="signin-title">酒カス</h1>
       <div className="signin-rule" aria-hidden="true">

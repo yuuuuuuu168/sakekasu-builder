@@ -84,7 +84,7 @@ describe('絞り込み条件の永続化（認証込みの統合）', () => {
 
     // 評価は詳細フィルタ側。条件が入っているので開いた状態で復元される
     expect(screen.getByTestId('filter-advanced-count')).toHaveTextContent('1');
-    expect(screen.getByTestId('filter-rating')).toHaveTextContent('★4以上');
+    expect(screen.getByTestId('filter-rating')).toHaveTextContent('星4以上');
     expect(screen.getByTestId('filter-record-type')).toHaveTextContent('飲酒記録');
     expect(screen.getByTestId('filter-category')).toHaveTextContent('ウイスキー');
     expect(screen.getByTestId('sort-option')).toHaveTextContent('評価（高い順）');

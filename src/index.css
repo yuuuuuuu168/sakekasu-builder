@@ -19,6 +19,20 @@
   --font-sans: var(--sk-font-sans);
 }
 
+/*
+ * 共通テーマの役割の色を、Tailwind の色名でも引けるようにする。
+ * 部品には色の値を直接書かず、ここの名前（text-ink-2、text-gold-ink など）を使う
+ */
+@theme inline {
+  --color-ink-2: var(--sk-ink-2);
+  --color-primary-hover: var(--sk-accent-hover);
+  --color-gold-line: var(--sk-gold-line);
+  --color-gold-ink: var(--sk-gold-ink);
+  --color-success: var(--sk-success);
+  --color-warning: var(--sk-warning);
+  --color-danger: var(--sk-danger);
+}
+
 :root {
   /* shadcn の変数。値は共通テーマの --sk-* を指すので、ライト/ダークで書き分けない */
   --background: var(--sk-bg);
@@ -103,6 +117,9 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* 日本語は英語向けの既定の行間だと詰まって見える。約物も詰める */
+    line-height: 1.7;
+    font-feature-settings: "palt" 1;
   }
   html {
     @apply font-sans;

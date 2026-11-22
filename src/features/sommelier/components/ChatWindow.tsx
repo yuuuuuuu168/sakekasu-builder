@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react';
 import { motion } from 'framer-motion';
+import { ImagePlus, X } from 'lucide-react';
 import { ChatMessageList } from './ChatMessageList';
 import {
   MAX_CHAT_IMAGES,
@@ -100,27 +101,27 @@ export function ChatWindow({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 16, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 16, scale: 0.98 }}
-      transition={{ duration: 0.18, ease: 'easeOut' }}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 8 }}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
       role="dialog"
       aria-label="酒ソムリエとの相談"
       // dvh を使うのは、iOS でアドレスバーの出入りにより vh がずれるため
-      className="fixed bottom-20 right-4 z-50 flex h-[70dvh] max-h-[560px] w-[calc(100vw-2rem)] max-w-sm flex-col overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl dark:border-white/10 dark:bg-dark-bg sm:right-6"
+      className="fixed bottom-20 right-4 z-50 flex h-[70dvh] max-h-[560px] w-[calc(100vw-2rem)] max-w-sm flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xl sm:right-6"
       data-testid="sommelier-chat-window"
     >
       {/* ヘッダー */}
-      <div className="flex items-center justify-between border-b border-gray-200 px-3 py-2 dark:border-white/10">
-        <h2 className="text-sm font-bold text-indigo-wa dark:text-dark-gold">
-          🍶 酒ソムリエ
+      <div className="flex items-center justify-between border-b border-border py-2 pr-2 pl-4">
+        <h2 className="text-sm font-bold text-foreground">
+          酒ソムリエ
         </h2>
         <div className="flex items-center gap-1">
           {messages.length > 0 && (
             <button
               type="button"
               onClick={onReset}
-              className="rounded px-2 py-1 text-xs text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200"
+              className="rounded px-2 py-1 text-xs text-ink-2 transition-colors hover:bg-muted hover:text-foreground"
               data-testid="chat-reset"
             >
               新しい相談
@@ -130,10 +131,10 @@ export function ChatWindow({
             type="button"
             onClick={onClose}
             aria-label="閉じる"
-            className="rounded px-2 py-1 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200"
+            className="flex size-8 items-center justify-center rounded text-ink-2 transition-colors hover:bg-muted hover:text-foreground"
             data-testid="chat-close"
           >
-            ✕
+            <X className="size-4" strokeWidth={1.5} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -143,7 +144,7 @@ export function ChatWindow({
       {/* 入力欄 */}
       <form
         onSubmit={handleSubmit}
-        className="border-t border-gray-200 p-2 dark:border-white/10"
+        className="border-t border-border p-2"
       >
         {/* 添付画像のプレビュー */}
         {attachments.length > 0 && (
@@ -153,16 +154,16 @@ export function ChatWindow({
                 <img
                   src={image.dataUrl}
                   alt={`添付画像${index + 1}`}
-                  className="h-14 w-14 rounded-lg border border-gray-200 object-cover dark:border-white/10"
+                  className="h-14 w-14 rounded-lg border border-border object-cover"
                 />
                 <button
                   type="button"
                   onClick={() => removeAttachment(index)}
                   aria-label={`添付画像${index + 1}を削除`}
-                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gray-700 text-xs text-white shadow hover:bg-gray-900 dark:bg-gray-200 dark:text-gray-900"
+                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background shadow-sm transition-colors hover:bg-ink-2"
                   data-testid={`chat-attachment-remove-${index}`}
                 >
-                  ✕
+                  <X className="size-3" strokeWidth={2} aria-hidden="true" />
                 </button>
               </div>
             ))}
@@ -170,7 +171,7 @@ export function ChatWindow({
         )}
         {attachError && (
           <p
-            className="mb-1 text-xs text-red-600 dark:text-red-400"
+            className="mb-1 text-xs text-danger"
             data-testid="chat-attach-error"
           >
             {attachError}
@@ -194,10 +195,10 @@ export function ChatWindow({
             disabled={isPreparing || attachments.length >= MAX_CHAT_IMAGES}
             aria-label="写真を添付"
             title="酒屋の棚やメニューの写真からおすすめを聞けます"
-            className="shrink-0 rounded-lg px-2 py-2 text-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200"
+            className="flex size-10 shrink-0 items-center justify-center rounded-lg text-ink-2 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
             data-testid="chat-attach"
           >
-            📷
+            <ImagePlus className="size-[18px]" strokeWidth={1.5} aria-hidden="true" />
           </button>
           <textarea
             value={input}
@@ -205,18 +206,18 @@ export function ChatWindow({
             onKeyDown={handleKeyDown}
             rows={2}
             maxLength={MAX_PROMPT_LENGTH}
-            placeholder="今夜は何を飲もう？ 料理に合うお酒は？"
+            placeholder="相談したいことを入力"
             aria-label="相談内容"
             // スマホでは 16px（text-base）にする。16px を下回ると iOS Safari が
             // 入力欄を触った拍子に画面を拡大し、そのまま戻らずに横へはみ出る
-            className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-base text-gray-900 outline-none focus:border-sake-gold focus:ring-1 focus:ring-sake-gold/40 sm:text-sm dark:border-white/15 dark:bg-white/5 dark:text-gray-100"
+            className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-input bg-background px-2 py-1.5 text-base text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:text-sm"
             data-testid="chat-input"
           />
           {isResponding ? (
             <button
               type="button"
               onClick={onStop}
-              className="shrink-0 rounded-lg bg-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300 dark:bg-white/10 dark:text-gray-200 dark:hover:bg-white/20"
+              className="shrink-0 rounded-lg bg-muted px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-border"
               data-testid="chat-stop"
             >
               停止
@@ -225,7 +226,7 @@ export function ChatWindow({
             <button
               type="submit"
               disabled={!canSend}
-              className="shrink-0 rounded-lg bg-gold-wa px-3 py-2 text-sm font-medium text-white transition-opacity disabled:opacity-40 dark:bg-dark-gold dark:text-gray-900"
+              className="shrink-0 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
               data-testid="chat-send"
             >
               送信

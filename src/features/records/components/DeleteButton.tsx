@@ -14,7 +14,7 @@ export function DeleteButton({ onClick, disabled }: DeleteButtonProps) {
       aria-label="削除"
       disabled={disabled}
       onClick={onClick}
-      className="text-gray-400 hover:text-red-500 dark:text-gray-500 dark:hover:text-red-400"
+      className="text-muted-foreground hover:text-danger"
     >
       <Trash2 className="size-4" />
     </Button>

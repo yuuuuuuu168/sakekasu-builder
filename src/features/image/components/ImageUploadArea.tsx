@@ -168,7 +168,7 @@ export function ImageUploadArea({
             <button
               type="button"
               onClick={handleClick}
-              className="flex h-24 w-24 items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/30 text-muted-foreground/60 transition-colors hover:border-sake-gold/60 hover:text-sake-gold/60"
+              className="flex h-24 w-24 items-center justify-center rounded-lg border border-dashed border-muted-foreground/40 text-muted-foreground transition-colors hover:border-primary/60 hover:bg-muted hover:text-foreground"
               aria-label="画像を追加"
               data-testid="image-add-button"
             >
@@ -184,7 +184,7 @@ export function ImageUploadArea({
           type="button"
           onClick={onOcrTrigger}
           disabled={isOcrAnalyzing}
-          className="flex items-center gap-1.5 rounded-md border border-sake-gold/40 bg-sake-gold/10 px-3 py-1.5 text-xs font-medium text-sake-gold transition-colors hover:bg-sake-gold/20 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex min-h-9 items-center gap-1.5 rounded-md border border-primary/40 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
           data-testid="ocr-trigger-button"
         >
           {isOcrAnalyzing ? (
@@ -251,7 +251,7 @@ export function ImageUploadArea({
 
       {/* 画像枚数表示 */}
       {hasAnyImage && (
-        <p className="text-xs text-muted-foreground/70">
+        <p className="text-xs text-muted-foreground tabular-nums">
           {attachedCount}/{maxImages}枚
         </p>
       )}
@@ -285,11 +285,11 @@ function DropZone({
       tabIndex={isInteractive ? 0 : -1}
       aria-label="画像を選択またはドラッグ＆ドロップ"
       className={`
-        flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed
+        flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed
         px-4 py-6 text-center transition-colors
         ${isDragOver
-          ? 'border-sake-gold bg-sake-gold/10'
-          : 'border-muted-foreground/30 hover:border-sake-gold/60 hover:bg-muted/30'
+          ? 'border-primary bg-primary/10'
+          : 'border-muted-foreground/40 hover:border-primary/60 hover:bg-muted'
         }
         ${!isInteractive ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}
       `}
@@ -309,7 +309,7 @@ function DropZone({
       <p className="text-sm text-muted-foreground">
         画像を選択またはドラッグ＆ドロップ
       </p>
-      <p className="text-xs text-muted-foreground/70">
+      <p className="text-xs text-muted-foreground">
         JPEG・PNG（最大{maxImages}枚）
       </p>
     </div>
@@ -365,9 +365,9 @@ function PreviewItem({
   return (
     <motion.div
       className="relative inline-block"
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.2 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
       data-testid={`image-preview-${index}`}
     >
       <img
@@ -413,18 +413,18 @@ function StatusMessage({
 }) {
   const colorClass = {
     info: 'text-muted-foreground',
-    success: 'text-green-600 dark:text-green-400',
+    success: 'text-success',
     error: 'text-destructive',
-    warning: 'text-amber-600 dark:text-amber-400',
+    warning: 'text-warning',
   }[variant];
 
   return (
     <motion.div
       className={`flex items-center gap-1.5 text-xs ${colorClass}`}
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: 'auto' }}
-      exit={{ opacity: 0, height: 0 }}
-      transition={{ duration: 0.2 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
       data-testid={`image-status-${variant}`}
     >
       {icon}
@@ -445,7 +445,7 @@ function CameraIcon() {
       strokeWidth={1.5}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="h-8 w-8 text-muted-foreground/60"
+      className="h-8 w-8 text-muted-foreground"
     >
       <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
       <circle cx="12" cy="13" r="4" />

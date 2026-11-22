@@ -107,9 +107,9 @@ export function PurchaseForm({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: 'easeOut' }}
+      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
     >
     <form onSubmit={onFormSubmit} className="space-y-5" data-testid="purchase-form">
       {/* 画像添付（編集時は登録済みの写真の続きに追加する） */}

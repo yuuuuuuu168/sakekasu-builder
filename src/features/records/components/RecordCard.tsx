@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
+import { MapPin, Star, Store } from 'lucide-react';
 import type { RecordType, UnifiedRecord } from '../types';
 import { CATEGORY_FILTER_OPTIONS, DRINKING_STATUS_DISPLAY } from '../types';
 import { DeleteButton } from './DeleteButton';
@@ -13,6 +14,7 @@ import { toThumbnailKey } from '@/features/image/lib/thumbnailKey';
 import type { LinkedDrinkingSummary } from '../lib/linkedDrinking';
 import { getBottleBreakdown, getRemainingBottles, toBottleCount } from '../lib/bottleCount';
 import type { DrinkingStatus } from '@/types/schema';
+import { RatingMark } from '@/components/RatingMark';
 
 interface RecordCardProps {
   record: UnifiedRecord;
@@ -34,18 +36,14 @@ interface RecordCardProps {
   linkedDrinking?: LinkedDrinkingSummary;
 }
 
-/** 飲みきりステータスのスタイル定義 */
+/**
+ * 飲みきりステータスのスタイル定義。
+ * 色を付けるのは「飲み中」（いま手元で開いている）だけにし、未開封と飲みきりは無彩色で分ける
+ */
 const DRINKING_STATUS_STYLES: Record<DrinkingStatus, string> = {
-  NOT_STARTED: 'bg-gray-100 text-gray-700 border border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600',
-  IN_PROGRESS: 'bg-amber-50 text-amber-800 border border-amber-300 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-600',
-  FINISHED: 'bg-green-50 text-green-800 border border-green-300 dark:bg-green-900/40 dark:text-green-300 dark:border-green-600',
-};
-
-/** 飲みきりステータスのアイコン */
-const DRINKING_STATUS_ICONS: Record<DrinkingStatus, string> = {
-  NOT_STARTED: '\u{1F4E6}',  // 📦
-  IN_PROGRESS: '\u{1F376}',  // 🍶
-  FINISHED: '\u{2705}',      // ✅
+  NOT_STARTED: 'border-border bg-card text-ink-2 hover:bg-muted',
+  IN_PROGRESS: 'border-gold-line bg-gold-line/15 text-gold-ink hover:bg-gold-line/25',
+  FINISHED: 'border-border bg-muted text-muted-foreground hover:bg-muted/70',
 };
 
 /** 次のステータスを取得 */
@@ -104,9 +102,20 @@ function formatPrice(price: number | null): string | null {
 /** 評価を★で表示 */
 function RatingStars({ rating }: { rating: number }) {
   return (
-    <span className="text-yellow-400" data-testid="rating-stars">
-      {'★'.repeat(rating)}
-      {'☆'.repeat(5 - rating)}
+    <span
+      className="inline-flex items-center gap-0.5"
+      role="img"
+      aria-label={`評価 ${rating}（5段階）`}
+      data-testid="rating-stars"
+    >
+      {Array.from({ length: 5 }, (_, i) => (
+        <Star
+          key={i}
+          className={`size-4 ${i < rating ? 'fill-current text-gold-ink' : 'text-border'}`}
+          strokeWidth={1.5}
+          aria-hidden="true"
+        />
+      ))}
     </span>
   );
 }
@@ -115,7 +124,7 @@ function RatingStars({ rating }: { rating: number }) {
 function ImagePlaceholder() {
   return (
     <div
-      className="flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800"
+      className="flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-lg bg-muted"
       data-testid="image-placeholder"
     >
       <svg
@@ -126,7 +135,7 @@ function ImagePlaceholder() {
         strokeWidth={1.5}
         strokeLinecap="round"
         strokeLinejoin="round"
-        className="h-8 w-8 text-gray-400 dark:text-gray-500"
+        className="h-8 w-8 text-muted-foreground"
       >
         <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
         <circle cx="8.5" cy="8.5" r="1.5" />
@@ -140,7 +149,7 @@ function ImagePlaceholder() {
 function ThumbnailSkeleton() {
   return (
     <div
-      className="h-20 w-20 flex-shrink-0 animate-pulse rounded-lg bg-gray-200 dark:bg-gray-700"
+      className="h-20 w-20 flex-shrink-0 animate-pulse rounded-lg bg-muted" /* check-ui-ignore: 画像の読み込み中だけ出すスケルトン */
       data-testid="thumbnail-skeleton"
     />
   );
@@ -199,7 +208,7 @@ function RecordThumbnail({
     <button
       type="button"
       onClick={() => onClickImage(0)}
-      className="relative h-20 w-20 flex-shrink-0 cursor-pointer overflow-hidden rounded-lg transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-sake-gold/50"
+      className="relative h-20 w-20 flex-shrink-0 cursor-pointer overflow-hidden rounded-lg transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       aria-label={`${sakeName}の画像を拡大表示`}
       data-testid="record-thumbnail"
     >
@@ -259,10 +268,10 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
   return (
     <motion.div
       layout
-      initial={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -80 }}
-      transition={{ duration: 0.3, ease: 'easeInOut' }}
-      className="rounded-xl border border-white/20 bg-white/80 p-4 shadow-sm backdrop-blur-lg transition-shadow hover:shadow-md dark:bg-white/5"
+      initial={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+      className="rounded-xl border border-border bg-card p-4 shadow-sm"
       data-testid="record-card"
     >
       <div className="flex gap-3">
@@ -278,21 +287,19 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
 
         {/* コンテンツ */}
         <div className="min-w-0 flex-1">
-          {/* ヘッダー: 種別ラベル + 削除ボタン + 日付 */}
-          <div className="mb-3 flex items-center justify-between">
-            <span
-              className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                isPurchase
-                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
-                  : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'
-              }`}
-              data-testid="record-type-label"
-            >
-              {isPurchase ? '購入' : '飲酒'}
+          {/* ヘッダー: 種別ラベル + 日付 + 編集・削除ボタン。
+              種別の点の色はカレンダーの凡例（買った日・飲んだ日）とそろえる */}
+          <div className="mb-1 flex items-center justify-between">
+            <span className="flex items-center gap-1.5 text-xs font-medium text-ink-2">
+              <span
+                className={`size-1.5 rounded-full ${isPurchase ? 'bg-gold-line' : 'bg-indigo-wa dark:bg-ink-2'}`}
+                aria-hidden="true"
+              />
+              <span data-testid="record-type-label">{isPurchase ? '購入' : '飲酒'}</span>
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               <time
-                className="text-sm text-gray-500 dark:text-gray-400"
+                className="mr-1 text-sm text-muted-foreground tabular-nums"
                 dateTime={record.date}
                 data-testid="record-date"
               >
@@ -313,7 +320,7 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
 
           {/* 銘柄名 */}
           <h3
-            className="mb-2 text-base font-bold text-gray-900 dark:text-gray-100 sm:text-lg"
+            className="mb-2 text-base font-bold leading-snug text-foreground sm:text-lg"
             data-testid="sake-name"
           >
             {record.sakeName}
@@ -327,16 +334,16 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
                 type="button"
                 onClick={handleStatusClick}
                 disabled={isStatusUpdating}
-                className={`rounded-lg px-3 py-1.5 text-sm font-bold shadow-sm transition-all hover:scale-105 hover:shadow-md active:scale-95 disabled:opacity-50 ${DRINKING_STATUS_STYLES[record.drinkingStatus]}`}
+                className={`min-h-9 rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors disabled:opacity-50 ${DRINKING_STATUS_STYLES[record.drinkingStatus]}`}
                 data-testid="drinking-status"
-                title="クリックでステータスを変更"
+                title="押すとステータスを次へ進める"
               >
-                {DRINKING_STATUS_ICONS[record.drinkingStatus]} {DRINKING_STATUS_DISPLAY[record.drinkingStatus]}
+                {DRINKING_STATUS_DISPLAY[record.drinkingStatus]}
               </button>
               )}
               {breakdownLabel && (
                 <span
-                  className="text-xs font-medium text-gray-600 dark:text-gray-300"
+                  className="text-xs font-medium text-ink-2"
                   data-testid="bottle-breakdown"
                 >
                   {breakdownLabel}
@@ -344,7 +351,7 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
               )}
               {record.drinkingStatus === 'IN_PROGRESS' && getOpenedDaysLabel(record.openedAt) && (
                 <span
-                  className="text-xs font-medium text-amber-700 dark:text-amber-400"
+                  className="text-xs font-medium text-gold-ink"
                   data-testid="opened-days"
                 >
                   {getOpenedDaysLabel(record.openedAt)}
@@ -354,21 +361,21 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
                 <button
                   type="button"
                   onClick={() => onDrinkFromStock?.(record)}
-                  className="rounded-lg border border-sake-gold/40 bg-sake-gold/10 px-3 py-1.5 text-sm font-bold text-sake-gold shadow-sm transition-all hover:scale-105 hover:shadow-md active:scale-95"
+                  className="min-h-9 rounded-lg border border-primary/40 px-3 py-1.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
                   data-testid="drink-from-stock"
                   title="この在庫の飲酒記録を登録する"
                 >
-                  🍶 これを飲む
+                  これを飲む
                 </button>
               )}
             </div>
           )}
 
           {/* 詳細情報 */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-2">
             {/* カテゴリ */}
             <span
-              className="rounded bg-gray-100 px-1.5 py-0.5 text-xs dark:bg-gray-800"
+              className="rounded bg-muted px-1.5 py-0.5 text-xs"
               data-testid="category-label"
             >
               {getCategoryLabel(record.category)}
@@ -376,34 +383,40 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
 
             {/* 購入記録: 店舗 */}
             {isPurchase && record.storeName && (
-              <span data-testid="store-name">🏪 {record.storeName}</span>
+              <span className="inline-flex items-center gap-1" data-testid="store-name">
+                <Store className="size-3.5 shrink-0" strokeWidth={1.5} aria-label="店" />
+                {record.storeName}
+              </span>
             )}
 
             {/* 飲酒記録: 場所 */}
             {!isPurchase && record.placeName && (
-              <span data-testid="place-name">📍 {record.placeName}</span>
+              <span className="inline-flex items-center gap-1" data-testid="place-name">
+                <MapPin className="size-3.5 shrink-0" strokeWidth={1.5} aria-label="場所" />
+                {record.placeName}
+              </span>
             )}
 
             {/* 価格 */}
             {priceText && (
-              <span className="font-medium" data-testid="price">
+              <span className="font-medium tabular-nums" data-testid="price">
                 {priceText}
               </span>
             )}
 
             {/* 購入記録: 本数 */}
             {isPurchase && record.quantity != null && (
-              <span data-testid="quantity">📦 {record.quantity}本</span>
+              <span className="tabular-nums" data-testid="quantity">{record.quantity}本</span>
             )}
 
             {/* 1本ずつ飲んで購入本数より減っていれば、残りも出す */}
             {isPurchase && remainingBottles < toBottleCount(record.quantity) && (
-              <span data-testid="remaining-quantity">残り {remainingBottles}本</span>
+              <span className="tabular-nums" data-testid="remaining-quantity">残り {remainingBottles}本</span>
             )}
 
             {/* 飲酒記録: 飲み方 */}
             {!isPurchase && record.drinkingMethod && (
-              <span data-testid="drinking-method">🍶 {record.drinkingMethod}</span>
+              <span data-testid="drinking-method">{record.drinkingMethod}</span>
             )}
           </div>
 
@@ -417,25 +430,25 @@ export function RecordCard({ record, onDelete, isDeleting, onEdit, onImageClick,
           {/* 購入記録: 紐づいた飲酒記録の感想 */}
           {isPurchase && linkedDrinking && (
             <div
-              className="mt-2 rounded-lg border border-sake-gold/20 bg-sake-gold/5 px-2.5 py-1.5 text-xs"
+              className="mt-3 border-t border-border pt-2 text-xs"
               data-testid="linked-drinking"
             >
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-gray-600 dark:text-gray-300">
-                <span className="font-semibold">🍶 飲んだ記録 {linkedDrinking.count}件</span>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-ink-2">
+                <span className="font-semibold">飲んだ記録 {linkedDrinking.count}件</span>
                 {linkedDrinking.averageRating !== null && (
-                  <span className="text-yellow-500" data-testid="linked-drinking-rating">
-                    ★ {linkedDrinking.averageRating}
+                  <span data-testid="linked-drinking-rating">
+                    <RatingMark value={linkedDrinking.averageRating} />
                   </span>
                 )}
                 {linkedDrinking.latestDate && (
-                  <span className="text-gray-500 dark:text-gray-400">
+                  <span className="text-muted-foreground tabular-nums">
                     最終 {linkedDrinking.latestDate}
                   </span>
                 )}
               </div>
               {linkedDrinking.latestMemo && (
                 <p
-                  className="mt-1 line-clamp-2 text-gray-600 dark:text-gray-400"
+                  className="mt-1 line-clamp-2 text-ink-2"
                   data-testid="linked-drinking-memo"
                 >
                   {linkedDrinking.latestMemo}

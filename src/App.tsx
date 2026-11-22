@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { CalendarDays, ChartColumn, List, ShoppingBag, Wine } from 'lucide-react';
 import { Amplify } from 'aws-amplify';
 import outputs from '../amplify_outputs.json';
 import { ThemeProvider } from '@/components/ThemeProvider';
@@ -33,7 +34,7 @@ function NavigationBar({
   const { signOut } = useAuth();
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-gray-200 bg-white/80 backdrop-blur-md dark:border-white/10 dark:bg-dark-bg/80">
+    <nav className="sticky top-0 z-50 border-b border-border bg-background">
       {/* 4 アプリの入口の一覧へ戻るリンクとサインアウトだけ（誰がログインしているかは出さない）。
           MFA の登録と入力は共通ログインの画面が受け持つので、ここには置かない */}
       <div className="mx-auto flex max-w-md items-center justify-end px-4 py-2 text-xs">
@@ -41,7 +42,7 @@ function NavigationBar({
           <PortalAppsLink />
           <button
             onClick={() => void signOut()}
-            className="rounded px-2 py-1 text-sake-red transition-colors hover:bg-sake-red/10"
+            className="rounded px-2 py-1 text-ink-2 transition-colors hover:bg-muted hover:text-foreground"
             data-testid="sign-out-button"
           >
             サインアウト
@@ -50,30 +51,29 @@ function NavigationBar({
       </div>
 
       {/* ページ切り替えタブ。5タブを1行に並べると iPhone の幅（390〜402px）では
-          最後の「統計」が画面からはみ出るので、狭い画面では絵文字を上・ラベルを下に
+          最後の「統計」が画面からはみ出るので、狭い画面ではアイコンを上・ラベルを下に
           積んで5つとも収める。文字を拡大している端末向けに横スクロールは残す */}
       <div className="mx-auto flex max-w-md overflow-x-auto">
         {(
           [
-            { page: 'purchase', icon: '🛒', label: '購入登録' },
-            { page: 'drinking', icon: '🍶', label: '飲酒登録' },
-            { page: 'records', icon: '📋', label: '記録一覧' },
-            { page: 'calendar', icon: '📅', label: 'カレンダー' },
-            { page: 'stats', icon: '📊', label: '統計' },
+            { page: 'purchase', icon: ShoppingBag, label: '購入登録' },
+            { page: 'drinking', icon: Wine, label: '飲酒登録' },
+            { page: 'records', icon: List, label: '記録一覧' },
+            { page: 'calendar', icon: CalendarDays, label: 'カレンダー' },
+            { page: 'stats', icon: ChartColumn, label: '統計' },
           ] as const
-        ).map(({ page, icon, label }) => (
+        ).map(({ page, icon: Icon, label }) => (
           <button
             key={page}
             onClick={() => onPageChange(page)}
-            className={`flex flex-1 flex-col items-center gap-0.5 whitespace-nowrap px-0.5 py-2 text-[11px] leading-tight font-medium transition-colors sm:flex-row sm:justify-center sm:gap-1 sm:px-1 sm:py-3 sm:text-sm ${
+            aria-current={currentPage === page ? 'page' : undefined}
+            className={`flex flex-1 flex-col items-center gap-1 whitespace-nowrap px-0.5 py-2 text-xs leading-tight font-medium transition-colors sm:flex-row sm:justify-center sm:gap-1 sm:px-1 sm:py-3 sm:text-sm ${
               currentPage === page
-                ? 'border-b-2 border-sake-gold text-sake-gold'
-                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                ? 'border-b-2 border-primary text-primary'
+                : 'border-b-2 border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
-            <span className="text-base leading-none sm:text-sm" aria-hidden="true">
-              {icon}
-            </span>
+            <Icon className="size-[18px] shrink-0 sm:size-4" strokeWidth={1.5} aria-hidden="true" />
             {label}
           </button>
         ))}

@@ -78,7 +78,7 @@ export function ImageModal({
         >
           {/* オーバーレイ */}
           <motion.div
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/75"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -91,10 +91,10 @@ export function ImageModal({
           {/* モーダルコンテンツ */}
           <motion.div
             className="relative z-10 flex max-h-[90vh] max-w-[90vw] flex-col items-center"
-            initial={{ opacity: 0, scale: 0.9 }}
+            initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
             role="dialog"
             aria-modal="true"
             aria-label={`${sakeName}の画像`}
@@ -124,7 +124,7 @@ export function ImageModal({
 
             {/* 画像 */}
             {isLoading || !currentUrl ? (
-              <div className="flex h-64 w-64 items-center justify-center rounded-lg bg-gray-800/50">
+              <div className="flex h-64 w-64 items-center justify-center rounded-lg bg-black/40">
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-white" />
               </div>
             ) : (
@@ -172,9 +172,9 @@ export function ImageModal({
                       key={i}
                       type="button"
                       onClick={() => setCurrentIndex(i)}
-                      className={`h-2 w-2 rounded-full transition-all ${
+                      className={`h-2 w-2 rounded-full transition-colors ${
                         i === currentIndex
-                          ? 'scale-125 bg-white'
+                          ? 'bg-white'
                           : 'bg-white/40 hover:bg-white/60'
                       }`}
                       aria-label={`画像 ${i + 1}`}

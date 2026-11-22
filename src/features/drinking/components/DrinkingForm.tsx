@@ -115,26 +115,26 @@ export function DrinkingForm({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: 'easeOut' }}
+      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
     >
       <form onSubmit={onFormSubmit} className="space-y-5" data-testid="drinking-form">
         {/* 在庫との紐づけ表示 */}
         {stockDraft && (
           <div
-            className="flex items-center justify-between gap-2 rounded-lg border border-sake-gold/40 bg-sake-gold/10 px-3 py-2"
+            className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted px-3 py-2"
             data-testid="stock-link-banner"
           >
-            <span className="min-w-0 text-sm text-gray-700 dark:text-gray-200">
-              🍶 在庫の「
+            <span className="min-w-0 text-sm text-ink-2">
+              在庫の「
               <span className="font-bold">{stockDraft.sakeName}</span>
               」として登録します
             </span>
             <button
               type="button"
               onClick={onStockDraftClear}
-              className="shrink-0 rounded px-2 py-1 text-xs text-gray-500 underline transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              className="shrink-0 rounded px-2 py-1 text-xs text-ink-2 underline underline-offset-2 transition-colors hover:text-foreground"
               data-testid="stock-link-clear"
             >
               紐づけを解除

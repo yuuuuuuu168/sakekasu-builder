@@ -69,11 +69,11 @@ describe('PurchaseForm ユニットテスト', () => {
       expect(dateButton).toHaveTextContent(today);
     });
 
-    it('登録ボタンのテキストが「🍶 登録する」である', () => {
+    it('登録ボタンのテキストが「登録する」である', () => {
       render(<PurchaseForm />);
 
       const submitButton = screen.getByTestId('submit-button');
-      expect(submitButton).toHaveTextContent('🍶 登録する');
+      expect(submitButton).toHaveTextContent('登録する');
     });
   });
 

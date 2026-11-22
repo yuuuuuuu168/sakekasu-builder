@@ -30,7 +30,7 @@ export function EditRecordDialog({ record, onOpenChange, onUpdated }: EditRecord
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
         <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 max-h-[90vh] w-[90vw] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl bg-card p-6 shadow-xl ring-1 ring-border data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
           <Dialog.Title className="mb-4 text-lg font-semibold text-card-foreground">
-            {isPurchase ? '🛒 購入記録を編集' : '🍶 飲酒記録を編集'}
+            {isPurchase ? '購入記録の編集' : '飲酒記録の編集'}
           </Dialog.Title>
 
           {/* record が確定してからフォームを描画（初期値プリフィルのため key で再マウント） */}

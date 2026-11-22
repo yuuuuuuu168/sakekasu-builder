@@ -53,7 +53,7 @@ export function SakeSpecFields({
   const isOpen = manualOpen ?? (hasAnySpecValue(specs) || hasError);
 
   return (
-    <div className="rounded-lg border border-border/60" data-testid="sake-spec-fields">
+    <div className="rounded-lg border border-border" data-testid="sake-spec-fields">
       <button
         type="button"
         onClick={() => setManualOpen(!isOpen)}
@@ -65,7 +65,7 @@ export function SakeSpecFields({
           詳細スペック（任意）
           {filledCount > 0 && (
             <span
-              className="rounded-full bg-sake-gold/15 px-2 py-0.5 text-xs font-semibold text-sake-gold"
+              className="text-xs font-normal text-muted-foreground"
               data-testid="spec-filled-count"
             >
               {filledCount}件入力済み
@@ -80,13 +80,12 @@ export function SakeSpecFields({
       <AnimatePresence initial={false}>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
           >
-            <div className="space-y-3 border-t border-border/60 px-3 py-3">
+            <div className="space-y-3 border-t border-border px-3 py-3">
               {fields.map((field) => (
                 <SpecField
                   key={field.key}
@@ -132,7 +131,7 @@ function SpecField({
         {field.label}
         {needsCheck && (
           <span
-            className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+            className="text-xs font-semibold text-warning"
             data-testid={`spec-low-confidence-${field.key}`}
           >
             要確認
