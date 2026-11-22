@@ -59,11 +59,11 @@ describe('runtimeSend', () => {
       'fetch',
       vi.fn().mockResolvedValue(
         // 1つの data 行が2回の受信に分かれるケース
-        sseResponse(['data: "こんば', 'んは"\n\n', 'data: "！"\n\n']),
+        sseResponse(['data: "こんば', 'んは"\n\n', 'data: "！"\n\n']), // check-ui-ignore: 受信データの分割を確かめる入力
       ),
     );
 
-    expect(await collect(runtimeSend('相談', options))).toBe('こんばんは！');
+    expect(await collect(runtimeSend('相談', options))).toBe('こんばんは！'); // check-ui-ignore: 上の入力をつないだ結果
   });
 
   it('Authorization ヘッダーとセッション ID を付けて呼び出す', async () => {

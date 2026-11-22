@@ -32,14 +32,13 @@ export function StarRating({ value, onChange, maxStars = 5 }: StarRatingProps) {
             data-testid={`star-${i}`}
             className={`cursor-pointer rounded-sm p-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               isFilled
-                ? 'text-yellow-400'
-                : 'text-gray-300 dark:text-gray-600'
+                ? 'text-gold-ink'
+                : 'text-border'
             }`}
             onClick={() => onChange(starIndex)}
             onMouseEnter={() => setHoverValue(starIndex)}
-            whileHover={{ scale: 1.2 }}
-            whileTap={{ scale: 0.9 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 15 }}
+            whileTap={{ scale: 0.97 }}
+            transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
           >
             <Star
               className="size-6"

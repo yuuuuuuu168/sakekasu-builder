@@ -12,7 +12,7 @@ export function PortalAppsLink() {
       href={PORTAL_APPS_URL}
       aria-label="アプリ一覧"
       data-testid="portal-apps-link"
-      className="inline-flex items-center gap-1 rounded px-2 py-1 text-gray-600 transition-colors hover:bg-gray-500/10 dark:text-gray-300"
+      className="inline-flex items-center gap-1 rounded px-2 py-1 text-ink-2 transition-colors hover:bg-muted hover:text-foreground"
     >
       <LayoutGrid className="size-3.5 shrink-0" aria-hidden="true" />
       {/* 狭い端末ではアイコンだけにする（aria-label があるので読み上げは変わらない） */}

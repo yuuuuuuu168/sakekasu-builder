@@ -2,12 +2,6 @@ import { useMemo } from 'react';
 import type { UnifiedRecord } from '../types';
 import { summarizeInventory } from '../lib/inventorySummary';
 
-/** カテゴリごとのアイコン */
-const CATEGORY_ICONS: Record<string, string> = {
-  WHISKY: '\u{1F943}', // 🥃
-  NIHONSHU: '\u{1F376}', // 🍶
-};
-
 interface InventorySummaryProps {
   /** フィルタ適用前の全記録（在庫はフィルタに関係なく総量を出す） */
   records: UnifiedRecord[];
@@ -26,25 +20,24 @@ export function InventorySummary({ records }: InventorySummaryProps) {
 
   return (
     <div
-      className="flex flex-wrap items-center gap-2 rounded-xl border border-white/20 bg-white/80 px-4 py-3 shadow-sm backdrop-blur-lg dark:bg-white/5"
+      className="flex flex-wrap items-baseline gap-x-5 gap-y-1 rounded-xl border border-border bg-card px-4 py-3 shadow-sm"
       data-testid="inventory-summary"
     >
-      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">在庫</span>
+      <span className="text-xs font-semibold text-muted-foreground">在庫</span>
       {summaries.map((summary) => (
         <span
           key={summary.category}
-          className="flex items-baseline gap-1 rounded-lg bg-gray-100 px-2.5 py-1 dark:bg-gray-800"
+          className="flex items-baseline gap-1 tabular-nums"
           data-testid={`inventory-${summary.category}`}
         >
-          <span className="text-sm">{CATEGORY_ICONS[summary.category] ?? ''}</span>
-          <span className="text-sm text-gray-600 dark:text-gray-300">{summary.label}</span>
-          <span className="text-base font-bold text-indigo-wa dark:text-dark-gold">
+          <span className="text-sm text-ink-2">{summary.label}</span>
+          <span className="text-lg font-bold text-foreground">
             {summary.total}
           </span>
-          <span className="text-xs text-gray-600 dark:text-gray-300">本</span>
+          <span className="text-xs text-ink-2">本</span>
           {summary.inProgress > 0 && (
             <span
-              className="text-xs text-amber-700 dark:text-amber-400"
+              className="text-xs text-gold-ink"
               data-testid={`inventory-${summary.category}-in-progress`}
             >
               （飲み中 {summary.inProgress}）

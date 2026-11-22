@@ -107,8 +107,8 @@ describe('RecordCard', () => {
     expect(screen.getByTestId('price').textContent).toContain('1,800');
     expect(screen.getByTestId('drinking-method').textContent).toContain('ロック');
     expect(screen.getByTestId('rating')).toBeTruthy();
-    // 4つ星 = ★★★★☆
-    expect(screen.getByTestId('rating').textContent).toContain('★★★★☆');
+    // 4つ星（5段階）。星は線のアイコンなので、読み上げの名前で確かめる
+    expect(screen.getByRole('img', { name: '評価 4（5段階）' })).toBeTruthy();
   });
 
   // Validates: Requirement 1.4

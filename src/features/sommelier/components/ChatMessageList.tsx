@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { ImageIcon } from 'lucide-react';
 import { linkifyText } from '../lib/linkify';
 import type { ChatMessage } from '../types';
 
@@ -9,23 +10,19 @@ interface ChatMessageListProps {
 const SUGGESTIONS = [
   '今夜は寒いから温めて飲みたい',
   '今夜すき焼きなんだけど何が合う？',
-  '★4だったあの酒が好きなら次は何？',
+  '星4だったあの酒が好きなら次は何？',
   '獺祭ってどんなお酒？',
-  '📷 棚の写真からこの中でおすすめある？',
+  '（棚の写真を添付して）この中でおすすめある？',
 ];
 
 /** 会話が空のときに出す案内 */
 function EmptyState() {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
-      <span className="text-3xl" aria-hidden="true">
-        🍶
-      </span>
-      <p className="text-sm text-gray-600 dark:text-gray-300">
-        在庫相談・料理とのペアリング・銘柄選び・お酒の知識まで相談できます。
-        話すうちに好みも覚えます
+    <div className="flex h-full flex-col justify-center gap-3 px-4">
+      <p className="text-sm text-ink-2">
+        在庫の相談、料理との組み合わせ、銘柄選び、お酒の知識まで聞けます。話すうちに好みも覚えます。
       </p>
-      <ul className="space-y-1 text-xs text-gray-500 dark:text-gray-400">
+      <ul className="space-y-1 text-xs text-muted-foreground">
         {SUGGESTIONS.map((s) => (
           <li key={s}>「{s}」</li>
         ))}
@@ -67,10 +64,10 @@ export function ChatMessageList({ messages }: ChatMessageListProps) {
             data-testid={`chat-message-${message.role}`}
           >
             <div
-              className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm ${
+              className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed ${
                 isUser
-                  ? 'bg-gold-wa text-white dark:bg-dark-gold dark:text-gray-900'
-                  : 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-foreground'
               }`}
             >
               {message.images && message.images.length > 0 && (
@@ -90,16 +87,26 @@ export function ChatMessageList({ messages }: ChatMessageListProps) {
               )}
               {/* 復元した履歴は画像の実体を持たないため、枚数だけ示す */}
               {!message.images?.length && message.imageCount ? (
-                <p className="mb-1 text-xs opacity-80" data-testid="chat-message-image-count">
-                  📷 画像{message.imageCount}枚を添付
+                <p
+                  className="mb-1 flex items-center gap-1 text-xs opacity-80"
+                  data-testid="chat-message-image-count"
+                >
+                  <ImageIcon className="size-3.5 shrink-0" strokeWidth={1.5} aria-hidden="true" />
+                  画像{message.imageCount}枚を添付
                 </p>
               ) : null}
               {/* ソムリエは出典の URL を本文に載せるので、開ける形にする。
                   ユーザーの発話はそのまま出す（リンクにする理由がない） */}
               {isUser ? message.content : linkifyText(message.content)}
+              {/* 最初の文字が届くまでは、固まって見えないよう「考え中」を出す */}
+              {message.isStreaming && !message.content && (
+                <span className="text-muted-foreground" data-testid="chat-thinking">
+                  考え中
+                </span>
+              )}
               {message.isStreaming && (
                 <span
-                  className="ml-0.5 inline-block animate-pulse"
+                  className="ml-0.5 inline-block animate-pulse" /* check-ui-ignore: 生成中だけ出す本文のカーソル */
                   data-testid="streaming-cursor"
                   aria-hidden="true"
                 >
@@ -108,7 +115,7 @@ export function ChatMessageList({ messages }: ChatMessageListProps) {
               )}
               {message.error && (
                 <p
-                  className="mt-1 text-xs text-red-600 dark:text-red-400"
+                  className="mt-1 text-xs text-danger"
                   data-testid="chat-error"
                 >
                   {message.error}

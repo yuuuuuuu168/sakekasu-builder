@@ -227,7 +227,7 @@ describe('Feature: sake-record-list, Property 8: キーワード検索の正確�
 
 
 describe('Feature: sake-record-list, Property 9: 評価フィルタの正確性', () => {
-  it('★N以上フィルタの結果は評価N以上の飲酒記録だけになる', () => {
+  it('星N以上フィルタの結果は評価N以上の飲酒記録だけになる', () => {
     fc.assert(
       fc.property(
         fc.array(arbUnifiedRecord),

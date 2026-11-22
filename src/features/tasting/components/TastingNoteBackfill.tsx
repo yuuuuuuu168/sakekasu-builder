@@ -1,4 +1,4 @@
-import { Loader2, Sparkles } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -45,7 +45,7 @@ export function TastingNoteBackfill({ records, onMemoUpdated }: TastingNoteBackf
   // 押し直しても結果は変わらないため、ここから再挑戦はさせない
   const skippedNote =
     skippedCount > 0 ? (
-      <span className="text-gray-500 dark:text-gray-500" data-testid="tasting-note-backfill-skipped">
+      <span className="text-muted-foreground" data-testid="tasting-note-backfill-skipped">
         {' '}
         （調べても書けなかった {skippedCount}件を除く）
       </span>
@@ -53,11 +53,10 @@ export function TastingNoteBackfill({ records, onMemoUpdated }: TastingNoteBackf
 
   return (
     <div
-      className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/20 bg-white/80 px-4 py-3 shadow-sm backdrop-blur-lg dark:bg-white/5"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 shadow-sm"
       data-testid="tasting-note-backfill"
     >
-      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-        <Sparkles className="size-4 shrink-0 text-indigo-wa dark:text-dark-gold" />
+      <div className="flex items-center gap-2 text-sm text-ink-2">
         {isRunning ? (
           <span data-testid="tasting-note-backfill-progress">
             テイスティングノートを追記中... {progress.done}/{progress.total}
@@ -65,7 +64,7 @@ export function TastingNoteBackfill({ records, onMemoUpdated }: TastingNoteBackf
         ) : (
           <span>
             テイスティングノート未記載のウイスキー・日本酒が{' '}
-            <span className="font-bold text-indigo-wa dark:text-dark-gold">{targets.length}</span>
+            <span className="font-bold text-foreground tabular-nums">{targets.length}</span>
             件あります
             {skippedNote}
           </span>

@@ -52,7 +52,7 @@ describe('CalendarPage', () => {
 
     render(<CalendarPage />);
 
-    const skeletons = document.querySelectorAll('.animate-pulse');
+    const skeletons = document.querySelectorAll('.animate-pulse'); // check-ui-ignore: 読み込み中のスケルトンを確かめるテスト
     expect(skeletons.length).toBeGreaterThan(0);
   });
 
@@ -81,8 +81,8 @@ describe('CalendarPage', () => {
 
     render(<CalendarPage />);
 
-    expect(screen.getByText('🍶 8月に飲んだ日')).toBeTruthy();
-    expect(screen.getByText('🛒 8月に買った日')).toBeTruthy();
+    expect(screen.getByText('8月に飲んだ日')).toBeTruthy();
+    expect(screen.getByText('8月に買った日')).toBeTruthy();
     // 飲んだ日: 2日 / 買った日: 1日（同月内のユニーク日数）
     expect(screen.getByTestId('summary-drinking-days').textContent).toBe('2日');
     expect(screen.getByTestId('summary-purchase-days').textContent).toBe('1日');
@@ -103,7 +103,7 @@ describe('CalendarPage', () => {
     expect(screen.getByText('8月8日（土）の記録')).toBeTruthy();
     expect(screen.getByText('獺祭 純米大吟醸45')).toBeTruthy();
     expect(screen.getByText('八海山 特別本醸造')).toBeTruthy();
-    expect(screen.getByText('★5')).toBeTruthy();
+    expect(screen.getByLabelText('評価 5')).toBeTruthy();
     expect(screen.getByText('¥1,500')).toBeTruthy();
     expect(screen.queryByText('別日の酒')).toBeNull();
   });

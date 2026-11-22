@@ -14,7 +14,7 @@ export function EditButton({ onClick, disabled }: EditButtonProps) {
       aria-label="編集"
       disabled={disabled}
       onClick={onClick}
-      className="text-gray-400 hover:text-sake-gold dark:text-gray-500 dark:hover:text-dark-gold"
+      className="text-muted-foreground hover:text-foreground"
     >
       <Pencil className="size-4" />
     </Button>

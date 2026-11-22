@@ -21,7 +21,7 @@ export function RecordMemo({ memo }: RecordMemoProps) {
   if (!isCollapsibleMemo(memo)) {
     return (
       <p
-        className="mt-2 whitespace-pre-wrap text-xs text-gray-600 dark:text-gray-400"
+        className="mt-2 whitespace-pre-wrap text-xs text-ink-2"
         data-testid="record-memo"
       >
         {memo}
@@ -34,19 +34,19 @@ export function RecordMemo({ memo }: RecordMemoProps) {
       type="button"
       onClick={() => setIsExpanded((prev) => !prev)}
       aria-expanded={isExpanded}
-      className="mt-2 w-full rounded-lg px-1 py-1 text-left transition-colors hover:bg-gray-500/5"
+      className="-mx-1 mt-2 w-[calc(100%+0.5rem)] rounded-lg px-1 py-1 text-left transition-colors hover:bg-muted"
       data-testid="record-memo-toggle"
       title={isExpanded ? 'クリックで折りたたむ' : 'クリックで全文を表示'}
     >
       <p
-        className={`text-xs text-gray-600 dark:text-gray-400 ${
+        className={`text-xs text-ink-2 ${
           isExpanded ? 'whitespace-pre-wrap' : 'line-clamp-2'
         }`}
         data-testid="record-memo"
       >
         {memo}
       </p>
-      <span className="mt-0.5 flex items-center gap-0.5 text-[11px] text-gray-500 dark:text-gray-500">
+      <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
         {isExpanded ? '折りたたむ' : 'もっと見る'}
         <ChevronDown className={`size-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
       </span>

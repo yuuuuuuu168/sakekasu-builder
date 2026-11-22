@@ -1,4 +1,5 @@
 import type { PastRatingSummary } from '../lib/pastRatings';
+import { RatingMark } from '@/components/RatingMark';
 
 interface PastRatingHintProps {
   summaries: PastRatingSummary[];
@@ -13,21 +14,24 @@ export function PastRatingHint({ summaries }: PastRatingHintProps) {
 
   return (
     <div
-      className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-600 dark:bg-amber-900/40"
+      className="mt-2 rounded-lg border border-border bg-muted px-3 py-2"
       data-testid="past-rating-hint"
     >
-      <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
-        🍶 飲んだことのある銘柄です
+      <p className="text-xs font-semibold text-foreground">
+        飲んだことのある銘柄です
       </p>
       <ul className="mt-1 space-y-0.5">
         {summaries.map((summary) => (
           <li
             key={summary.sakeName}
-            className="text-xs text-amber-800 dark:text-amber-300"
+            className="flex flex-wrap items-center gap-x-1.5 text-xs text-ink-2 tabular-nums"
             data-testid="past-rating-item"
           >
-            {summary.sakeName}：★{summary.avgRating.toFixed(1)}（{summary.count}回・最終{' '}
-            {summary.lastDate}）
+            <span>{summary.sakeName}</span>
+            <RatingMark value={summary.avgRating.toFixed(1)} />
+            <span className="text-muted-foreground">
+              {summary.count}回・最終 {summary.lastDate}
+            </span>
           </li>
         ))}
       </ul>

@@ -22,8 +22,8 @@ export function SubmitButton({ isSubmitting, isEditMode, busyLabel }: SubmitButt
       data-testid="submit-button"
       disabled={isSubmitting}
       className="w-full h-10 text-base font-semibold"
-      whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
+      transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
     >
       {isSubmitting ? (
         <>
@@ -31,9 +31,9 @@ export function SubmitButton({ isSubmitting, isEditMode, busyLabel }: SubmitButt
           {busyLabel ?? (isEditMode ? '更新中...' : '登録中...')}
         </>
       ) : isEditMode ? (
-        '🍶 更新する'
+        '更新する'
       ) : (
-        '🍶 登録する'
+        '登録する'
       )}
     </MotionButton>
   );

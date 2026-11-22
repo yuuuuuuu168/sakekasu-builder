@@ -9,6 +9,7 @@ import { useRecordFetch } from '@/features/records/hooks/useRecordFetch';
 import { LoadingState } from '@/features/records/components/LoadingState';
 import { ErrorState } from '@/features/records/components/ErrorState';
 import type { UnifiedRecord } from '@/features/records/types';
+import { RatingMark } from '@/components/RatingMark';
 import {
   collectMarkedDates,
   countMonthlyRecordDays,
@@ -25,10 +26,10 @@ function RecordDayButton(props: ComponentProps<typeof DayButton>) {
       {/* 記録がない日も高さを揃えるため常にドット行を描画する */}
       <span className="flex h-1 items-center gap-0.5" aria-hidden="true">
         {modifiers.purchased ? (
-          <span className="size-1 rounded-full bg-gold-wa in-data-[selected-single=true]:bg-primary-foreground dark:bg-dark-gold" />
+          <span className="size-1 rounded-full bg-gold-line in-data-[selected-single=true]:bg-primary-foreground" />
         ) : null}
         {modifiers.drank ? (
-          <span className="size-1 rounded-full bg-indigo-wa in-data-[selected-single=true]:bg-primary-foreground dark:bg-indigo-300" />
+          <span className="size-1 rounded-full bg-indigo-wa in-data-[selected-single=true]:bg-primary-foreground dark:bg-ink-2" />
         ) : null}
       </span>
     </CalendarDayButton>
@@ -46,10 +47,10 @@ function MonthlySummaryTile({
   testId: string;
 }) {
   return (
-    <div className="rounded-xl border border-white/20 bg-white/80 p-3 text-center shadow-sm backdrop-blur-lg dark:bg-white/5">
-      <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
+    <div className="rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
+      <div className="text-xs text-muted-foreground">{label}</div>
       <div
-        className="mt-1 text-2xl font-bold text-indigo-wa dark:text-dark-gold"
+        className="mt-1 text-2xl font-bold text-foreground tabular-nums"
         data-testid={testId}
       >
         {days}
@@ -62,30 +63,27 @@ function MonthlySummaryTile({
 /** 選択した日の記録1件分の行 */
 function DayRecordItem({ record }: { record: UnifiedRecord }) {
   const isPurchase = record.type === 'purchase';
-  const meta = isPurchase
-    ? record.price != null
-      ? `¥${record.price.toLocaleString()}`
-      : ''
-    : record.rating != null
-      ? `★${record.rating}`
-      : '';
+  const meta = isPurchase ? (
+    record.price != null ? `¥${record.price.toLocaleString()}` : null
+  ) : record.rating != null ? (
+    <RatingMark value={record.rating} />
+  ) : null;
 
   return (
-    <li className="flex min-h-[44px] items-center gap-3 rounded-lg border border-gray-200 px-3 py-2 dark:border-white/10">
-      <span
-        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-          isPurchase
-            ? 'bg-gold-wa/15 text-gold-wa dark:bg-dark-gold/15 dark:text-dark-gold'
-            : 'bg-indigo-wa/10 text-indigo-wa dark:bg-indigo-300/15 dark:text-indigo-300'
-        }`}
-      >
-        {isPurchase ? '🛒 購入' : '🍶 飲酒'}
+    <li className="flex min-h-[44px] items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
+      {/* 点の色はカレンダーの凡例とそろえる */}
+      <span className="flex w-10 shrink-0 items-center gap-1.5 text-xs font-medium text-ink-2">
+        <span
+          className={`size-1.5 rounded-full ${isPurchase ? 'bg-gold-line' : 'bg-indigo-wa dark:bg-ink-2'}`}
+          aria-hidden="true"
+        />
+        {isPurchase ? '購入' : '飲酒'}
       </span>
-      <span className="min-w-0 flex-1 truncate text-sm text-gray-900 dark:text-gray-100">
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground">
         {record.sakeName}
       </span>
       {meta && (
-        <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">{meta}</span>
+        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{meta}</span>
       )}
     </li>
   );
@@ -104,12 +102,12 @@ export function CalendarPage() {
   const monthLabel = format(month, 'M月', { locale: ja });
 
   return (
-    <div className="min-h-screen bg-white dark:bg-dark-bg">
-      <div className="mx-auto max-w-2xl px-4 py-8 sm:py-12">
+    <div className="min-h-screen bg-background">
+      <div className="mx-auto max-w-2xl px-4 pt-6 pb-24 sm:pt-10">
         {/* Header */}
         <header className="mb-6 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-indigo-wa dark:text-dark-gold sm:text-2xl">
-            📅 カレンダー
+          <h1 className="text-xl font-bold text-primary sm:text-2xl">
+            カレンダー
           </h1>
           <ThemeToggle />
         </header>
@@ -123,19 +121,19 @@ export function CalendarPage() {
             {/* 表示中の月のサマリー */}
             <div className="grid grid-cols-2 gap-3">
               <MonthlySummaryTile
-                label={`🍶 ${monthLabel}に飲んだ日`}
+                label={`${monthLabel}に飲んだ日`}
                 days={monthlyDays.drinkingDays}
                 testId="summary-drinking-days"
               />
               <MonthlySummaryTile
-                label={`🛒 ${monthLabel}に買った日`}
+                label={`${monthLabel}に買った日`}
                 days={monthlyDays.purchaseDays}
                 testId="summary-purchase-days"
               />
             </div>
 
             {/* カレンダー本体 */}
-            <section className="rounded-xl border border-white/20 bg-white/80 p-4 shadow-sm backdrop-blur-lg dark:bg-white/5">
+            <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
               <Calendar
                 mode="single"
                 required
@@ -150,13 +148,13 @@ export function CalendarPage() {
                 className="bg-transparent p-0 [--cell-size:--spacing(11)]"
               />
               {/* 凡例 */}
-              <div className="mt-3 flex justify-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+              <div className="mt-3 flex justify-center gap-4 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1.5">
-                  <span className="size-2 rounded-full bg-gold-wa dark:bg-dark-gold" />
+                  <span className="size-2 rounded-full bg-gold-line" />
                   買った日
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <span className="size-2 rounded-full bg-indigo-wa dark:bg-indigo-300" />
+                  <span className="size-2 rounded-full bg-indigo-wa dark:bg-ink-2" />
                   飲んだ日
                 </span>
               </div>
@@ -164,11 +162,11 @@ export function CalendarPage() {
 
             {/* 選択した日の記録 */}
             <section>
-              <h2 className="mb-3 text-sm font-bold text-gray-900 dark:text-gray-100">
+              <h2 className="mb-3 text-sm font-bold text-foreground">
                 {format(selected, 'M月d日（E）', { locale: ja })}の記録
               </h2>
               {dayRecords.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <p className="text-sm text-muted-foreground">
                   この日の記録はありません
                 </p>
               ) : (

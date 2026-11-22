@@ -59,8 +59,8 @@ describe('RecordListPage', () => {
 
     render(<RecordListPage />);
 
-    // LoadingState はスケルトンUI（animate-pulse）を表示する
-    const skeletons = document.querySelectorAll('.animate-pulse');
+    // LoadingState はスケルトンUI（animate-pulse）を表示する check-ui-ignore
+    const skeletons = document.querySelectorAll('.animate-pulse'); // check-ui-ignore: 読み込み中のスケルトンを確かめるテスト
     expect(skeletons.length).toBeGreaterThan(0);
   });
 

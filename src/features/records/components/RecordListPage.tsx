@@ -123,12 +123,12 @@ export function RecordListPage({ onDrinkFromStock }: RecordListPageProps = {}) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-white dark:bg-dark-bg">
-      <div className="mx-auto max-w-2xl px-4 py-8 sm:py-12">
+    <div className="min-h-screen bg-background">
+      <div className="mx-auto max-w-2xl px-4 pt-6 pb-24 sm:pt-10">
         {/* Header */}
         <header className="mb-6 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-indigo-wa dark:text-dark-gold sm:text-2xl">
-            🍶 記録一覧
+          <h1 className="text-xl font-bold text-primary sm:text-2xl">
+            記録一覧
           </h1>
           <ThemeToggle />
         </header>

@@ -34,23 +34,23 @@ export function RecordSpecs({ specs }: RecordSpecsProps) {
         type="button"
         onClick={() => setIsExpanded((prev) => !prev)}
         aria-expanded={isExpanded}
-        className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[11px] text-gray-500 transition-colors hover:bg-gray-500/5 dark:text-gray-400"
+        className="-mx-1 flex items-center gap-1 rounded px-1 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted"
         data-testid="record-specs-toggle"
       >
-        📋 詳細スペック {entries.length}件
+        詳細スペック {entries.length}件
         <ChevronDown className={`size-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
       </button>
 
       {isExpanded && (
         <dl
-          className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-lg bg-gray-500/5 px-2.5 py-2 text-xs"
+          className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-lg bg-muted px-3 py-2 text-xs"
           data-testid="record-specs-list"
         >
           {rows.map((entry) => (
             <div key={entry.key} className="contents">
-              <dt className="text-gray-500 dark:text-gray-400">{entry.label}</dt>
+              <dt className="text-muted-foreground">{entry.label}</dt>
               <dd
-                className="font-medium text-gray-700 dark:text-gray-300"
+                className="font-medium text-ink-2"
                 data-testid={`record-spec-${entry.key}`}
               >
                 {entry.value}
@@ -58,10 +58,10 @@ export function RecordSpecs({ specs }: RecordSpecsProps) {
             </div>
           ))}
           {description && (
-            <div className="col-span-2 border-t border-gray-500/10 pt-1.5">
-              <dt className="text-gray-500 dark:text-gray-400">{description.label}</dt>
+            <div className="col-span-2 border-t border-border pt-1.5">
+              <dt className="text-muted-foreground">{description.label}</dt>
               <dd
-                className="mt-0.5 whitespace-pre-wrap text-gray-700 dark:text-gray-300"
+                className="mt-0.5 whitespace-pre-wrap text-ink-2"
                 data-testid="record-spec-labelDescription"
               >
                 {description.value}

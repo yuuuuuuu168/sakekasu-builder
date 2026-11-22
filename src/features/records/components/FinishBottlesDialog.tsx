@@ -53,7 +53,7 @@ export function FinishBottlesDialog({
           data-testid="finish-bottles-dialog"
         >
           <Dialog.Title className="text-lg font-semibold text-card-foreground">
-            何本飲みきった？
+            飲みきった本数
           </Dialog.Title>
           <Dialog.Description className="mt-2 text-sm text-muted-foreground">
             「{sakeName}」は残り{remaining}本です。飲みきったぶんだけ在庫から減らします。
@@ -71,7 +71,7 @@ export function FinishBottlesDialog({
               disabled={isUpdating}
               aria-label="飲みきった本数"
               data-testid="finish-bottles-input"
-              className="w-24 rounded-lg border border-border bg-background px-3 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-sake-gold/50"
+              className="w-24 rounded-lg border border-border bg-background px-3 py-2 text-base text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             <span className="text-sm text-muted-foreground">本</span>
           </div>

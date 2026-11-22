@@ -16,8 +16,8 @@ import { TopSakeList } from './TopSakeList';
 /** 統計セクションの共通カード */
 function StatsCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="rounded-xl border border-white/20 bg-white/80 p-4 shadow-sm backdrop-blur-lg dark:bg-white/5">
-      <h2 className="mb-4 text-sm font-bold text-gray-900 dark:text-gray-100">{title}</h2>
+    <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      <h2 className="mb-4 text-sm font-semibold text-foreground">{title}</h2>
       {children}
     </section>
   );
@@ -31,12 +31,12 @@ export function StatsPage() {
   const topSakes = useMemo(() => aggregateTopSakes(records), [records]);
 
   return (
-    <div className="min-h-screen bg-white dark:bg-dark-bg">
-      <div className="mx-auto max-w-2xl px-4 py-8 sm:py-12">
+    <div className="min-h-screen bg-background">
+      <div className="mx-auto max-w-2xl px-4 pt-6 pb-24 sm:pt-10">
         {/* Header */}
         <header className="mb-6 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-indigo-wa dark:text-dark-gold sm:text-2xl">
-            📊 統計
+          <h1 className="text-xl font-bold text-primary sm:text-2xl">
+            統計
           </h1>
           <ThemeToggle />
         </header>

@@ -8,10 +8,7 @@ interface ErrorStateProps {
 export function ErrorState({ message, onRetry }: ErrorStateProps) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
-      <span className="mb-4 text-5xl" role="img" aria-label="エラー">
-        ⚠️
-      </span>
-      <p className="text-lg font-medium text-gray-600 dark:text-gray-400">
+      <p className="text-base font-medium text-ink-2" role="alert">
         {message}
       </p>
       <Button
